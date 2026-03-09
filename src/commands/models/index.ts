@@ -1,5 +1,5 @@
 import chalk from 'chalk';
-import { resolveConfig, getApiKey } from '../../core/config/loader';
+import { resolveConfig, resolveApiKey } from '../../core/config/loader';
 import { DirectAIRuntime } from '../../core/runtime/direct/index';
 
 const KNOWN_PROVIDERS = ['anthropic', 'openai'];
@@ -10,7 +10,7 @@ export async function runModels(repoPath: string, provider?: string): Promise<vo
   const config = resolveConfig(repoPath);
   let apiKey: string;
   try {
-    apiKey = getApiKey(config.apiKeyEnv);
+    apiKey = resolveApiKey(config);
   } catch {
     apiKey = '';
   }

@@ -1,8 +1,8 @@
 import chalk from 'chalk';
-import { loadConfig, resolveConfig, setConfigField } from '../../core/config/loader';
+import { resolveConfig, setConfigField } from '../../core/config/loader';
 import { Config } from '../../types/index';
 
-const ALLOWED_FIELDS: (keyof Config)[] = ['model', 'lightModel', 'apiKeyEnv', 'exclude'];
+const ALLOWED_FIELDS: (keyof Config)[] = ['model', 'lightModel', 'apiKey', 'apiKeyEnvVariable', 'exclude'];
 
 export async function runConfigShow(repoPath: string): Promise<void> {
   console.log(chalk.cyan('\n🦉 CodeOwl Config\n'));
@@ -11,12 +11,13 @@ export async function runConfigShow(repoPath: string): Promise<void> {
   const rows: [string, string][] = [
     ['model', config.model],
     ['lightModel', config.lightModel],
-    ['apiKeyEnv', config.apiKeyEnv],
+    ['apiKey', config.apiKey ? '***' + config.apiKey.slice(-4) : ''],
+    ['apiKeyEnvVariable', config.apiKeyEnvVariable],
     ['exclude', JSON.stringify(config.exclude)],
   ];
 
   for (const [key, val] of rows) {
-    console.log(`  ${chalk.white(key.padEnd(14))} ${chalk.gray(val)}`);
+    console.log(`  ${chalk.white(key.padEnd(18))} ${chalk.gray(val)}`);
   }
   console.log();
 }

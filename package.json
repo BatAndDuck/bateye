@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "tsc && npm run copy-templates",
-    "copy-templates": "cp -r src/templates dist/templates",
+    "copy-templates": "node scripts/copy-templates.js",
     "dev": "ts-node src/index.ts",
     "start": "node dist/index.js",
     "link:local": "npm run build && npm link"
@@ -34,3 +34,4 @@
     "typescript": "^5.7.3"
   }
 }
+

@@ -18,14 +18,12 @@ export async function runDoctor(repoPath: string): Promise<void> {
 
   const checks: CheckResult[] = [];
 
-  // 1. Git repo
   checks.push({
     label: 'Git repository',
     status: await isGitRepo(repoPath) ? 'ok' : 'warn',
-    detail: await isGitRepo(repoPath) ? undefined : 'Not a git repository — some features may not work',
+    detail: await isGitRepo(repoPath) ? undefined : 'Not a git repository - some features may not work',
   });
 
-  // 2. Config file
   const configPath = path.join(repoPath, CONFIG_FILE);
   if (fs.existsSync(configPath)) {
     try {
@@ -35,33 +33,37 @@ export async function runDoctor(repoPath: string): Promise<void> {
       checks.push({ label: 'Config file (.codeowl/config.json)', status: 'error', detail: (err as Error).message });
     }
   } else {
-    checks.push({ label: 'Config file (.codeowl/config.json)', status: 'warn', detail: 'Not found — run `codeowl init`' });
+    checks.push({ label: 'Config file (.codeowl/config.json)', status: 'warn', detail: 'Not found - run `codeowl init`' });
   }
 
-  // 3. API key
   const config = resolveConfig(repoPath);
-  const apiKey = process.env[config.apiKeyEnv];
-  if (apiKey) {
-    checks.push({ label: `API key (${config.apiKeyEnv})`, status: 'ok', detail: '***' + apiKey.slice(-4) });
+  if (config.apiKey) {
+    checks.push({ label: 'API key (config.apiKey)', status: 'ok', detail: '***' + config.apiKey.slice(-4) });
   } else {
-    checks.push({ label: `API key (${config.apiKeyEnv})`, status: 'error', detail: `${config.apiKeyEnv} is not set` });
+    const apiKey = process.env[config.apiKeyEnvVariable];
+    if (apiKey) {
+      checks.push({ label: `API key (${config.apiKeyEnvVariable})`, status: 'ok', detail: '***' + apiKey.slice(-4) });
+    } else {
+      checks.push({
+        label: `API key (${config.apiKeyEnvVariable})`,
+        status: 'error',
+        detail: `${config.apiKeyEnvVariable} is not set and config.apiKey is empty`,
+      });
+    }
   }
 
-  // 4. Model config
   checks.push({
     label: 'Model',
     status: 'ok',
     detail: config.model,
   });
 
-  // 5. Light model config
   checks.push({
     label: 'Light model (orchestration)',
     status: 'ok',
     detail: config.lightModel,
   });
 
-  // 6. Reviewers
   const { reviewers, warnings } = loadReviewers(repoPath);
   checks.push({
     label: `Reviewers (${reviewers.length} loaded)`,
@@ -72,20 +74,18 @@ export async function runDoctor(repoPath: string): Promise<void> {
     checks.push({ label: 'Reviewer warning', status: 'warn', detail: w });
   }
 
-  // 7. OpenCode CLI (optional)
   try {
     const result = await execa('opencode', ['--version'], { timeout: 3000 });
     checks.push({ label: 'OpenCode CLI', status: 'ok', detail: result.stdout.trim() });
   } catch {
-    checks.push({ label: 'OpenCode CLI (optional)', status: 'warn', detail: 'Not found — using direct AI SDK (fine for most uses)' });
+    checks.push({ label: 'OpenCode CLI (optional)', status: 'warn', detail: 'Not found - using direct AI SDK (fine for most uses)' });
   }
 
-  // Print results
   let hasErrors = false;
   for (const check of checks) {
     const icon = check.status === 'ok' ? chalk.green('✓') : check.status === 'warn' ? chalk.yellow('⚠') : chalk.red('✗');
     const label = check.status === 'error' ? chalk.red(check.label) : check.status === 'warn' ? chalk.yellow(check.label) : chalk.white(check.label);
-    const detail = check.detail ? chalk.gray(' — ' + check.detail) : '';
+    const detail = check.detail ? chalk.gray(' - ' + check.detail) : '';
     console.log(`  ${icon}  ${label}${detail}`);
     if (check.status === 'error') hasErrors = true;
   }

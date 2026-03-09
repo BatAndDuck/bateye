@@ -55,7 +55,8 @@ codeowl audit
   "$schema": "./node_modules/codeowl/schemas/codeowl-config.schema.json",
   "model": "anthropic/claude-sonnet-4-5",
   "lightModel": "anthropic/claude-haiku-4-5-20251001",
-  "apiKeyEnv": "ANTHROPIC_API_KEY",
+  "apiKey": "your-api-key-here",
+  "apiKeyEnvVariable": "ANTHROPIC_API_KEY",
   "exclude": ["generated", "vendor"]
 }
 ```
@@ -106,3 +107,4 @@ npm run build       # Compile TypeScript + copy templates
 node dist/index.js  # Run directly
 npm link            # Install as global `codeowl` command
 ```
+

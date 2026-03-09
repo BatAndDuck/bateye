@@ -1,6 +1,6 @@
 import * as path from 'path';
 import { Finding, PRReviewResult, Config, Reviewer } from '../../types/index';
-import { resolveConfig, getApiKey } from '../config/loader';
+import { resolveConfig, resolveApiKey } from '../config/loader';
 import { loadReviewers } from '../reviewers/loader';
 import { getRuntime } from '../runtime/factory';
 import { reviewerAnalysisSchema, ReviewerAnalysis } from '../validation/schemas';
@@ -29,7 +29,7 @@ export async function runPRReview(options: PRReviewOptions): Promise<PRReviewRes
   // Load config
   log('Loading configuration...');
   const config = resolveConfig(repoPath);
-  const apiKey = getApiKey(config.apiKeyEnv);
+  const apiKey = resolveApiKey(config);
 
   const baseRef = options.baseRef || 'origin/main';
   const headRef = options.headRef || 'HEAD';
@@ -185,3 +185,4 @@ ${finding.evidence.length > 0 ? `> ${finding.evidence[0]}` : ''}
 
 *Reviewer: ${finding.reviewerName} | Confidence: ${Math.round(finding.confidence * 100)}%*`;
 }
+

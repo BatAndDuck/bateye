@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { ServiceDesignDoc, SystemDesignResult } from '../../types/index';
-import { resolveConfig, getApiKey } from '../config/loader';
+import { resolveConfig, resolveApiKey } from '../config/loader';
 import { buildRepoIndex, formatFilesForContext, scopeFilesForReviewer } from '../indexing/index';
 import { getRuntime } from '../runtime/factory';
 import { serviceDesignDocSchema, ServiceDoc } from '../validation/schemas';
@@ -11,6 +11,11 @@ import { buildGraph } from './graph';
 import { writeSystemDesignResult, writeJson, writeText, ensureDir } from '../output/writer';
 import { SYSTEM_DESIGN_OUTPUT_DIR } from '../config/defaults';
 import { listTopLevelDirs } from '../git/index';
+
+const SYSTEM_DESIGN_TEMPLATE_CANDIDATES = [
+  path.resolve(__dirname, '../../templates/system-design-app/index.html'),
+  path.resolve(__dirname, '../../../src/templates/system-design-app/index.html'),
+];
 
 export interface SystemDesignOptions {
   repoPath: string;
@@ -23,22 +28,18 @@ export async function runSystemDesign(options: SystemDesignOptions): Promise<Sys
   const log = (msg: string) => onProgress?.(msg);
   const outputDir = options.outputDir || path.join(repoPath, SYSTEM_DESIGN_OUTPUT_DIR);
 
-  // Load config
   log('Loading configuration...');
   const config = resolveConfig(repoPath);
-  const apiKey = getApiKey(config.apiKeyEnv);
+  const apiKey = resolveApiKey(config);
 
-  // Build repo index
   log('Indexing repository...');
   const index = await buildRepoIndex(repoPath, config);
   log(`Found ${index.totalFiles} files.`);
 
-  // Detect services/modules
   log('Detecting services and modules...');
   const units = await detectArchitecturalUnits(repoPath, index);
   log(`Detected ${units.length} architectural unit(s): ${units.map(u => u.name).join(', ')}`);
 
-  // Analyze each unit
   const runtime = await getRuntime();
   const services: ServiceDesignDoc[] = [];
 
@@ -49,11 +50,9 @@ export async function runSystemDesign(options: SystemDesignOptions): Promise<Sys
     log(`  ✓ ${unit.name}: ${serviceDoc.kind}`);
   }
 
-  // Get repo structure for synthesis
   const topLevelDirs = await listTopLevelDirs(repoPath);
   const repoStructure = `Top-level directories: ${topLevelDirs.join(', ')}\nTotal files: ${index.totalFiles}`;
 
-  // Synthesize overall architecture
   log('Synthesizing architecture...');
   const synthesis = await synthesizeArchitecture(services, repoStructure, config.model, apiKey);
 
@@ -76,16 +75,13 @@ export async function runSystemDesign(options: SystemDesignOptions): Promise<Sys
     generatedAt,
   };
 
-  // Write output files
   log('Writing output files...');
   ensureDir(outputDir);
   writeSystemDesignResult(outputDir, result);
 
-  // Write graph.json
   const graph = buildGraph(result);
   writeJson(path.join(outputDir, 'graph.json'), graph);
 
-  // Write summary.json
   writeJson(path.join(outputDir, 'summary.json'), {
     architectureType: result.architectureType,
     score: result.score,
@@ -96,7 +92,6 @@ export async function runSystemDesign(options: SystemDesignOptions): Promise<Sys
     generatedAt,
   });
 
-  // Generate interactive HTML report
   generateHTMLReport(outputDir, graph);
   log(`✓ HTML report: ${path.join(outputDir, 'index.html')}`);
 
@@ -114,12 +109,6 @@ async function detectArchitecturalUnits(
   index: import('../../types/index').RepoIndex
 ): Promise<ArchitecturalUnit[]> {
   const units: ArchitecturalUnit[] = [];
-
-  // Strategy: look for common patterns indicating distinct services/modules
-  // 1. packages/* (monorepo)
-  // 2. apps/*
-  // 3. services/*
-  // 4. src/* (single service)
 
   const patterns = ['packages', 'apps', 'services', 'modules'];
   let found = false;
@@ -146,7 +135,6 @@ async function detectArchitecturalUnits(
   }
 
   if (!found) {
-    // Single service: use top-level src or the whole repo
     const srcFiles = index.files.filter(f => f.relativePath.startsWith('src/'));
     if (srcFiles.length > 0) {
       units.push({ name: path.basename(repoPath), dirPath: 'src', files: srcFiles });
@@ -186,16 +174,27 @@ async function analyzeUnit(
       publicInterfaces: [],
       dependencies: [],
       entities: [],
-      risks: ['Analysis failed — manual review required'],
+      risks: ['Analysis failed - manual review required'],
     };
   }
 }
 
+function resolveSystemDesignTemplatePath(): string {
+  for (const candidate of SYSTEM_DESIGN_TEMPLATE_CANDIDATES) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    `System design template not found. Checked: ${SYSTEM_DESIGN_TEMPLATE_CANDIDATES.join(', ')}`
+  );
+}
+
 function generateHTMLReport(outputDir: string, graph: import('../../types/index').ArchitectureGraph): void {
-  const templatePath = path.join(__dirname, '../../templates/system-design-app/index.html');
+  const templatePath = resolveSystemDesignTemplatePath();
   let template = fs.readFileSync(templatePath, 'utf-8');
 
-  // Replace data placeholder with actual data
   const dataJson = JSON.stringify(graph);
   template = template.replace('__CODEOWL_DATA__', dataJson);
 

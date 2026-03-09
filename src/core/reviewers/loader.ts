@@ -5,7 +5,24 @@ import { Reviewer } from '../../types/index';
 import { ReviewerLoadResult } from './types';
 import { REVIEWERS_DIR } from '../config/defaults';
 
-const BUILTIN_REVIEWERS_DIR = path.join(__dirname, '../../templates/reviewers');
+const BUILTIN_REVIEWER_DIR_CANDIDATES = [
+  path.resolve(__dirname, '../../templates/reviewers'),
+  path.resolve(__dirname, '../../../src/templates/reviewers'),
+];
+
+function getBuiltInReviewerDirs(): string[] {
+  const seen = new Set<string>();
+  const dirs: string[] = [];
+
+  for (const candidate of BUILTIN_REVIEWER_DIR_CANDIDATES) {
+    if (fs.existsSync(candidate) && !seen.has(candidate)) {
+      seen.add(candidate);
+      dirs.push(candidate);
+    }
+  }
+
+  return dirs;
+}
 
 function parseReviewerFile(filePath: string, isBuiltIn: boolean): Reviewer | null {
   try {
@@ -55,22 +72,25 @@ function loadReviewersFromDir(dir: string, isBuiltIn: boolean): { reviewers: Rev
 export function loadReviewers(repoPath: string): ReviewerLoadResult {
   const warnings: string[] = [];
 
-  // Load built-in reviewers
-  const builtIn = loadReviewersFromDir(BUILTIN_REVIEWERS_DIR, true);
-  warnings.push(...builtIn.warnings);
+  const reviewerMap = new Map<string, Reviewer>();
+  const builtInDirs = getBuiltInReviewerDirs();
+  for (const dir of builtInDirs) {
+    const builtIn = loadReviewersFromDir(dir, true);
+    warnings.push(...builtIn.warnings);
+    for (const reviewer of builtIn.reviewers) {
+      reviewerMap.set(reviewer.id, reviewer);
+    }
+  }
 
-  // Load user reviewers
+  if (builtInDirs.length === 0) {
+    warnings.push('No built-in reviewer directory found. Expected templates/reviewers in dist or src.');
+  }
+
   const userDir = path.join(repoPath, REVIEWERS_DIR);
   const user = loadReviewersFromDir(userDir, false);
   warnings.push(...user.warnings);
-
-  // User reviewers override built-ins with same id
-  const reviewerMap = new Map<string, Reviewer>();
-  for (const r of builtIn.reviewers) {
-    reviewerMap.set(r.id, r);
-  }
-  for (const r of user.reviewers) {
-    reviewerMap.set(r.id, r);
+  for (const reviewer of user.reviewers) {
+    reviewerMap.set(reviewer.id, reviewer);
   }
 
   const reviewers = Array.from(reviewerMap.values()).filter(r => r.enabled !== false);

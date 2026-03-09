@@ -7,7 +7,6 @@ import { CONFIG_DIR, REVIEWERS_DIR, CONFIG_FILE, DEFAULT_MODEL, DEFAULT_LIGHT_MO
 export async function runInit(repoPath: string): Promise<void> {
   console.log(chalk.cyan('\n🦉 CodeOwl Init\n'));
 
-  // Create .codeowl directory
   const configDir = path.join(repoPath, CONFIG_DIR);
   const reviewersDir = path.join(repoPath, REVIEWERS_DIR);
   const outDir = path.join(repoPath, CONFIG_DIR, 'out');
@@ -21,14 +20,13 @@ export async function runInit(repoPath: string): Promise<void> {
     }
   });
 
-  // Create config if not exists
   const configPath = path.join(repoPath, CONFIG_FILE);
   if (!fs.existsSync(configPath)) {
     saveConfig(repoPath, {
       $schema: './node_modules/codeowl/schemas/codeowl-config.schema.json',
       model: DEFAULT_MODEL,
       lightModel: DEFAULT_LIGHT_MODEL,
-      apiKeyEnv: DEFAULT_API_KEY_ENV,
+      apiKeyEnvVariable: DEFAULT_API_KEY_ENV,
       exclude: [],
     });
     console.log(chalk.green('  created'), CONFIG_FILE);
@@ -36,7 +34,6 @@ export async function runInit(repoPath: string): Promise<void> {
     console.log(chalk.gray('  exists '), CONFIG_FILE);
   }
 
-  // Add .codeowl/out to .gitignore
   const gitignorePath = path.join(repoPath, '.gitignore');
   const outEntry = '.codeowl/out/';
   if (fs.existsSync(gitignorePath)) {
@@ -48,7 +45,7 @@ export async function runInit(repoPath: string): Promise<void> {
   }
 
   console.log(chalk.cyan('\nNext steps:'));
-  console.log(`  1. Set your API key:   export ANTHROPIC_API_KEY=your-key`);
+  console.log('  1. Set your API key:   put it in .codeowl/config.json as apiKey, or export ANTHROPIC_API_KEY');
   console.log(`  2. Run a check:        ${chalk.white('codeowl doctor')}`);
   console.log(`  3. Run an audit:       ${chalk.white('codeowl audit')}`);
   console.log();

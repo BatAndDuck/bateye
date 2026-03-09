@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import { Reviewer, AuditResult, ReviewerResult, Finding, Config } from '../../types/index';
 import { buildRepoIndex, scopeFilesForReviewer, formatFilesForContext } from '../indexing/index';
-import { resolveConfig, getApiKey } from '../config/loader';
+import { resolveConfig, resolveApiKey } from '../config/loader';
 import { loadReviewers } from '../reviewers/loader';
 import { getRuntime } from '../runtime/factory';
 import { reviewerAnalysisSchema, ReviewerAnalysis } from '../validation/schemas';
@@ -25,7 +25,7 @@ export async function runAudit(options: AuditOptions): Promise<AuditResult> {
   // Load config
   log('Loading configuration...');
   const config = resolveConfig(repoPath);
-  const apiKey = getApiKey(config.apiKeyEnv);
+  const apiKey = resolveApiKey(config);
 
   // Load reviewers
   log('Loading reviewers...');

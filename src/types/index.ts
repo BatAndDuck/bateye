@@ -112,7 +112,8 @@ export type Config = {
   $schema?: string;
   model?: string;
   lightModel?: string;
-  apiKeyEnv?: string;
+  apiKey?: string;
+  apiKeyEnvVariable?: string;
   exclude?: string[];
 };
 

@@ -19,7 +19,11 @@
       "description": "Lighter model for orchestration tasks",
       "examples": ["openai/gpt-4o-mini", "anthropic/claude-haiku-4-5"]
     },
-    "apiKeyEnv": {
+    "apiKey": {
+      "type": "string",
+      "description": "API key to use directly (alternative to apiKeyEnvVariable)"
+    },
+    "apiKeyEnvVariable": {
       "type": "string",
       "description": "Name of the environment variable containing the API key",
       "examples": ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]
