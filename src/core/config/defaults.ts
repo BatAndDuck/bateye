@@ -1,0 +1,28 @@
+export const BUILT_IN_EXCLUDES = [
+  'node_modules',
+  'dist',
+  'build',
+  'coverage',
+  '.next',
+  '.out',
+  '.cache',
+  'tmp',
+  'temp',
+  '.git',
+];
+
+export const CONFIG_DIR = '.codeowl';
+export const CONFIG_FILE = '.codeowl/config.json';
+export const REVIEWERS_DIR = '.codeowl/reviewers';
+export const OUTPUT_DIR = '.codeowl/out';
+export const AUDIT_OUTPUT_FILE = '.codeowl/out/audit.json';
+export const PR_REVIEW_OUTPUT_FILE = '.codeowl/out/pr-review.json';
+export const SYSTEM_DESIGN_OUTPUT_DIR = '.codeowl/out/system-design';
+
+export const DEFAULT_MODEL = 'anthropic/claude-sonnet-4-5';
+export const DEFAULT_LIGHT_MODEL = 'anthropic/claude-haiku-4-5-20251001';
+export const DEFAULT_API_KEY_ENV = 'ANTHROPIC_API_KEY';
+
+export const MAX_FILE_SIZE_BYTES = 500 * 1024; // 500 KB
+export const MAX_CONTEXT_FILES = 50;
+export const MAX_TOKENS_PER_FILE = 8000;

@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://codeowl.dev/schemas/codeowl-config.schema.json",
+  "title": "CodeOwl Configuration",
+  "description": "Configuration schema for .codeowl/config.json",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference"
+    },
+    "model": {
+      "type": "string",
+      "description": "Primary analysis model in provider/model format (e.g. anthropic/claude-sonnet-4-5)",
+      "examples": ["anthropic/claude-sonnet-4-5", "openai/gpt-4o"]
+    },
+    "lightModel": {
+      "type": "string",
+      "description": "Lighter model for orchestration tasks",
+      "examples": ["openai/gpt-4o-mini", "anthropic/claude-haiku-4-5"]
+    },
+    "apiKeyEnv": {
+      "type": "string",
+      "description": "Name of the environment variable containing the API key",
+      "examples": ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]
+    },
+    "exclude": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Additional paths/patterns to exclude from analysis",
+      "examples": [["generated", "vendor", "proto"]]
+    }
+  },
+  "additionalProperties": false
+}
