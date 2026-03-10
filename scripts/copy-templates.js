@@ -1,21 +1,31 @@
 const fs = require('fs');
 const path = require('path');
 
-const sourceDir = path.resolve(__dirname, '../src/templates');
-const destDir = path.resolve(__dirname, '../dist/templates');
+const targets = [
+  {
+    source: path.resolve(__dirname, '../src/features/audit/builtin-reviewers'),
+    destination: path.resolve(__dirname, '../dist/features/audit/builtin-reviewers'),
+  },
+  {
+    source: path.resolve(__dirname, '../src/features/system-design/assets'),
+    destination: path.resolve(__dirname, '../dist/features/system-design/assets'),
+  },
+];
 
-function copyRecursive(source, dest) {
+function copyRecursive(source, destination) {
   const stat = fs.statSync(source);
   if (stat.isDirectory()) {
-    fs.mkdirSync(dest, { recursive: true });
+    fs.mkdirSync(destination, { recursive: true });
     for (const entry of fs.readdirSync(source)) {
-      copyRecursive(path.join(source, entry), path.join(dest, entry));
+      copyRecursive(path.join(source, entry), path.join(destination, entry));
     }
     return;
   }
 
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.copyFileSync(source, dest);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.copyFileSync(source, destination);
 }
 
-copyRecursive(sourceDir, destDir);
+for (const target of targets) {
+  copyRecursive(target.source, target.destination);
+}

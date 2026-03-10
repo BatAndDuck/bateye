@@ -11,7 +11,10 @@
     "copy-templates": "node scripts/copy-templates.js",
     "dev": "ts-node src/index.ts",
     "start": "node dist/index.js",
-    "link:local": "npm run build && npm link"
+    "link:local": "npm run build && npm link",
+    "test:unit": "npm run build && node --test test/unit/*.test.js",
+    "test:integration": "npm run build && node --test test/integration/*.test.js",
+    "test": "npm run test:unit && npm run test:integration"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.36.3",
