@@ -131,6 +131,8 @@ export type SystemDesignResult = {
 export type Config = {
   $schema?: string;
   model?: string;
+  /** Fallback model used when the primary model is rate-limited. API key read from CODE_OWL_LLM_MODEL_API_KEY_FALLBACK. */
+  fallbackModel?: string;
   apiKeyEnvVariable?: string;
   exclude?: string[];
 };

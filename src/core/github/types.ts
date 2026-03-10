@@ -19,6 +19,7 @@ export interface PullRequestContext {
 
 export interface ReviewPlatform {
   getPullRequestContext(): Promise<PullRequestContext>;
-  publishInlineComment(comment: InlineComment): Promise<void>;
+  /** Returns true if the comment was posted inline, false if the line was not in the diff. */
+  publishInlineComment(comment: InlineComment): Promise<boolean>;
   publishSummaryComment(body: string): Promise<void>;
 }

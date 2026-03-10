@@ -51,7 +51,7 @@ export class GitHubReviewPlatform implements ReviewPlatform {
     };
   }
 
-  async publishInlineComment(comment: InlineComment): Promise<void> {
+  async publishInlineComment(comment: InlineComment): Promise<boolean> {
     try {
       const { data: pr } = await this.octokit.rest.pulls.get({
         owner: this.owner,
@@ -69,10 +69,11 @@ export class GitHubReviewPlatform implements ReviewPlatform {
         side: comment.side || 'RIGHT',
         body: comment.body,
       });
+      return true;
     } catch (err) {
-      // If inline comment fails (line not in diff), silently skip
-      // The finding will appear in the summary instead
+      // Line is not in the diff — caller will post as a standalone comment
       console.warn(`Could not post inline comment for ${comment.path}:${comment.line}: ${(err as Error).message}`);
+      return false;
     }
   }
 

@@ -26,11 +26,12 @@ export function saveConfig(repoPath: string, config: Config): void {
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
 }
 
-export function resolveConfig(repoPath: string): Required<Omit<Config, '$schema'>> & { $schema?: string } {
+export function resolveConfig(repoPath: string): Required<Omit<Config, '$schema' | 'fallbackModel'>> & { $schema?: string; fallbackModel?: string } {
   const config = loadConfig(repoPath);
   return {
     $schema: config.$schema,
     model: config.model || DEFAULT_MODEL,
+    fallbackModel: config.fallbackModel,
     apiKeyEnvVariable: config.apiKeyEnvVariable || DEFAULT_API_KEY_ENV,
     exclude: config.exclude || [],
   };
