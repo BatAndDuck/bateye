@@ -7,7 +7,7 @@ export async function selectReviewers(
   changedFiles: string[],
   diff: string,
   availableReviewers: Reviewer[],
-  lightModel: string,
+  model: string,
   apiKey: string
 ): Promise<OrchestratorResult> {
   const runtime = await getRuntime();
@@ -24,7 +24,7 @@ export async function selectReviewers(
 
   try {
     const result = await runtime.run<OrchestratorResult>(
-      { systemPrompt, userMessage, model: lightModel, apiKey, maxTokens: 2048, temperature: 0 },
+      { systemPrompt, userMessage, model, apiKey, maxTokens: 2048, temperature: 0 },
       orchestratorResultSchema
     );
     return result.data;

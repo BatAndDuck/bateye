@@ -26,7 +26,7 @@ export async function runModels(repoPath: string, provider?: string): Promise<vo
         console.log(chalk.gray('    (no models found)'));
       } else {
         for (const m of models) {
-          const isCurrent = m === config.model || m === config.lightModel;
+          const isCurrent = m === config.model;
           console.log(`    ${isCurrent ? chalk.cyan('→') : ' '} ${m}${isCurrent ? chalk.cyan(' (configured)') : ''}`);
         }
       }
@@ -36,8 +36,7 @@ export async function runModels(repoPath: string, provider?: string): Promise<vo
     console.log();
   }
 
-  console.log(chalk.gray(`  Current model:       ${config.model}`));
-  console.log(chalk.gray(`  Current lightModel:  ${config.lightModel}`));
+  console.log(chalk.gray(`  Current model:  ${config.model}`));
   console.log(chalk.gray(`\n  To change: codeowl config set model anthropic/claude-opus-4-6`));
   console.log();
 }

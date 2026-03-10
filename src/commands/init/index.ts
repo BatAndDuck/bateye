@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
 import { saveConfig } from '../../core/config/loader';
-import { CONFIG_DIR, REVIEWERS_DIR, CONFIG_FILE, DEFAULT_MODEL, DEFAULT_LIGHT_MODEL, DEFAULT_API_KEY_ENV } from '../../core/config/defaults';
+import { CONFIG_DIR, REVIEWERS_DIR, CONFIG_FILE, DEFAULT_MODEL, DEFAULT_API_KEY_ENV } from '../../core/config/defaults';
 
 export async function runInit(repoPath: string): Promise<void> {
   console.log(chalk.cyan('\n🦉 CodeOwl Init\n'));
@@ -25,7 +25,6 @@ export async function runInit(repoPath: string): Promise<void> {
     saveConfig(repoPath, {
       $schema: './node_modules/codeowl/schemas/codeowl-config.schema.json',
       model: DEFAULT_MODEL,
-      lightModel: DEFAULT_LIGHT_MODEL,
       apiKeyEnvVariable: DEFAULT_API_KEY_ENV,
       exclude: [],
     });
@@ -45,7 +44,7 @@ export async function runInit(repoPath: string): Promise<void> {
   }
 
   console.log(chalk.cyan('\nNext steps:'));
-  console.log('  1. Set your API key:   put it in .codeowl/config.json as apiKey, or export ANTHROPIC_API_KEY');
+  console.log(`  1. Set your API key:   export ${DEFAULT_API_KEY_ENV}=your_key`);
   console.log(`  2. Run a check:        ${chalk.white('codeowl doctor')}`);
   console.log(`  3. Run an audit:       ${chalk.white('codeowl audit')}`);
   console.log();

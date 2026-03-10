@@ -37,31 +37,21 @@ export async function runDoctor(repoPath: string): Promise<void> {
   }
 
   const config = resolveConfig(repoPath);
-  if (config.apiKey) {
-    checks.push({ label: 'API key (config.apiKey)', status: 'ok', detail: '***' + config.apiKey.slice(-4) });
+  const apiKey = process.env[config.apiKeyEnvVariable];
+  if (apiKey) {
+    checks.push({ label: `API key (${config.apiKeyEnvVariable})`, status: 'ok', detail: '***' + apiKey.slice(-4) });
   } else {
-    const apiKey = process.env[config.apiKeyEnvVariable];
-    if (apiKey) {
-      checks.push({ label: `API key (${config.apiKeyEnvVariable})`, status: 'ok', detail: '***' + apiKey.slice(-4) });
-    } else {
-      checks.push({
-        label: `API key (${config.apiKeyEnvVariable})`,
-        status: 'error',
-        detail: `${config.apiKeyEnvVariable} is not set and config.apiKey is empty`,
-      });
-    }
+    checks.push({
+      label: `API key (${config.apiKeyEnvVariable})`,
+      status: 'error',
+      detail: `${config.apiKeyEnvVariable} environment variable is not set`,
+    });
   }
 
   checks.push({
     label: 'Model',
     status: 'ok',
     detail: config.model,
-  });
-
-  checks.push({
-    label: 'Light model (orchestration)',
-    status: 'ok',
-    detail: config.lightModel,
   });
 
   const { reviewers, warnings } = loadReviewers(repoPath);

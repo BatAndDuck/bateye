@@ -2,7 +2,7 @@ import chalk from 'chalk';
 import { Config } from '../../../types/index';
 import { resolveConfig, setConfigField } from '../application/config-service';
 
-const ALLOWED_FIELDS: (keyof Config)[] = ['model', 'lightModel', 'apiKey', 'apiKeyEnvVariable', 'exclude'];
+const ALLOWED_FIELDS: (keyof Config)[] = ['model', 'apiKeyEnvVariable', 'exclude'];
 
 export async function runConfigShow(repoPath: string): Promise<void> {
   console.log(chalk.cyan('\n🦉 CodeOwl Config\n'));
@@ -10,8 +10,6 @@ export async function runConfigShow(repoPath: string): Promise<void> {
 
   const rows: [string, string][] = [
     ['model', config.model],
-    ['lightModel', config.lightModel],
-    ['apiKey', config.apiKey ? '***' + config.apiKey.slice(-4) : ''],
     ['apiKeyEnvVariable', config.apiKeyEnvVariable],
     ['exclude', JSON.stringify(config.exclude)],
   ];
