@@ -34,8 +34,14 @@ export async function runPRReview(options: PRReviewOptions): Promise<PRReviewRes
   // Optional fallback model + key — used when primary is rate-limited
   const fallbackModel = config.fallbackModel;
   const fallbackApiKey = fallbackModel ? process.env['CODE_OWL_LLM_MODEL_API_KEY_FALLBACK'] : undefined;
-  if (fallbackModel && !fallbackApiKey) {
-    console.warn(`Warning: fallbackModel "${fallbackModel}" is configured but CODE_OWL_LLM_MODEL_API_KEY_FALLBACK is not set — fallback will not be used.`);
+
+  log(`Primary model  : ${config.model}`);
+  if (fallbackModel) {
+    if (fallbackApiKey) {
+      log(`Fallback model : ${fallbackModel} (key set)`);
+    } else {
+      console.warn(`Warning: fallbackModel "${fallbackModel}" is configured but CODE_OWL_LLM_MODEL_API_KEY_FALLBACK is not set — fallback will not be used.`);
+    }
   }
 
   const baseRef = options.baseRef || 'origin/main';
@@ -56,7 +62,7 @@ export async function runPRReview(options: PRReviewOptions): Promise<PRReviewRes
   const { reviewers } = loadReviewers(repoPath);
 
   // Use orchestrator to select relevant reviewers
-  log('Selecting relevant reviewers...');
+  log(`Selecting relevant reviewers via ${config.model}...`);
   const orchestratorResult = await selectReviewers(
     changedFiles,
     diff,
@@ -76,30 +82,31 @@ export async function runPRReview(options: PRReviewOptions): Promise<PRReviewRes
   const reviewerErrors: { id: string; name: string; message: string }[] = [];
 
   for (const reviewer of selectedReviewers) {
-    log(`Running reviewer: ${reviewer.name}...`);
+    const primaryModel = reviewer.model || config.model;
+    log(`Running reviewer: ${reviewer.name} [${primaryModel}]...`);
     try {
-      const findings = await runPRReviewer(reviewer, diff, changedFiles, reviewer.model || config.model, apiKey, runtime);
+      const findings = await runPRReviewer(reviewer, diff, changedFiles, primaryModel, apiKey, runtime);
       allFindings.push(...findings);
-      log(`  ✓ ${reviewer.name}: ${findings.length} findings`);
+      log(`  ✓ ${reviewer.name} [${primaryModel}]: ${findings.length} findings`);
     } catch (primaryErr) {
       // If primary was rate-limited and a fallback model is configured, try that instead
       if (is429Error(primaryErr) && fallbackModel && fallbackApiKey) {
-        log(`  ⚠ ${reviewer.name} rate-limited on primary model, retrying with fallback model...`);
+        log(`  ⚠ ${reviewer.name} [${primaryModel}] exhausted retries (429), switching to fallback [${fallbackModel}]...`);
         try {
           const findings = await runPRReviewer(reviewer, diff, changedFiles, fallbackModel, fallbackApiKey, runtime);
           allFindings.push(...findings);
-          log(`  ✓ ${reviewer.name} (via fallback): ${findings.length} findings`);
+          log(`  ✓ ${reviewer.name} [${fallbackModel}] (fallback): ${findings.length} findings`);
           continue;
         } catch (fallbackErr) {
           const message = (fallbackErr as Error).message;
-          console.warn(`Reviewer ${reviewer.id} also failed on fallback model: ${message}`);
-          reviewerErrors.push({ id: reviewer.id, name: reviewer.name, message: `primary 429, fallback: ${message}` });
+          console.warn(`  ✗ ${reviewer.name} [${fallbackModel}] (fallback) also failed: ${message}`);
+          reviewerErrors.push({ id: reviewer.id, name: reviewer.name, message: `[${primaryModel}] 429 + [${fallbackModel}] fallback: ${message}` });
           continue;
         }
       }
       const message = (primaryErr as Error).message;
-      console.warn(`Reviewer ${reviewer.id} failed: ${message}`);
-      reviewerErrors.push({ id: reviewer.id, name: reviewer.name, message });
+      console.warn(`  ✗ ${reviewer.name} [${primaryModel}] failed: ${message}`);
+      reviewerErrors.push({ id: reviewer.id, name: reviewer.name, message: `[${primaryModel}]: ${message}` });
     }
   }
 
@@ -170,7 +177,7 @@ async function runPRReviewer(
       const isRateLimit = is429Error(err);
       if (isRateLimit && attempt < maxRetries) {
         const waitMs = backoffMs[attempt];
-        console.warn(`Reviewer ${reviewer.id} rate-limited (429), retrying in ${waitMs / 1000}s... (attempt ${attempt + 1}/${maxRetries})`);
+        console.warn(`Reviewer ${reviewer.id} [${model}] rate-limited (429), retrying in ${waitMs / 1000}s... (attempt ${attempt + 1}/${maxRetries})`);
         await sleep(waitMs);
         continue;
       }
