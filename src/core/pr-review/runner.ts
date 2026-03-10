@@ -48,13 +48,13 @@ export async function runPRReview(options: PRReviewOptions): Promise<PRReviewRes
   log('Loading reviewers...');
   const { reviewers } = loadReviewers(repoPath);
 
-  // Use orchestrator to select relevant reviewers (uses lighter model to save rate limit)
+  // Use orchestrator to select relevant reviewers
   log('Selecting relevant reviewers...');
   const orchestratorResult = await selectReviewers(
     changedFiles,
     diff,
     reviewers,
-    config.lightModel,
+    config.model,
     apiKey
   );
 
@@ -71,9 +71,7 @@ export async function runPRReview(options: PRReviewOptions): Promise<PRReviewRes
   for (const reviewer of selectedReviewers) {
     log(`Running reviewer: ${reviewer.name}...`);
     try {
-      // Use reviewer's own model override → lightModel → main model
-      const effectiveModel = reviewer.model || config.lightModel;
-      const findings = await runPRReviewer(reviewer, diff, changedFiles, effectiveModel, apiKey, runtime);
+      const findings = await runPRReviewer(reviewer, diff, changedFiles, reviewer.model || config.model, apiKey, runtime);
       allFindings.push(...findings);
       log(`  ✓ ${reviewer.name}: ${findings.length} findings`);
     } catch (err) {

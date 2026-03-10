@@ -28,11 +28,9 @@ export function saveConfig(repoPath: string, config: Config): void {
 
 export function resolveConfig(repoPath: string): Required<Omit<Config, '$schema'>> & { $schema?: string } {
   const config = loadConfig(repoPath);
-  const model = config.model || DEFAULT_MODEL;
   return {
     $schema: config.$schema,
-    model,
-    lightModel: config.lightModel || model,
+    model: config.model || DEFAULT_MODEL,
     apiKeyEnvVariable: config.apiKeyEnvVariable || DEFAULT_API_KEY_ENV,
     exclude: config.exclude || [],
   };
