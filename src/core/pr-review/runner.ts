@@ -48,13 +48,13 @@ export async function runPRReview(options: PRReviewOptions): Promise<PRReviewRes
   log('Loading reviewers...');
   const { reviewers } = loadReviewers(repoPath);
 
-  // Use orchestrator to select relevant reviewers
+  // Use orchestrator to select relevant reviewers (uses lighter model to save rate limit)
   log('Selecting relevant reviewers...');
   const orchestratorResult = await selectReviewers(
     changedFiles,
     diff,
     reviewers,
-    config.model,
+    config.lightModel,
     apiKey
   );
 
