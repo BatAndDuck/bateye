@@ -11,13 +11,23 @@ Return ONLY this JSON:
   "serviceId": "<kebab-case-id>",
   "name": "<human readable name>",
   "kind": "<service|module|library|app|worker|gateway|resource>",
+  "resourceCategory": "<optional database|cache|queue|storage|vector-search|external-saas|external-api|internal-platform>",
   "purpose": "<one sentence description of what this does>",
   "responsibilities": ["<responsibility 1>", "..."],
+  "capabilities": ["<user-facing or business capability 1>", "..."],
   "publicInterfaces": [
     {
       "type": "<http|graphql|event|queue|cron|db>",
       "name": "<interface name, e.g. POST /api/users>",
       "description": "<optional description>"
+    }
+  ],
+  "integrations": [
+    {
+      "name": "<target system or service name>",
+      "description": "<what this integration does, max 200 chars>",
+      "internal": <true|false>,
+      "category": "<optional database|cache|queue|storage|vector-search|external-saas|external-api|internal-platform>"
     }
   ],
   "dependencies": ["<other service/module names this depends on>"],
@@ -37,8 +47,11 @@ Return ONLY this JSON:
 Rules:
 - serviceId must be kebab-case (e.g. "user-service", "auth-module")
 - kind=resource is for infrastructure components such as databases, caches, brokers, storage, or other external runtime resources that are part of the solution architecture
+- If you are in an agentic CLI environment, inspect the code deeply before answering and use extra research passes/subagents when useful
 - List only actual dependencies evident in the code
 - Public interfaces are externally visible APIs, events, or data sources
+- integrations: concise explanation of why the integration exists; keep each description under 200 characters
+- capabilities: concrete things the service enables, phrased as actions or outcomes
 - submodules: list inner organizational units visible in the code — CQRS patterns (commands/queries), feature modules, architectural layers (controllers/services/repositories), domain aggregates, or named sub-packages. Leave empty array if no clear inner structure.
 - complexityScore: 1–10 rating of this service's overall complexity. Consider: number of files, depth of logic, number of integrations, patterns used (1=trivial config/static, 5=moderate CRUD service, 10=complex distributed coordinator).
 - Risks are architectural or operational concerns`;

@@ -78,7 +78,9 @@ test('writeSystemDesignResult creates services dir with JSON and Markdown per se
     kind: 'service',
     purpose: 'Handles API requests',
     responsibilities: ['Route requests', 'Validate input'],
+    capabilities: ['REST API', 'Rate limiting'],
     publicInterfaces: [{ type: 'http', name: 'GET /health', description: 'Health check' }],
+    integrations: [{ name: 'postgres', description: 'Primary datastore', internal: false, category: 'database' }],
     dependencies: ['database'],
     entities: [{ name: 'User', description: 'User entity', fields: ['id', 'email'] }],
     submodules: ['routes', 'controllers'],
@@ -118,6 +120,8 @@ test('writeSystemDesignResult creates services dir with JSON and Markdown per se
   assert.ok(md.includes('GET /health'));
   assert.ok(md.includes('User'));
   assert.ok(md.includes('database'));
+  assert.ok(md.includes('Rate limiting'));   // capabilities section
+  assert.ok(md.includes('postgres'));        // integrations section
 });
 
 test('writeSystemDesignResult handles service with no interfaces or submodules', () => {
@@ -130,7 +134,9 @@ test('writeSystemDesignResult handles service with no interfaces or submodules',
     kind: 'library',
     purpose: 'Shared utilities',
     responsibilities: [],
+    capabilities: [],
     publicInterfaces: [],
+    integrations: [],
     dependencies: [],
     entities: [],
     submodules: [],
@@ -168,7 +174,9 @@ test('writeSystemDesignResult writes multiple services', () => {
     kind: 'service',
     purpose: `${id} purpose`,
     responsibilities: [],
+    capabilities: [],
     publicInterfaces: [],
+    integrations: [],
     dependencies: [],
     entities: [],
     submodules: [],

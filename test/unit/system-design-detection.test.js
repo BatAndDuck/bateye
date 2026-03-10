@@ -4,9 +4,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const {
-  detectArchitecturalUnits,
-} = require('../../dist/features/system-design/application/system-design-service');
+const { buildRepoIndex } = require('../../dist/core/indexing/index');
+const { detectArchitecturalUnits } = require('../../dist/features/system-design/application/system-design-service');
+
+// ── Helpers for fast synthetic-index tests ──────────────────────────────────
 
 function makeTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-sysdesign-'));
@@ -29,7 +30,8 @@ function makeIndex(repoPath, relPaths) {
   };
 }
 
-// Fallback behaviour
+// ── Fallback behaviour ───────────────────────────────────────────────────────
+
 test('detectArchitecturalUnits falls back to src/ when no container dirs present', async () => {
   const tmpDir = makeTmpDir();
   fs.mkdirSync(path.join(tmpDir, 'src'), { recursive: true });
@@ -54,23 +56,24 @@ test('detectArchitecturalUnits falls back to repo root when src/ is empty', asyn
   assert.equal(units[0].dirPath, '.');
 });
 
-// Phase 1: container directories (packages, apps, services, etc.)
-test('detectArchitecturalUnits detects subdirs inside packages/ as separate units', async () => {
+// ── Phase 1: container directories (apps/, services/, modules/, etc.) ────────
+
+test('detectArchitecturalUnits detects subdirs inside services/ as separate units', async () => {
   const tmpDir = makeTmpDir();
-  fs.mkdirSync(path.join(tmpDir, 'packages', 'core'), { recursive: true });
-  fs.mkdirSync(path.join(tmpDir, 'packages', 'ui'), { recursive: true });
-  fs.writeFileSync(path.join(tmpDir, 'packages', 'core', 'index.ts'), 'export const x = 1;');
-  fs.writeFileSync(path.join(tmpDir, 'packages', 'ui', 'App.tsx'), 'export default () => null;');
+  fs.mkdirSync(path.join(tmpDir, 'services', 'core'), { recursive: true });
+  fs.mkdirSync(path.join(tmpDir, 'services', 'gateway'), { recursive: true });
+  fs.writeFileSync(path.join(tmpDir, 'services', 'core', 'index.ts'), 'export const x = 1;');
+  fs.writeFileSync(path.join(tmpDir, 'services', 'gateway', 'index.ts'), 'export const gw = {};');
 
   const index = makeIndex(tmpDir, [
-    'packages/core/index.ts',
-    'packages/ui/App.tsx',
+    'services/core/index.ts',
+    'services/gateway/index.ts',
   ]);
   const units = await detectArchitecturalUnits(tmpDir, index);
 
   const names = units.map(u => u.name);
   assert.ok(names.includes('core'), 'Expected unit named "core"');
-  assert.ok(names.includes('ui'), 'Expected unit named "ui"');
+  assert.ok(names.includes('gateway'), 'Expected unit named "gateway"');
 });
 
 test('detectArchitecturalUnits detects subdirs inside apps/ as separate units', async () => {
@@ -91,7 +94,8 @@ test('detectArchitecturalUnits detects subdirs inside apps/ as separate units', 
   assert.ok(names.includes('backend'), 'Expected unit named "backend"');
 });
 
-// Phase 2: top-level service directories
+// ── Phase 2: top-level service directories ────────────────────────────────────
+
 test('detectArchitecturalUnits detects top-level frontend directory', async () => {
   const tmpDir = makeTmpDir();
   fs.mkdirSync(path.join(tmpDir, 'frontend'), { recursive: true });
@@ -117,7 +121,8 @@ test('detectArchitecturalUnits detects top-level api directory', async () => {
   assert.ok(apiUnit, 'Expected a unit named "api"');
 });
 
-// Phase 3: src/ subdirectories
+// ── Phase 3: src/ subdirectories ─────────────────────────────────────────────
+
 test('detectArchitecturalUnits picks up multiple src/ subdirs', async () => {
   const tmpDir = makeTmpDir();
   fs.mkdirSync(path.join(tmpDir, 'src', 'auth'), { recursive: true });
@@ -136,17 +141,18 @@ test('detectArchitecturalUnits picks up multiple src/ subdirs', async () => {
   assert.ok(names.includes('billing'), 'Expected unit named "billing"');
 });
 
-// Deduplication
+// ── Deduplication ─────────────────────────────────────────────────────────────
+
 test('detectArchitecturalUnits does not duplicate units with same name', async () => {
   const tmpDir = makeTmpDir();
-  // Create both packages/frontend AND top-level frontend
-  fs.mkdirSync(path.join(tmpDir, 'packages', 'frontend'), { recursive: true });
+  // Phase 1 detects services/frontend; Phase 2 would also detect top-level frontend/
+  fs.mkdirSync(path.join(tmpDir, 'services', 'frontend'), { recursive: true });
   fs.mkdirSync(path.join(tmpDir, 'frontend'), { recursive: true });
-  fs.writeFileSync(path.join(tmpDir, 'packages', 'frontend', 'App.tsx'), 'export default App;');
+  fs.writeFileSync(path.join(tmpDir, 'services', 'frontend', 'App.tsx'), 'export default App;');
   fs.writeFileSync(path.join(tmpDir, 'frontend', 'App.tsx'), 'export default App;');
 
   const index = makeIndex(tmpDir, [
-    'packages/frontend/App.tsx',
+    'services/frontend/App.tsx',
     'frontend/App.tsx',
   ]);
   const units = await detectArchitecturalUnits(tmpDir, index);
@@ -155,7 +161,8 @@ test('detectArchitecturalUnits does not duplicate units with same name', async (
   assert.equal(frontendUnits.length, 1, 'Should not duplicate "frontend" unit');
 });
 
-// Kind inference
+// ── Kind inference ────────────────────────────────────────────────────────────
+
 test('detectArchitecturalUnits assigns worker kind to worker directories', async () => {
   const tmpDir = makeTmpDir();
   fs.mkdirSync(path.join(tmpDir, 'workers'), { recursive: true });
@@ -180,4 +187,93 @@ test('detectArchitecturalUnits assigns library kind to lib directories', async (
   const libUnit = units.find(u => u.name === 'lib');
   assert.ok(libUnit, 'Expected a unit named "lib"');
   assert.equal(libUnit.kindHint, 'library');
+});
+
+// ── Compose-based detection (from main) ───────────────────────────────────────
+
+test('detectArchitecturalUnits includes compose services and infrastructure resources', async () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-system-design-detect-'));
+
+  fs.mkdirSync(path.join(repoPath, 'apps', 'frontend'), { recursive: true });
+  fs.mkdirSync(path.join(repoPath, 'services', 'api'), { recursive: true });
+  fs.mkdirSync(path.join(repoPath, 'workers', 'sync'), { recursive: true });
+
+  fs.writeFileSync(path.join(repoPath, 'apps', 'frontend', 'index.tsx'), 'export const Frontend = () => null;\n');
+  fs.writeFileSync(path.join(repoPath, 'services', 'api', 'index.ts'), 'export function api() { return true; }\n');
+  fs.writeFileSync(path.join(repoPath, 'workers', 'sync', 'index.ts'), 'export async function run() { return true; }\n');
+  fs.writeFileSync(path.join(repoPath, 'docker-compose.yml'), `
+services:
+  frontend:
+    build: ./apps/frontend
+  api:
+    build: ./services/api
+    depends_on:
+      - redis
+      - postgres
+  worker:
+    build: ./workers/sync
+    depends_on:
+      - redis
+  redis:
+    image: redis:7
+  postgres:
+    image: postgres:16
+`);
+
+  const index = await buildRepoIndex(repoPath, { exclude: [] });
+  const units = await detectArchitecturalUnits(repoPath, index);
+
+  const byName = new Map(units.map(unit => [unit.name, unit]));
+
+  assert.ok(byName.has('frontend'));
+  assert.ok(byName.has('api'));
+  assert.ok(byName.has('worker'));
+  assert.ok(byName.has('redis'));
+  assert.ok(byName.has('postgres'));
+
+  assert.equal(byName.get('redis').kindHint, 'resource');
+  assert.equal(byName.get('postgres').kindHint, 'resource');
+  assert.deepEqual(byName.get('api').dependencyHints.sort(), ['postgres', 'redis']);
+  assert.deepEqual(byName.get('worker').dependencyHints.sort(), ['postgres', 'redis']);
+});
+
+test('detectArchitecturalUnits splits a hybrid Next.js app into frontend and bff and infers resources', async () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-system-design-next-'));
+
+  fs.mkdirSync(path.join(repoPath, 'apps', 'web-host', 'app', 'api', 'chat'), { recursive: true });
+  fs.mkdirSync(path.join(repoPath, 'apps', 'web-host', 'src', 'components'), { recursive: true });
+
+  fs.writeFileSync(path.join(repoPath, 'apps', 'web-host', 'package.json'), JSON.stringify({
+    name: 'web-host',
+    dependencies: {
+      next: '^16.0.0',
+      '@clerk/nextjs': '^6.0.0',
+      openai: '^5.0.0',
+    },
+  }, null, 2));
+  fs.writeFileSync(path.join(repoPath, 'apps', 'web-host', 'app', 'page.tsx'), 'export default function Page() { return <div>Hello</div>; }\n');
+  fs.writeFileSync(path.join(repoPath, 'apps', 'web-host', 'app', 'api', 'chat', 'route.ts'), `
+import { auth } from '@clerk/nextjs';
+import OpenAI from 'openai';
+export async function POST() { auth(); return new Response('ok'); }
+`);
+  fs.writeFileSync(path.join(repoPath, 'apps', 'web-host', 'src', 'components', 'Shell.tsx'), 'export function Shell() { return null; }\n');
+
+  const index = await buildRepoIndex(repoPath, { exclude: [] });
+  const units = await detectArchitecturalUnits(repoPath, index);
+
+  const byName = new Map(units.map(unit => [unit.name, unit]));
+  const frontendUnit = units.find(unit => /frontend/i.test(unit.name));
+  const bffUnit = units.find(unit => /\bbff\b/i.test(unit.name));
+
+  assert.ok(frontendUnit);
+  assert.ok(bffUnit);
+  assert.ok(byName.has('clerk'));
+  assert.ok(byName.has('llm'));
+
+  assert.equal(frontendUnit.kindHint, 'app');
+  assert.equal(bffUnit.kindHint, 'gateway');
+  assert.ok(bffUnit.interfaceHints.some(api => api.type === 'http' && api.name === '/chat'));
+  assert.ok(bffUnit.dependencyHints.includes('clerk'));
+  assert.ok(bffUnit.dependencyHints.includes('llm'));
 });

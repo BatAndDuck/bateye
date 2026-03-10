@@ -63,16 +63,34 @@ export type ServiceInterfaceType = "http" | "graphql" | "event" | "queue" | "cro
 
 export type ServiceKind = "service" | "module" | "library" | "app" | "worker" | "gateway" | "resource";
 
+export type ResourceCategory =
+  | "database"
+  | "cache"
+  | "queue"
+  | "storage"
+  | "vector-search"
+  | "external-saas"
+  | "external-api"
+  | "internal-platform";
+
 export type ServiceDesignDoc = {
   serviceId: string;
   name: string;
   kind: ServiceKind;
+  resourceCategory?: ResourceCategory;
   purpose: string;
   responsibilities: string[];
+  capabilities: string[];
   publicInterfaces: {
     type: ServiceInterfaceType;
     name: string;
     description?: string;
+  }[];
+  integrations: {
+    name: string;
+    description: string;
+    internal: boolean;
+    category?: ResourceCategory;
   }[];
   dependencies: string[];
   entities: {

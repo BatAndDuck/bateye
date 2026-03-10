@@ -89,23 +89,47 @@ test('systemSynthesisSchema requires globalSummary', () => {
   assert.ok(!result.success);
 });
 
+// Minimal valid service document (used across multiple tests)
+function makeValidService(overrides = {}) {
+  return {
+    serviceId: 'svc',
+    name: 'svc',
+    kind: 'service',
+    purpose: 'A purpose',
+    responsibilities: [],
+    capabilities: [],
+    publicInterfaces: [],
+    integrations: [],
+    dependencies: [],
+    entities: [],
+    submodules: [],
+    complexityScore: 3,
+    risks: [],
+    ...overrides,
+  };
+}
+
 // serviceDesignDocSchema
 test('serviceDesignDocSchema accepts a fully valid service document', () => {
-  const validService = {
+  const validService = makeValidService({
     serviceId: 'api-service',
     name: 'api-service',
     kind: 'service',
     purpose: 'Handles API requests',
     responsibilities: ['Route requests', 'Validate input'],
+    capabilities: ['REST API', 'Rate limiting'],
     publicInterfaces: [
       { type: 'http', name: 'GET /health', description: 'Health check endpoint' },
+    ],
+    integrations: [
+      { name: 'postgres', description: 'Primary datastore', internal: false, category: 'database' },
     ],
     dependencies: ['database'],
     entities: [{ name: 'User', description: 'User entity', fields: ['id', 'email'] }],
     submodules: ['routes', 'controllers'],
     complexityScore: 5,
     risks: ['Single point of failure'],
-  };
+  });
   const result = serviceDesignDocSchema.safeParse(validService);
   assert.ok(result.success);
 });
@@ -113,54 +137,46 @@ test('serviceDesignDocSchema accepts a fully valid service document', () => {
 test('serviceDesignDocSchema accepts all valid service kinds', () => {
   const kinds = ['service', 'module', 'library', 'app', 'worker', 'gateway', 'resource'];
   for (const kind of kinds) {
-    const result = serviceDesignDocSchema.safeParse({
-      serviceId: 'svc',
-      name: 'svc',
-      kind,
-      purpose: 'A purpose',
-      responsibilities: [],
-      publicInterfaces: [],
-      dependencies: [],
-      entities: [],
-      submodules: [],
-      complexityScore: 3,
-      risks: [],
-    });
+    const result = serviceDesignDocSchema.safeParse(makeValidService({ kind }));
     assert.ok(result.success, `Expected kind '${kind}' to be valid`);
   }
 });
 
+test('serviceDesignDocSchema accepts optional resourceCategory', () => {
+  const result = serviceDesignDocSchema.safeParse(
+    makeValidService({ kind: 'resource', resourceCategory: 'database' }),
+  );
+  assert.ok(result.success);
+});
+
+test('serviceDesignDocSchema rejects invalid resourceCategory', () => {
+  const result = serviceDesignDocSchema.safeParse(
+    makeValidService({ kind: 'resource', resourceCategory: 'unknown-category' }),
+  );
+  assert.ok(!result.success);
+});
+
 test('serviceDesignDocSchema rejects invalid service kind', () => {
-  const result = serviceDesignDocSchema.safeParse({
-    serviceId: 'svc',
-    name: 'svc',
-    kind: 'database',
-    purpose: 'Purpose',
-    responsibilities: [],
-    publicInterfaces: [],
-    dependencies: [],
-    entities: [],
-    submodules: [],
-    complexityScore: 5,
-    risks: [],
-  });
+  const result = serviceDesignDocSchema.safeParse(makeValidService({ kind: 'database' }));
+  assert.ok(!result.success);
+});
+
+test('serviceDesignDocSchema rejects missing capabilities field', () => {
+  const svc = makeValidService();
+  delete svc.capabilities;
+  const result = serviceDesignDocSchema.safeParse(svc);
+  assert.ok(!result.success);
+});
+
+test('serviceDesignDocSchema rejects missing integrations field', () => {
+  const svc = makeValidService();
+  delete svc.integrations;
+  const result = serviceDesignDocSchema.safeParse(svc);
   assert.ok(!result.success);
 });
 
 test('serviceDesignDocSchema rejects complexityScore below 1', () => {
-  const result = serviceDesignDocSchema.safeParse({
-    serviceId: 'svc',
-    name: 'svc',
-    kind: 'service',
-    purpose: 'Purpose',
-    responsibilities: [],
-    publicInterfaces: [],
-    dependencies: [],
-    entities: [],
-    submodules: [],
-    complexityScore: 0,
-    risks: [],
-  });
+  const result = serviceDesignDocSchema.safeParse(makeValidService({ complexityScore: 0 }));
   assert.ok(!result.success);
 });
 
@@ -171,7 +187,9 @@ test('serviceDesignDocSchema rejects complexityScore above 10', () => {
     kind: 'service',
     purpose: 'Purpose',
     responsibilities: [],
+    capabilities: [],
     publicInterfaces: [],
+    integrations: [],
     dependencies: [],
     entities: [],
     submodules: [],
@@ -182,19 +200,9 @@ test('serviceDesignDocSchema rejects complexityScore above 10', () => {
 });
 
 test('serviceDesignDocSchema rejects invalid public interface type', () => {
-  const result = serviceDesignDocSchema.safeParse({
-    serviceId: 'svc',
-    name: 'svc',
-    kind: 'service',
-    purpose: 'Purpose',
-    responsibilities: [],
-    publicInterfaces: [{ type: 'rest', name: 'GET /foo' }],
-    dependencies: [],
-    entities: [],
-    submodules: [],
-    complexityScore: 5,
-    risks: [],
-  });
+  const result = serviceDesignDocSchema.safeParse(
+    makeValidService({ publicInterfaces: [{ type: 'rest', name: 'GET /foo' }] }),
+  );
   assert.ok(!result.success);
 });
 
