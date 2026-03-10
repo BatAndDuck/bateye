@@ -54,7 +54,7 @@ export async function runPRReview(options: PRReviewOptions): Promise<PRReviewRes
     changedFiles,
     diff,
     reviewers,
-    config.lightModel,
+    config.model,
     apiKey
   );
 

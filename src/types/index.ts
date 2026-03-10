@@ -111,8 +111,6 @@ export type SystemDesignResult = {
 export type Config = {
   $schema?: string;
   model?: string;
-  lightModel?: string;
-  apiKey?: string;
   apiKeyEnvVariable?: string;
   exclude?: string[];
 };

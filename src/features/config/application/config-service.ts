@@ -1,11 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Config } from '../../../types/index';
-import { CONFIG_FILE, DEFAULT_MODEL, DEFAULT_LIGHT_MODEL, DEFAULT_API_KEY_ENV } from '../../../core/config/defaults';
-
-type LegacyConfig = Config & {
-  apiKeyEnv?: string;
-};
+import { CONFIG_FILE, DEFAULT_MODEL, DEFAULT_API_KEY_ENV } from '../../../core/config/defaults';
 
 export function loadConfig(repoPath: string): Config {
   const configPath = path.join(repoPath, CONFIG_FILE);
@@ -15,7 +11,7 @@ export function loadConfig(repoPath: string): Config {
 
   try {
     const raw = fs.readFileSync(configPath, 'utf-8');
-    return JSON.parse(raw) as LegacyConfig;
+    return JSON.parse(raw) as Config;
   } catch (err) {
     throw new Error(`Failed to parse ${configPath}: ${(err as Error).message}`);
   }
@@ -30,26 +26,21 @@ export function saveConfig(repoPath: string, config: Config): void {
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
 }
 
-export function resolveConfig(repoPath: string): Required<Omit<Config, '$schema' | 'apiKey'>> & { $schema?: string; apiKey?: string } {
+export function resolveConfig(repoPath: string): Required<Omit<Config, '$schema'>> & { $schema?: string } {
   const config = loadConfig(repoPath);
-  const legacyConfig = config as LegacyConfig;
   return {
     $schema: config.$schema,
     model: config.model || DEFAULT_MODEL,
-    lightModel: config.lightModel || DEFAULT_LIGHT_MODEL,
-    apiKey: config.apiKey,
-    apiKeyEnvVariable: config.apiKeyEnvVariable || legacyConfig.apiKeyEnv || DEFAULT_API_KEY_ENV,
+    apiKeyEnvVariable: config.apiKeyEnvVariable || DEFAULT_API_KEY_ENV,
     exclude: config.exclude || [],
   };
 }
 
-export function resolveApiKey(config: { apiKey?: string; apiKeyEnvVariable: string }): string {
-  if (config.apiKey) return config.apiKey;
-
+export function resolveApiKey(config: { apiKeyEnvVariable: string }): string {
   const key = process.env[config.apiKeyEnvVariable];
   if (!key) {
     throw new Error(
-      `API key not found. Set the ${config.apiKeyEnvVariable} environment variable, or set apiKey/apiKeyEnvVariable in .codeowl/config.json`
+      `API key not found. Set the ${config.apiKeyEnvVariable} environment variable.`
     );
   }
 

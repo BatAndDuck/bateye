@@ -14,15 +14,6 @@
       "description": "Primary analysis model in provider/model format (e.g. anthropic/claude-sonnet-4-5)",
       "examples": ["anthropic/claude-sonnet-4-5", "openai/gpt-4o"]
     },
-    "lightModel": {
-      "type": "string",
-      "description": "Lighter model for orchestration tasks",
-      "examples": ["openai/gpt-4o-mini", "anthropic/claude-haiku-4-5"]
-    },
-    "apiKey": {
-      "type": "string",
-      "description": "API key to use directly (alternative to apiKeyEnvVariable)"
-    },
     "apiKeyEnvVariable": {
       "type": "string",
       "description": "Name of the environment variable containing the API key",
