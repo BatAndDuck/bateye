@@ -28,6 +28,8 @@ Return ONLY this JSON:
       "fields": ["<optional field list>"]
     }
   ],
+  "submodules": ["<inner code module or pattern, e.g. 'commands', 'queries', 'handlers', 'controllers', 'repositories', 'domain', 'user feature', 'auth feature'>"],
+  "complexityScore": <1-10>,
   "risks": ["<risk 1>", "..."]
 }
 \`\`\`
@@ -36,6 +38,8 @@ Rules:
 - serviceId must be kebab-case (e.g. "user-service", "auth-module")
 - List only actual dependencies evident in the code
 - Public interfaces are externally visible APIs, events, or data sources
+- submodules: list inner organizational units visible in the code — CQRS patterns (commands/queries), feature modules, architectural layers (controllers/services/repositories), domain aggregates, or named sub-packages. Leave empty array if no clear inner structure.
+- complexityScore: 1–10 rating of this service's overall complexity. Consider: number of files, depth of logic, number of integrations, patterns used (1=trivial config/static, 5=moderate CRUD service, 10=complex distributed coordinator).
 - Risks are architectural or operational concerns`;
 }
 

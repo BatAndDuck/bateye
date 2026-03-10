@@ -80,6 +80,8 @@ export type ServiceDesignDoc = {
     description?: string;
     fields?: string[];
   }[];
+  submodules: string[];
+  complexityScore: number;
   risks: string[];
 };
 
