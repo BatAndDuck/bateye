@@ -31,6 +31,10 @@ export async function runPRReview(options: PRReviewOptions): Promise<PRReviewRes
   const config = resolveConfig(repoPath);
   const apiKey = resolveApiKey(config);
 
+  // Optional fallback model + key — used when primary is rate-limited
+  const fallbackModel = config.fallbackModel;
+  const fallbackApiKey = fallbackModel ? process.env['CODE_OWL_LLM_MODEL_API_KEY_FALLBACK'] : undefined;
+
   const baseRef = options.baseRef || 'origin/main';
   const headRef = options.headRef || 'HEAD';
 
@@ -74,8 +78,23 @@ export async function runPRReview(options: PRReviewOptions): Promise<PRReviewRes
       const findings = await runPRReviewer(reviewer, diff, changedFiles, reviewer.model || config.model, apiKey, runtime);
       allFindings.push(...findings);
       log(`  ✓ ${reviewer.name}: ${findings.length} findings`);
-    } catch (err) {
-      const message = (err as Error).message;
+    } catch (primaryErr) {
+      // If primary was rate-limited and a fallback model is configured, try that instead
+      if (is429Error(primaryErr) && fallbackModel && fallbackApiKey) {
+        log(`  ⚠ ${reviewer.name} rate-limited on primary model, retrying with fallback model...`);
+        try {
+          const findings = await runPRReviewer(reviewer, diff, changedFiles, fallbackModel, fallbackApiKey, runtime);
+          allFindings.push(...findings);
+          log(`  ✓ ${reviewer.name} (via fallback): ${findings.length} findings`);
+          continue;
+        } catch (fallbackErr) {
+          const message = (fallbackErr as Error).message;
+          console.warn(`Reviewer ${reviewer.id} also failed on fallback model: ${message}`);
+          reviewerErrors.push({ id: reviewer.id, name: reviewer.name, message: `primary 429, fallback: ${message}` });
+          continue;
+        }
+      }
+      const message = (primaryErr as Error).message;
       console.warn(`Reviewer ${reviewer.id} failed: ${message}`);
       reviewerErrors.push({ id: reviewer.id, name: reviewer.name, message });
     }
