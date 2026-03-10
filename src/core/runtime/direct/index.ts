@@ -117,7 +117,7 @@ export class DirectAIRuntime implements IRuntime {
         return runWithOpenAI(options, schema, modelId, 'https://api.minimax.chat/v1');
       case 'google':
         // Google uses OpenAI-compatible API
-        return runWithOpenAI(options, schema, `google/${modelId}`, 'https://generativelanguage.googleapis.com/v1beta/openai');
+        return runWithOpenAI(options, schema, modelId, 'https://generativelanguage.googleapis.com/v1beta/openai');
       default:
         // Fall back to OpenAI-compatible
         return runWithOpenAI(options, schema, modelId);
