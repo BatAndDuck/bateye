@@ -3,6 +3,8 @@ export const BUILT_IN_EXCLUDES = [
   'dist',
   'build',
   'coverage',
+  '.codeowl',
+  '.claude',
   '.next',
   '.out',
   '.cache',

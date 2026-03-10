@@ -234,7 +234,7 @@ services:
   assert.equal(byName.get('redis').kindHint, 'resource');
   assert.equal(byName.get('postgres').kindHint, 'resource');
   assert.deepEqual(byName.get('api').dependencyHints.sort(), ['postgres', 'redis']);
-  assert.deepEqual(byName.get('worker').dependencyHints.sort(), ['postgres', 'redis']);
+  assert.deepEqual(byName.get('worker').dependencyHints.sort(), ['redis']);
 });
 
 test('detectArchitecturalUnits splits a hybrid Next.js app into frontend and bff and infers resources', async () => {
@@ -275,5 +275,153 @@ export async function POST() { auth(); return new Response('ok'); }
   assert.equal(bffUnit.kindHint, 'gateway');
   assert.ok(bffUnit.interfaceHints.some(api => api.type === 'http' && api.name === '/chat'));
   assert.ok(bffUnit.dependencyHints.includes('clerk'));
+  assert.ok(bffUnit.dependencyHints.includes('llm'));
+});
+
+test('detectArchitecturalUnits keeps a single-package CLI as one app and ignores prompt-only infra mentions', async () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-system-design-cli-'));
+
+  fs.mkdirSync(path.join(repoPath, 'src', 'cli'), { recursive: true });
+  fs.mkdirSync(path.join(repoPath, 'src', 'commands'), { recursive: true });
+  fs.mkdirSync(path.join(repoPath, 'src', 'core', 'prompts'), { recursive: true });
+
+  fs.writeFileSync(path.join(repoPath, 'package.json'), JSON.stringify({
+    name: 'codeowl',
+    bin: { codeowl: 'dist/index.js' },
+    dependencies: {
+      commander: '^12.0.0',
+      openai: '^5.0.0',
+    },
+  }, null, 2));
+  fs.writeFileSync(path.join(repoPath, 'src', 'cli', 'index.ts'), `
+import { Command } from 'commander';
+import OpenAI from 'openai';
+export function createCli() { return new Command().name('codeowl'); }
+export function createLlm() { return new OpenAI({ apiKey: process.env.OPENAI_API_KEY }); }
+`);
+  fs.writeFileSync(path.join(repoPath, 'src', 'commands', 'audit.ts'), 'export function audit() { return "ok"; }\n');
+  fs.writeFileSync(path.join(repoPath, 'src', 'core', 'prompts', 'system-design.ts'), `
+export const prompt = "Mention redis postgres clerk vector-search stripe only as examples.";
+`);
+
+  const index = await buildRepoIndex(repoPath, { exclude: [] });
+  const units = await detectArchitecturalUnits(repoPath, index);
+
+  const unitNames = units.map(unit => unit.name.toLowerCase());
+  const rootUnit = units.find(unit => unit.dirPath === '.');
+
+  assert.ok(rootUnit);
+  assert.equal(rootUnit.kindHint, 'app');
+  assert.ok(!unitNames.includes('commands'));
+  assert.ok(!unitNames.includes('core'));
+  assert.ok(!unitNames.includes('schemas'));
+  assert.ok(unitNames.includes('llm'));
+  assert.ok(!unitNames.includes('redis'));
+  assert.ok(!unitNames.includes('postgres'));
+  assert.ok(!unitNames.includes('clerk'));
+  assert.ok(!unitNames.includes('vector-search'));
+  assert.ok(!unitNames.includes('stripe'));
+});
+
+test('detectArchitecturalUnits attributes resources through local workspace imports for split app units', async () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-system-design-workspace-'));
+
+  fs.mkdirSync(path.join(repoPath, 'apps', 'web-host', 'app', 'api', 'chat'), { recursive: true });
+  fs.mkdirSync(path.join(repoPath, 'apps', 'web-host', 'app', '(marketing)'), { recursive: true });
+  fs.mkdirSync(path.join(repoPath, 'packages', 'libs', 'llm', 'src'), { recursive: true });
+
+  fs.writeFileSync(path.join(repoPath, 'apps', 'web-host', 'package.json'), JSON.stringify({
+    name: 'web-host',
+    dependencies: {
+      next: '^16.0.0',
+      '@clerk/nextjs': '^6.0.0',
+      '@libs/llm': '*',
+    },
+  }, null, 2));
+  fs.writeFileSync(path.join(repoPath, 'apps', 'web-host', 'app', 'page.tsx'), `
+import { SignedIn } from '@clerk/nextjs';
+export default function Page() { return <SignedIn />; }
+`);
+  fs.writeFileSync(path.join(repoPath, 'apps', 'web-host', 'app', 'api', 'chat', 'route.ts'), `
+import { summarize } from '@libs/llm';
+export async function POST() { return Response.json(await summarize()); }
+`);
+  fs.writeFileSync(path.join(repoPath, 'packages', 'libs', 'llm', 'package.json'), JSON.stringify({
+    name: '@libs/llm',
+    dependencies: {
+      openai: '^5.0.0',
+    },
+  }, null, 2));
+  fs.writeFileSync(path.join(repoPath, 'packages', 'libs', 'llm', 'src', 'index.ts'), `
+import OpenAI from 'openai';
+export async function summarize() { return new OpenAI({ apiKey: process.env.OPENAI_API_KEY }); }
+`);
+
+  const index = await buildRepoIndex(repoPath, { exclude: [] });
+  const units = await detectArchitecturalUnits(repoPath, index);
+  const frontendUnit = units.find(unit => /frontend/i.test(unit.name));
+  const bffUnit = units.find(unit => /\bbff\b/i.test(unit.name));
+
+  assert.ok(frontendUnit);
+  assert.ok(bffUnit);
+  assert.ok(frontendUnit.dependencyHints.includes('clerk'));
+  assert.ok(!frontendUnit.dependencyHints.includes('llm'));
+  assert.ok(bffUnit.dependencyHints.includes('llm'));
+});
+
+test('detectArchitecturalUnits does not leak transitive backend resources into a split frontend unit', async () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-system-design-frontend-boundary-'));
+
+  fs.mkdirSync(path.join(repoPath, 'apps', 'web-host', 'app', 'api', 'chat'), { recursive: true });
+  fs.mkdirSync(path.join(repoPath, 'packages', 'shared', 'contracts', 'src'), { recursive: true });
+  fs.mkdirSync(path.join(repoPath, 'packages', 'libs', 'llm', 'src'), { recursive: true });
+
+  fs.writeFileSync(path.join(repoPath, 'apps', 'web-host', 'package.json'), JSON.stringify({
+    name: 'web-host',
+    dependencies: {
+      next: '^16.0.0',
+      '@clerk/nextjs': '^6.0.0',
+      '@shared/contracts': '*',
+      '@libs/llm': '*',
+    },
+  }, null, 2));
+  fs.writeFileSync(path.join(repoPath, 'apps', 'web-host', 'app', 'page.tsx'), `
+import type { SummaryCard } from '@shared/contracts';
+import { SignedIn } from '@clerk/nextjs';
+export default function Page() { const card = {} as SummaryCard; return <SignedIn>{card.title}</SignedIn>; }
+`);
+  fs.writeFileSync(path.join(repoPath, 'apps', 'web-host', 'app', 'api', 'chat', 'route.ts'), `
+import { summarize } from '@libs/llm';
+export async function POST() { return Response.json(await summarize()); }
+`);
+  fs.writeFileSync(path.join(repoPath, 'packages', 'shared', 'contracts', 'package.json'), JSON.stringify({
+    name: '@shared/contracts',
+    dependencies: {
+      openai: '^5.0.0',
+    },
+  }, null, 2));
+  fs.writeFileSync(path.join(repoPath, 'packages', 'shared', 'contracts', 'src', 'index.ts'), `
+export type SummaryCard = { title: string };
+`);
+  fs.writeFileSync(path.join(repoPath, 'packages', 'libs', 'llm', 'package.json'), JSON.stringify({
+    name: '@libs/llm',
+    dependencies: {
+      openai: '^5.0.0',
+    },
+  }, null, 2));
+  fs.writeFileSync(path.join(repoPath, 'packages', 'libs', 'llm', 'src', 'index.ts'), `
+import OpenAI from 'openai';
+export async function summarize() { return new OpenAI({ apiKey: process.env.OPENAI_API_KEY }); }
+`);
+
+  const index = await buildRepoIndex(repoPath, { exclude: [] });
+  const units = await detectArchitecturalUnits(repoPath, index);
+  const frontendUnit = units.find(unit => /frontend/i.test(unit.name));
+  const bffUnit = units.find(unit => /\bbff\b/i.test(unit.name));
+
+  assert.ok(frontendUnit);
+  assert.ok(bffUnit);
+  assert.ok(frontendUnit.dependencyHints.includes('clerk'));
+  assert.ok(!frontendUnit.dependencyHints.includes('llm'));
   assert.ok(bffUnit.dependencyHints.includes('llm'));
 });
