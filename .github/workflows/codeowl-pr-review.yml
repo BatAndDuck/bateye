@@ -51,6 +51,7 @@ jobs:
             core.setOutput('pr-number', String(prNumber));
             core.setOutput('base-branch', baseBranch);
             core.setOutput('head-sha', headSha);
+            core.info(`PR #${prNumber} — base: ${baseBranch}, head: ${headSha}`);
 
       - name: Checkout PR code
         uses: actions/checkout@v4
@@ -62,6 +63,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
 
       # Build and link from source so we test the exact code in this PR,
       # not the last published npm version.
@@ -74,6 +76,18 @@ jobs:
       - name: Link CodeOwl globally
         run: npm link
 
+      - name: Show active config
+        run: |
+          echo "=== .codeowl/config.json ==="
+          cat .codeowl/config.json 2>/dev/null || echo "(no config file — using defaults)"
+          echo ""
+          echo "=== Secrets present ==="
+          echo "CODE_OWL_LLM_MODEL_API_KEY      : $( [ -n "$CODE_OWL_LLM_MODEL_API_KEY" ]      && echo "set" || echo "NOT SET" )"
+          echo "CODE_OWL_LLM_MODEL_API_KEY_FALLBACK : $( [ -n "$CODE_OWL_LLM_MODEL_API_KEY_FALLBACK" ] && echo "set" || echo "NOT SET" )"
+        env:
+          CODE_OWL_LLM_MODEL_API_KEY: ${{ secrets.CODE_OWL_LLM_MODEL_API_KEY }}
+          CODE_OWL_LLM_MODEL_API_KEY_FALLBACK: ${{ secrets.CODE_OWL_LLM_MODEL_API_KEY_FALLBACK }}
+
       # Model and reviewer config is read from .codeowl/config.json in the repository.
       # See https://github.com/CodeNinjaArea/CodeOwl#configuration
       - name: Run CodeOwl PR Review
@@ -85,6 +99,11 @@ jobs:
           # (for pull_request events it is read from GITHUB_REF automatically)
           PR_NUMBER: ${{ steps.pr.outputs.pr-number }}
         run: |
+          echo "=== Starting CodeOwl PR Review ==="
+          echo "PR   : #${{ steps.pr.outputs.pr-number }}"
+          echo "Base : origin/${{ steps.pr.outputs.base-branch }}"
+          echo "Head : ${{ steps.pr.outputs.head-sha }}"
+          echo ""
           codeowl pr-review \
             --base origin/${{ steps.pr.outputs.base-branch }} \
             --github \
