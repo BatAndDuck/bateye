@@ -89,9 +89,10 @@ export async function runPRReview(options: PRReviewOptions): Promise<PRReviewRes
       allFindings.push(...findings);
       log(`  ✓ ${reviewer.name} [${primaryModel}]: ${findings.length} findings`);
     } catch (primaryErr) {
-      // If primary was rate-limited and a fallback model is configured, try that instead
-      if (is429Error(primaryErr) && fallbackModel && fallbackApiKey) {
-        log(`  ⚠ ${reviewer.name} [${primaryModel}] exhausted retries (429), switching to fallback [${fallbackModel}]...`);
+      // If primary failed for any reason and a fallback model is configured, try that instead
+      if (fallbackModel && fallbackApiKey) {
+        const reason = is429Error(primaryErr) ? '429 rate-limit' : (primaryErr as Error).message;
+        log(`  ⚠ ${reviewer.name} [${primaryModel}] failed (${reason}), switching to fallback [${fallbackModel}]...`);
         try {
           const findings = await runPRReviewer(reviewer, diff, changedFiles, fallbackModel, fallbackApiKey, runtime);
           allFindings.push(...findings);
