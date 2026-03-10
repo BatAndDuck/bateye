@@ -63,16 +63,20 @@
   .kind-library { background: #1f2937; color: #9ca3af; }
   .interface-item { padding: 4px 8px; background: var(--surface2); border-radius: 4px; margin-bottom: 4px; font-size: 12px; }
   .interface-type { color: var(--accent-light); font-weight: 600; margin-right: 6px; }
-  .risk-item { padding: 4px 8px; background: #2d1515; border-radius: 4px; margin-bottom: 4px; font-size: 12px; color: #fca5a5; }
   .entity-item { padding: 4px 8px; background: var(--surface2); border-radius: 4px; margin-bottom: 4px; font-size: 12px; }
+  .submodule-item { padding: 3px 8px; background: var(--surface2); border-radius: 4px; margin-bottom: 3px; font-size: 12px; color: var(--accent-light); display: inline-block; margin-right: 4px; }
+  .integration-item { padding: 4px 8px; background: var(--surface2); border-radius: 4px; margin-bottom: 4px; font-size: 12px; display: flex; align-items: center; gap: 6px; }
+  .integration-arrow { color: var(--accent-light); font-size: 10px; }
+  .complexity-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .complexity-track { flex: 1; height: 4px; background: var(--surface2); border-radius: 2px; overflow: hidden; }
+  .complexity-fill { height: 100%; border-radius: 2px; }
+  .complexity-label { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
   .toolbar { position: absolute; bottom: 16px; left: 16px; display: flex; gap: 8px; }
   .tool-btn { padding: 8px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-size: 12px; cursor: pointer; }
   .tool-btn:hover { background: var(--surface2); }
   .legend { position: absolute; top: 12px; right: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; font-size: 11px; }
   .legend-item { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; color: var(--text-muted); }
   .legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-  .node-rect { rx: 8; ry: 8; filter: drop-shadow(0 2px 8px rgba(0,0,0,0.4)); cursor: pointer; transition: filter 0.15s; }
-  .node-rect:hover { filter: drop-shadow(0 4px 12px rgba(124,58,237,0.5)); }
   .node-selected rect { filter: drop-shadow(0 0 12px rgba(167,139,250,0.7)); }
   #summary-bar { padding: 10px 20px; background: var(--surface); border-top: 1px solid var(--border); font-size: 12px; color: var(--text-muted); display: flex; gap: 20px; flex-shrink: 0; }
   #summary-bar span { color: var(--text); font-weight: 500; }
@@ -99,9 +103,6 @@
         <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
           <path d="M 0 0 L 10 5 L 0 10 z" fill="#4b5563"/>
         </marker>
-        <marker id="arrow-dep" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c3aed"/>
-        </marker>
       </defs>
       <g id="graph-root"></g>
     </svg>
@@ -121,7 +122,6 @@
       <div class="tab active" onclick="showTab('overview')">Overview</div>
       <div class="tab" onclick="showTab('interfaces')">Interfaces</div>
       <div class="tab" onclick="showTab('data')">Data</div>
-      <div class="tab" onclick="showTab('risks')">Risks</div>
     </div>
     <div id="panel-body">
       <div id="welcome"><div class="icon">🦉</div><p>Click a node to see details</p></div>
@@ -130,7 +130,7 @@
 </main>
 <div id="summary-bar">
   <div>Services: <span id="svc-count">0</span></div>
-  <div>Score: <span id="score-val">—</span></div>
+  <div id="arch-summary"></div>
   <div id="strength-preview"></div>
 </div>
 
@@ -150,6 +150,25 @@ const KIND_COLORS = {
   worker: '#d97706', gateway: '#dc2626', library: '#6b7280'
 };
 
+// Node size range driven by complexityScore (1-10)
+const NODE_MIN_W = 140, NODE_MAX_W = 230;
+const NODE_MIN_H = 62,  NODE_MAX_H = 96;
+
+function nodeSize(score) {
+  const s = Math.max(1, Math.min(10, score || 5));
+  const t = (s - 1) / 9;
+  return {
+    w: Math.round(NODE_MIN_W + t * (NODE_MAX_W - NODE_MIN_W)),
+    h: Math.round(NODE_MIN_H + t * (NODE_MAX_H - NODE_MIN_H)),
+  };
+}
+
+function complexityColor(score) {
+  if (score <= 3) return '#10b981';
+  if (score <= 6) return '#f59e0b';
+  return '#ef4444';
+}
+
 function init() {
   if (!DATA || !DATA.nodes) return;
   nodes = DATA.nodes;
@@ -166,10 +185,9 @@ function init() {
   badge.className = 'score-badge ' + (score >= 80 ? 'score-a' : score >= 65 ? 'score-b' : score >= 50 ? 'score-c' : 'score-d');
 
   document.getElementById('svc-count').textContent = nodes.length;
-  document.getElementById('score-val').textContent = score + '/100';
+  document.getElementById('arch-summary').textContent = DATA.metadata.architectureType.replace(/-/g, ' ');
   if (DATA.metadata.strengths?.length) {
-    document.getElementById('strength-preview').textContent =
-      '✓ ' + DATA.metadata.strengths[0];
+    document.getElementById('strength-preview').textContent = '✓ ' + DATA.metadata.strengths[0];
   }
 
   buildLegend();
@@ -188,13 +206,14 @@ function buildLegend() {
 }
 
 function layoutNodes() {
-  const cols = Math.ceil(Math.sqrt(nodes.length));
-  const W = 180, H = 80, GAPX = 60, GAPY = 50;
+  const cols = Math.max(1, Math.ceil(Math.sqrt(nodes.length)));
+  const GAPX = 60, GAPY = 50;
   nodes.forEach((n, i) => {
-    n._x = (i % cols) * (W + GAPX) + 40;
-    n._y = Math.floor(i / cols) * (H + GAPY) + 40;
-    n._w = W;
-    n._h = H;
+    const sz = nodeSize(n.data?.complexityScore);
+    n._w = sz.w;
+    n._h = sz.h;
+    n._x = (i % cols) * (NODE_MAX_W + GAPX) + 40;
+    n._y = Math.floor(i / cols) * (NODE_MAX_H + GAPY) + 40;
   });
 }
 
@@ -209,19 +228,17 @@ function renderGraph() {
     const src = nodes.find(n => n.id === e.source);
     const tgt = nodes.find(n => n.id === e.target);
     if (!src || !tgt) return;
-    const x1 = src._x + src._w / 2;
-    const y1 = src._y + src._h / 2;
-    const x2 = tgt._x + tgt._w / 2;
-    const y2 = tgt._y + tgt._h / 2;
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const x1 = src._x + src._w / 2, y1 = src._y + src._h / 2;
+    const x2 = tgt._x + tgt._w / 2, y2 = tgt._y + tgt._h / 2;
     const mx = (x1 + x2) / 2;
-    path.setAttribute('d', `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`);
-    path.setAttribute('fill', 'none');
-    path.setAttribute('stroke', '#4b5563');
-    path.setAttribute('stroke-width', '1.5');
-    path.setAttribute('marker-end', 'url(#arrow)');
-    path.setAttribute('opacity', '0.6');
-    edgeG.appendChild(path);
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('d', `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`);
+    p.setAttribute('fill', 'none');
+    p.setAttribute('stroke', '#4b5563');
+    p.setAttribute('stroke-width', '1.5');
+    p.setAttribute('marker-end', 'url(#arrow)');
+    p.setAttribute('opacity', '0.6');
+    edgeG.appendChild(p);
   });
   root.appendChild(edgeG);
 
@@ -236,6 +253,9 @@ function renderGraph() {
     g.addEventListener('click', () => selectNode(n.id));
 
     const color = KIND_COLORS[n.kind] || '#6b7280';
+    const isSelected = selectedNode === n.id;
+    const complexity = n.data?.complexityScore || 5;
+
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     rect.setAttribute('x', n._x);
     rect.setAttribute('y', n._y);
@@ -244,31 +264,58 @@ function renderGraph() {
     rect.setAttribute('rx', '8');
     rect.setAttribute('fill', color + '22');
     rect.setAttribute('stroke', color);
-    rect.setAttribute('stroke-width', selectedNode === n.id ? '2' : '1');
-    rect.style.filter = 'drop-shadow(0 2px 8px rgba(0,0,0,0.4))';
+    rect.setAttribute('stroke-width', isSelected ? '2' : '1');
+    rect.style.filter = isSelected
+      ? 'drop-shadow(0 0 12px rgba(167,139,250,0.7))'
+      : 'drop-shadow(0 2px 8px rgba(0,0,0,0.4))';
+    rect.style.cursor = 'pointer';
 
     const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     label.setAttribute('x', n._x + n._w / 2);
-    label.setAttribute('y', n._y + n._h / 2 - 8);
+    label.setAttribute('y', n._y + n._h / 2 - 10);
     label.setAttribute('text-anchor', 'middle');
     label.setAttribute('fill', '#e2e8f0');
     label.setAttribute('font-size', '13');
     label.setAttribute('font-weight', '600');
     label.setAttribute('font-family', 'system-ui, sans-serif');
+    label.setAttribute('pointer-events', 'none');
     label.textContent = n.label.length > 22 ? n.label.slice(0, 20) + '…' : n.label;
 
     const sub = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     sub.setAttribute('x', n._x + n._w / 2);
-    sub.setAttribute('y', n._y + n._h / 2 + 12);
+    sub.setAttribute('y', n._y + n._h / 2 + 8);
     sub.setAttribute('text-anchor', 'middle');
     sub.setAttribute('fill', color);
     sub.setAttribute('font-size', '10');
     sub.setAttribute('font-family', 'system-ui, sans-serif');
+    sub.setAttribute('pointer-events', 'none');
     sub.textContent = n.kind;
+
+    // Complexity indicator: small colored bar at bottom of node
+    const barW = Math.round((complexity / 10) * (n._w - 24));
+    const barBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    barBg.setAttribute('x', n._x + 12);
+    barBg.setAttribute('y', n._y + n._h - 10);
+    barBg.setAttribute('width', n._w - 24);
+    barBg.setAttribute('height', 3);
+    barBg.setAttribute('rx', '1.5');
+    barBg.setAttribute('fill', '#ffffff18');
+    barBg.setAttribute('pointer-events', 'none');
+
+    const barFg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    barFg.setAttribute('x', n._x + 12);
+    barFg.setAttribute('y', n._y + n._h - 10);
+    barFg.setAttribute('width', barW);
+    barFg.setAttribute('height', 3);
+    barFg.setAttribute('rx', '1.5');
+    barFg.setAttribute('fill', complexityColor(complexity));
+    barFg.setAttribute('pointer-events', 'none');
 
     g.appendChild(rect);
     g.appendChild(label);
     g.appendChild(sub);
+    g.appendChild(barBg);
+    g.appendChild(barFg);
     nodeG.appendChild(g);
   });
   root.appendChild(nodeG);
@@ -314,7 +361,10 @@ function setupPan() {
     transform.y = e.clientY - dragStart.y;
     applyTransform();
   });
-  window.addEventListener('mouseup', () => { dragging = false; document.getElementById('canvas-area').classList.remove('dragging'); });
+  window.addEventListener('mouseup', () => {
+    dragging = false;
+    document.getElementById('canvas-area').classList.remove('dragging');
+  });
   area.addEventListener('wheel', e => {
     e.preventDefault();
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
@@ -342,27 +392,56 @@ function closePanel() {
 function showTab(tab, nodeOverride) {
   currentTab = tab;
   document.querySelectorAll('.tab').forEach((t, i) => {
-    t.classList.toggle('active', ['overview','interfaces','data','risks'][i] === tab);
+    t.classList.toggle('active', ['overview', 'interfaces', 'data'][i] === tab);
   });
   const node = nodeOverride || nodes.find(n => n.id === selectedNode);
   if (!node) return;
   const data = node.data;
   const body = document.getElementById('panel-body');
+  const complexity = data.complexityScore || 5;
+  const cColor = complexityColor(complexity);
 
   if (tab === 'overview') {
+    // Compute integrations: services that depend ON this node
+    const dependents = edges
+      .filter(e => e.target === node.id)
+      .map(e => nodes.find(n => n.id === e.source)?.label)
+      .filter(Boolean);
+
+    const submodulesHtml = (data.submodules || []).length > 0
+      ? `<h3>Inner Modules</h3><div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px">
+          ${data.submodules.map(s => `<span class="submodule-item">${escHtml(s)}</span>`).join('')}
+        </div>`
+      : '';
+
+    const depsHtml = data.dependencies?.length
+      ? `<ul>${data.dependencies.map(d => `<li>${escHtml(d)}</li>`).join('')}</ul>`
+      : '<p>None</p>';
+
+    const dependentsHtml = dependents.length
+      ? `<ul>${dependents.map(d => `<li>${escHtml(d)}</li>`).join('')}</ul>`
+      : '<p>None</p>';
+
     body.innerHTML = `
       <span class="kind-badge kind-${data.kind}">${data.kind}</span>
-      <h3>Purpose</h3><p>${escHtml(data.purpose)}</p>
+      <div class="complexity-bar">
+        <div class="complexity-track">
+          <div class="complexity-fill" style="width:${complexity * 10}%;background:${cColor}"></div>
+        </div>
+        <span class="complexity-label" style="color:${cColor}">Complexity ${complexity}/10</span>
+      </div>
+      <h3>Description</h3><p>${escHtml(data.purpose)}</p>
+      ${submodulesHtml}
       <h3>Responsibilities</h3>
-      <ul>${(data.responsibilities||[]).map(r => `<li>${escHtml(r)}</li>`).join('')}</ul>
-      <h3>Dependencies</h3>
-      ${data.dependencies?.length ? `<ul>${data.dependencies.map(d => `<li>${escHtml(d)}</li>`).join('')}</ul>` : '<p>None</p>'}
+      <ul>${(data.responsibilities || []).map(r => `<li>${escHtml(r)}</li>`).join('') || '<li style="color:var(--text-muted)">None</li>'}</ul>
+      <h3>Depends On</h3>${depsHtml}
+      <h3>Used By</h3>${dependentsHtml}
     `;
   } else if (tab === 'interfaces') {
     body.innerHTML = `
       <h3>Public Interfaces</h3>
-      ${(data.publicInterfaces||[]).length === 0 ? '<p>None detected</p>' :
-        (data.publicInterfaces||[]).map(i => `
+      ${(data.publicInterfaces || []).length === 0 ? '<p>None detected</p>' :
+        (data.publicInterfaces || []).map(i => `
           <div class="interface-item">
             <span class="interface-type">${escHtml(i.type.toUpperCase())}</span>
             ${escHtml(i.name)}
@@ -372,25 +451,19 @@ function showTab(tab, nodeOverride) {
   } else if (tab === 'data') {
     body.innerHTML = `
       <h3>Entities & Data</h3>
-      ${(data.entities||[]).length === 0 ? '<p>None detected</p>' :
-        (data.entities||[]).map(e => `
+      ${(data.entities || []).length === 0 ? '<p>None detected</p>' :
+        (data.entities || []).map(e => `
           <div class="entity-item">
             <strong>${escHtml(e.name)}</strong>
             ${e.description ? `<br><span style="color:var(--text-muted);font-size:11px">${escHtml(e.description)}</span>` : ''}
             ${e.fields?.length ? `<br><span style="color:var(--text-muted);font-size:11px">Fields: ${escHtml(e.fields.join(', '))}</span>` : ''}
           </div>`).join('')}
     `;
-  } else if (tab === 'risks') {
-    body.innerHTML = `
-      <h3>Risks</h3>
-      ${(data.risks||[]).length === 0 ? '<p>No risks identified</p>' :
-        (data.risks||[]).map(r => `<div class="risk-item">${escHtml(r)}</div>`).join('')}
-    `;
   }
 }
 
 function escHtml(str) {
-  return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 init();

@@ -54,6 +54,8 @@ export const serviceDesignDocSchema = z.object({
     description: z.string().optional(),
     fields: z.array(z.string()).optional(),
   })),
+  submodules: z.array(z.string()),
+  complexityScore: z.number().min(1).max(10),
   risks: z.array(z.string()),
 });
 

@@ -119,34 +119,65 @@ async function detectArchitecturalUnits(
   index: import('../../../types/index').RepoIndex,
 ): Promise<ArchitecturalUnit[]> {
   const units: ArchitecturalUnit[] = [];
-  const patterns = ['packages', 'apps', 'services', 'modules'];
-  let found = false;
+  const usedDirPaths = new Set<string>();
 
-  for (const pattern of patterns) {
+  const addUnit = (name: string, dirPath: string, files: import('../../../types/index').RepoFile[]) => {
+    const normalized = dirPath.replace(/\\/g, '/');
+    if (files.length > 0 && !usedDirPaths.has(normalized)) {
+      units.push({ name, dirPath: normalized, files });
+      usedDirPaths.add(normalized);
+    }
+  };
+
+  // Phase 1: Multi-service container directories (packages/, apps/, services/, modules/)
+  const multiServicePatterns = ['packages', 'apps', 'services', 'modules'];
+  for (const pattern of multiServicePatterns) {
     const patternDir = path.join(repoPath, pattern);
-    if (!fs.existsSync(patternDir)) {
-      continue;
-    }
-
-    const subdirs = fs.readdirSync(patternDir).filter(entry => fs.statSync(path.join(patternDir, entry)).isDirectory());
-    if (subdirs.length === 0) {
-      continue;
-    }
-
+    if (!fs.existsSync(patternDir)) continue;
+    const subdirs = fs.readdirSync(patternDir)
+      .filter(e => fs.statSync(path.join(patternDir, e)).isDirectory());
     for (const subdir of subdirs) {
-      const dirPath = path.join(pattern, subdir);
-      const files = index.files.filter(file => file.relativePath.startsWith(dirPath + '/'));
-      if (files.length > 0) {
-        units.push({ name: subdir, dirPath, files });
-      }
+      const dirPath = `${pattern}/${subdir}`;
+      const files = index.files.filter(f => f.relativePath.startsWith(dirPath + '/'));
+      addUnit(subdir, dirPath, files);
     }
-
-    found = true;
-    break;
   }
 
-  if (!found) {
-    const srcFiles = index.files.filter(file => file.relativePath.startsWith('src/'));
+  // Phase 2: Common top-level service/component directories
+  const topLevelCandidates = [
+    'frontend', 'web', 'client', 'ui',
+    'backend', 'api', 'server',
+    'worker', 'workers', 'jobs', 'queue',
+    'admin', 'dashboard', 'mobile',
+    'shared', 'common', 'lib', 'libs',
+    'gateway', 'proxy',
+  ];
+  for (const dirName of topLevelCandidates) {
+    const fullPath = path.join(repoPath, dirName);
+    if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isDirectory()) continue;
+    const files = index.files.filter(f => f.relativePath.startsWith(dirName + '/'));
+    addUnit(dirName, dirName, files);
+  }
+
+  // Phase 3: If nothing found yet, try src/ subdirectories
+  if (units.length === 0) {
+    const srcPath = path.join(repoPath, 'src');
+    if (fs.existsSync(srcPath)) {
+      const srcSubdirs = fs.readdirSync(srcPath)
+        .filter(e => fs.statSync(path.join(srcPath, e)).isDirectory());
+      if (srcSubdirs.length > 1) {
+        for (const subdir of srcSubdirs) {
+          const dirPath = `src/${subdir}`;
+          const files = index.files.filter(f => f.relativePath.startsWith(dirPath + '/'));
+          if (files.length >= 2) addUnit(subdir, dirPath, files);
+        }
+      }
+    }
+  }
+
+  // Fallback: entire src/ or root as a single unit
+  if (units.length === 0) {
+    const srcFiles = index.files.filter(f => f.relativePath.startsWith('src/'));
     units.push(srcFiles.length > 0
       ? { name: path.basename(repoPath), dirPath: 'src', files: srcFiles }
       : { name: path.basename(repoPath), dirPath: '.', files: index.files });
@@ -183,6 +214,8 @@ async function analyzeUnit(
       publicInterfaces: [],
       dependencies: [],
       entities: [],
+      submodules: [],
+      complexityScore: 3,
       risks: ['Analysis failed - manual review required'],
     };
   }
