@@ -71,7 +71,9 @@ export async function runPRReview(options: PRReviewOptions): Promise<PRReviewRes
   for (const reviewer of selectedReviewers) {
     log(`Running reviewer: ${reviewer.name}...`);
     try {
-      const findings = await runPRReviewer(reviewer, diff, changedFiles, config.model, apiKey, runtime);
+      // Use reviewer's own model override → lightModel → main model
+      const effectiveModel = reviewer.model || config.lightModel;
+      const findings = await runPRReviewer(reviewer, diff, changedFiles, effectiveModel, apiKey, runtime);
       allFindings.push(...findings);
       log(`  ✓ ${reviewer.name}: ${findings.length} findings`);
     } catch (err) {
@@ -194,14 +196,20 @@ async function postToGitHub(
 
   const platform = new GitHubReviewPlatform({ token, owner, repo, prNumber, repoPath });
 
-  log(`Posting ${result.findings.length} inline comments to GitHub PR #${prNumber}...`);
+  log(`Posting ${result.findings.length} findings to GitHub PR #${prNumber}...`);
 
   for (const finding of result.findings) {
-    await platform.publishInlineComment({
+    const postedInline = await platform.publishInlineComment({
       body: formatFindingComment(finding),
       path: finding.filePath,
       line: finding.startLine,
     });
+
+    if (!postedInline) {
+      // Line not in diff — post as a standalone PR comment so the finding isn't lost
+      log(`  Falling back to standalone comment for ${finding.filePath}:${finding.startLine}`);
+      await platform.publishSummaryComment(formatFindingComment(finding));
+    }
   }
 
   log('Posting summary comment...');
