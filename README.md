@@ -91,6 +91,68 @@ User reviewers with the same `id` override built-in ones.
 - `codeowl pr-review` → `.codeowl/out/pr-review.json` + optional GitHub comments
 - `codeowl system-design` → `.codeowl/out/system-design/index.html` (interactive graph)
 
+## GitHub Actions — Automated PR Review
+
+Automatically review every pull request with inline comments posted directly to GitHub.
+
+### Quick setup (for repos using CodeOwl installed via npm)
+
+**1. Copy the workflow file into your repository:**
+
+```bash
+mkdir -p .github/workflows
+curl -o .github/workflows/codeowl-pr-review.yml \
+  https://raw.githubusercontent.com/CodeNinjaArea/CodeOwl/main/.github/workflows/codeowl-pr-review.yml
+git add .github/workflows/codeowl-pr-review.yml
+git commit -m "ci: add CodeOwl PR review workflow"
+```
+
+**2. Add your AI provider API key as a GitHub secret:**
+
+Go to **Settings → Secrets and variables → Actions → New repository secret** and add:
+
+| Secret name | Value |
+|---|---|
+| `ANTHROPIC_API_KEY` | Your Anthropic API key |
+
+For other providers use `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, or `GOOGLE_API_KEY` (and update `apiKeyEnvVariable` in `.codeowl/config.json`).
+
+**3. That's it.** CodeOwl will run on every new or updated PR.
+
+### Triggers
+
+| Event | Behaviour |
+|---|---|
+| PR opened / pushed to | Review runs automatically |
+| PR comment `/review` | Re-runs the review on demand |
+
+### Customise the model or reviewers
+
+Commit a `.codeowl/config.json` to your repo root and the workflow will use it automatically:
+
+```json
+{
+  "model": "anthropic/claude-sonnet-4-5",
+  "lightModel": "anthropic/claude-haiku-4-5-20251001",
+  "apiKeyEnvVariable": "ANTHROPIC_API_KEY",
+  "exclude": ["generated", "vendor"]
+}
+```
+
+Add custom reviewers by committing `.codeowl/reviewers/*.md` files (see [Reviewers](#reviewers)).
+
+### Required permissions
+
+The workflow uses the built-in `GITHUB_TOKEN` — no extra tokens needed:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+```
+
+---
+
 ## Supported Providers
 
 | Provider | Model format | API key env |
