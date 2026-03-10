@@ -92,7 +92,7 @@ jobs:
 
       - name: Run CodeOwl PR Review
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.CODE_OWL_LLM_MODEL_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # PR_NUMBER lets CodeOwl detect the PR in issue_comment events
           # (for pull_request events it is read from GITHUB_REF automatically)
