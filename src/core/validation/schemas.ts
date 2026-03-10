@@ -40,7 +40,7 @@ export const reviewerResultSchema = z.object({
 export const serviceDesignDocSchema = z.object({
   serviceId: z.string(),
   name: z.string(),
-  kind: z.enum(['service', 'module', 'library', 'app', 'worker', 'gateway']),
+  kind: z.enum(['service', 'module', 'library', 'app', 'worker', 'gateway', 'resource']),
   purpose: z.string(),
   responsibilities: z.array(z.string()),
   publicInterfaces: z.array(z.object({

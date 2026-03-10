@@ -17,8 +17,7 @@ test('system-design command reaches the mocked runtime and writes artifacts', ()
 
   writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
     model: 'anthropic/mock-model',
-    lightModel: 'anthropic/mock-light',
-    apiKey: 'direct-test-key',
+    apiKeyEnvVariable: 'CODE_OWL_LLM_MODEL_API_KEY',
     exclude: [],
   });
 
@@ -36,6 +35,8 @@ test('system-design command reaches the mocked runtime and writes artifacts', ()
           publicInterfaces: [],
           dependencies: [],
           entities: [],
+          submodules: ['routes', 'handlers'],
+          complexityScore: 4,
           risks: [],
         },
       },
@@ -55,6 +56,7 @@ test('system-design command reaches the mocked runtime and writes artifacts', ()
     cwd: process.cwd(),
     env: {
       ...process.env,
+      CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
       CODEOWL_RUNTIME: 'mock',
       CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
       CODEOWL_MOCK_RUNTIME_LOG: logPath,

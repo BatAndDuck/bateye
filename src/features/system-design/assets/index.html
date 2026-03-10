@@ -26,6 +26,7 @@
     --node-worker: #d97706;
     --node-gateway: #dc2626;
     --node-library: #6b7280;
+    --node-resource: #0f766e;
   }
   body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
   header { padding: 12px 20px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
@@ -61,11 +62,16 @@
   .kind-worker { background: #451a03; color: #fcd34d; }
   .kind-gateway { background: #4c0519; color: #fca5a5; }
   .kind-library { background: #1f2937; color: #9ca3af; }
+  .kind-resource { background: #042f2e; color: #5eead4; }
   .interface-item { padding: 4px 8px; background: var(--surface2); border-radius: 4px; margin-bottom: 4px; font-size: 12px; }
   .interface-type { color: var(--accent-light); font-weight: 600; margin-right: 6px; }
   .entity-item { padding: 4px 8px; background: var(--surface2); border-radius: 4px; margin-bottom: 4px; font-size: 12px; }
-  .submodule-item { padding: 3px 8px; background: var(--surface2); border-radius: 4px; margin-bottom: 3px; font-size: 12px; color: var(--accent-light); display: inline-block; margin-right: 4px; }
-  .integration-item { padding: 4px 8px; background: var(--surface2); border-radius: 4px; margin-bottom: 4px; font-size: 12px; display: flex; align-items: center; gap: 6px; }
+  .submodule-list, .integration-list { display: grid; gap: 8px; }
+  .submodule-item, .integration-item { padding: 8px 10px; background: var(--surface2); border-radius: 6px; font-size: 12px; }
+  .submodule-name, .integration-name { color: var(--text); font-weight: 600; }
+  .submodule-meta, .integration-meta { color: var(--text-muted); font-size: 11px; margin-top: 3px; }
+  .integration-group { margin-bottom: 14px; }
+  .edge-pill { display: inline-block; padding: 2px 6px; border-radius: 999px; background: #ffffff12; color: var(--accent-light); font-size: 10px; margin-left: 6px; }
   .integration-arrow { color: var(--accent-light); font-size: 10px; }
   .complexity-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
   .complexity-track { flex: 1; height: 4px; background: var(--surface2); border-radius: 2px; overflow: hidden; }
@@ -94,7 +100,6 @@
   <h1>🦉 CodeOwl System Design</h1>
   <div class="meta" id="header-meta"></div>
   <div class="arch-tag" id="arch-tag"></div>
-  <div class="score-badge" id="score-badge"></div>
 </header>
 <main>
   <div id="canvas-area">
@@ -120,8 +125,8 @@
     </div>
     <div class="tabs">
       <div class="tab active" onclick="showTab('overview')">Overview</div>
-      <div class="tab" onclick="showTab('interfaces')">Interfaces</div>
-      <div class="tab" onclick="showTab('data')">Data</div>
+      <div class="tab" onclick="showTab('submodules')">Modules</div>
+      <div class="tab" onclick="showTab('integrations')">Integrations</div>
     </div>
     <div id="panel-body">
       <div id="welcome"><div class="icon">🦉</div><p>Click a node to see details</p></div>
@@ -131,7 +136,7 @@
 <div id="summary-bar">
   <div>Services: <span id="svc-count">0</span></div>
   <div id="arch-summary"></div>
-  <div id="strength-preview"></div>
+  <div id="global-summary"></div>
 </div>
 
 <script>
@@ -147,7 +152,7 @@ let currentTab = 'overview';
 
 const KIND_COLORS = {
   service: '#7c3aed', module: '#2563eb', app: '#059669',
-  worker: '#d97706', gateway: '#dc2626', library: '#6b7280'
+  worker: '#d97706', gateway: '#dc2626', library: '#6b7280', resource: '#0f766e'
 };
 
 // Node size range driven by complexityScore (1-10)
@@ -179,16 +184,9 @@ function init() {
   document.getElementById('arch-tag').textContent =
     DATA.metadata.architectureType.replace(/-/g, ' ');
 
-  const score = DATA.metadata.score;
-  const badge = document.getElementById('score-badge');
-  badge.textContent = `Score: ${score}`;
-  badge.className = 'score-badge ' + (score >= 80 ? 'score-a' : score >= 65 ? 'score-b' : score >= 50 ? 'score-c' : 'score-d');
-
   document.getElementById('svc-count').textContent = nodes.length;
   document.getElementById('arch-summary').textContent = DATA.metadata.architectureType.replace(/-/g, ' ');
-  if (DATA.metadata.strengths?.length) {
-    document.getElementById('strength-preview').textContent = '✓ ' + DATA.metadata.strengths[0];
-  }
+  document.getElementById('global-summary').textContent = DATA.metadata.globalSummary || '';
 
   buildLegend();
   layoutNodes();
@@ -392,7 +390,7 @@ function closePanel() {
 function showTab(tab, nodeOverride) {
   currentTab = tab;
   document.querySelectorAll('.tab').forEach((t, i) => {
-    t.classList.toggle('active', ['overview', 'interfaces', 'data'][i] === tab);
+    t.classList.toggle('active', ['overview', 'submodules', 'integrations'][i] === tab);
   });
   const node = nodeOverride || nodes.find(n => n.id === selectedNode);
   if (!node) return;
@@ -402,26 +400,6 @@ function showTab(tab, nodeOverride) {
   const cColor = complexityColor(complexity);
 
   if (tab === 'overview') {
-    // Compute integrations: services that depend ON this node
-    const dependents = edges
-      .filter(e => e.target === node.id)
-      .map(e => nodes.find(n => n.id === e.source)?.label)
-      .filter(Boolean);
-
-    const submodulesHtml = (data.submodules || []).length > 0
-      ? `<h3>Inner Modules</h3><div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px">
-          ${data.submodules.map(s => `<span class="submodule-item">${escHtml(s)}</span>`).join('')}
-        </div>`
-      : '';
-
-    const depsHtml = data.dependencies?.length
-      ? `<ul>${data.dependencies.map(d => `<li>${escHtml(d)}</li>`).join('')}</ul>`
-      : '<p>None</p>';
-
-    const dependentsHtml = dependents.length
-      ? `<ul>${dependents.map(d => `<li>${escHtml(d)}</li>`).join('')}</ul>`
-      : '<p>None</p>';
-
     body.innerHTML = `
       <span class="kind-badge kind-${data.kind}">${data.kind}</span>
       <div class="complexity-bar">
@@ -431,26 +409,22 @@ function showTab(tab, nodeOverride) {
         <span class="complexity-label" style="color:${cColor}">Complexity ${complexity}/10</span>
       </div>
       <h3>Description</h3><p>${escHtml(data.purpose)}</p>
-      ${submodulesHtml}
       <h3>Responsibilities</h3>
       <ul>${(data.responsibilities || []).map(r => `<li>${escHtml(r)}</li>`).join('') || '<li style="color:var(--text-muted)">None</li>'}</ul>
-      <h3>Depends On</h3>${depsHtml}
-      <h3>Used By</h3>${dependentsHtml}
+      <h3>Inner Structure</h3>
+      <p>${(data.submodules || []).length > 0 ? `${data.submodules.length} module(s) detected` : 'No clear submodules detected'}</p>
     `;
-  } else if (tab === 'interfaces') {
+  } else if (tab === 'submodules') {
     body.innerHTML = `
-      <h3>Public Interfaces</h3>
-      ${(data.publicInterfaces || []).length === 0 ? '<p>None detected</p>' :
-        (data.publicInterfaces || []).map(i => `
-          <div class="interface-item">
-            <span class="interface-type">${escHtml(i.type.toUpperCase())}</span>
-            ${escHtml(i.name)}
-            ${i.description ? `<br><span style="color:var(--text-muted);font-size:11px">${escHtml(i.description)}</span>` : ''}
-          </div>`).join('')}
-    `;
-  } else if (tab === 'data') {
-    body.innerHTML = `
-      <h3>Entities & Data</h3>
+      <h3>Inner Modules / Code Services</h3>
+      ${(data.submodules || []).length === 0
+        ? '<p>None detected</p>'
+        : `<div class="submodule-list">${(data.submodules || []).map(module => `
+            <div class="submodule-item">
+              <div class="submodule-name">${escHtml(module)}</div>
+              <div class="submodule-meta">Detected as a structural submodule of ${escHtml(data.name)}</div>
+            </div>`).join('')}</div>`}
+      <h3>Entities</h3>
       ${(data.entities || []).length === 0 ? '<p>None detected</p>' :
         (data.entities || []).map(e => `
           <div class="entity-item">
@@ -459,7 +433,45 @@ function showTab(tab, nodeOverride) {
             ${e.fields?.length ? `<br><span style="color:var(--text-muted);font-size:11px">Fields: ${escHtml(e.fields.join(', '))}</span>` : ''}
           </div>`).join('')}
     `;
+  } else if (tab === 'integrations') {
+    const outbound = edges.filter(e => e.source === node.id);
+    const inbound = edges.filter(e => e.target === node.id);
+    body.innerHTML = `
+      <div class="integration-group">
+        <h3>Outbound Integrations</h3>
+        ${renderIntegrationList(outbound, 'target')}
+      </div>
+      <div class="integration-group">
+        <h3>Inbound Integrations</h3>
+        ${renderIntegrationList(inbound, 'source')}
+      </div>
+      <div class="integration-group">
+        <h3>Public Interfaces</h3>
+        ${(data.publicInterfaces || []).length === 0 ? '<p>None detected</p>' :
+          `<div class="integration-list">${(data.publicInterfaces || []).map(i => `
+            <div class="interface-item">
+              <span class="interface-type">${escHtml(i.type.toUpperCase())}</span>
+              ${escHtml(i.name)}
+              ${i.description ? `<br><span style="color:var(--text-muted);font-size:11px">${escHtml(i.description)}</span>` : ''}
+            </div>`).join('')}</div>`}
+      </div>
+    `;
   }
+}
+
+function renderIntegrationList(edgeList, direction) {
+  if (!edgeList.length) return '<p>None detected</p>';
+
+  return `<div class="integration-list">${edgeList.map(edge => {
+    const otherId = direction === 'target' ? edge.target : edge.source;
+    const otherNode = nodes.find(n => n.id === otherId);
+    if (!otherNode) return '';
+    return `
+      <div class="integration-item">
+        <div class="integration-name">${escHtml(otherNode.label)}<span class="edge-pill">${escHtml(edge.label || edge.type)}</span></div>
+        <div class="integration-meta">${escHtml(otherNode.kind)}</div>
+      </div>`;
+  }).join('')}</div>`;
 }
 
 function escHtml(str) {

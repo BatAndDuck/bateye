@@ -44,12 +44,16 @@ function generateServiceMarkdown(service: import('../../types/index').ServiceDes
 
 **Kind:** ${service.kind}
 **ID:** ${service.serviceId}
+**Complexity:** ${service.complexityScore}/10
 
 ## Purpose
 ${service.purpose}
 
 ## Responsibilities
 ${service.responsibilities.map(r => `- ${r}`).join('\n')}
+
+## Submodules
+${service.submodules.length === 0 ? '_None detected_' : service.submodules.map(module => `- ${module}`).join('\n')}
 
 ## Public Interfaces
 ${service.publicInterfaces.length === 0 ? '_None_' : service.publicInterfaces.map(i => `- **${i.type}** \`${i.name}\`${i.description ? ': ' + i.description : ''}`).join('\n')}
@@ -59,8 +63,5 @@ ${service.dependencies.length === 0 ? '_None_' : service.dependencies.map(d => `
 
 ## Entities / Data
 ${service.entities.length === 0 ? '_None_' : service.entities.map(e => `### ${e.name}${e.description ? '\n' + e.description : ''}${e.fields ? '\n\nFields: ' + e.fields.join(', ') : ''}`).join('\n\n')}
-
-## Risks
-${service.risks.length === 0 ? '_None identified_' : service.risks.map(r => `- ${r}`).join('\n')}
 `;
 }

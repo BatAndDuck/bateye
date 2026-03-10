@@ -10,7 +10,7 @@ Return ONLY this JSON:
 {
   "serviceId": "<kebab-case-id>",
   "name": "<human readable name>",
-  "kind": "<service|module|library|app|worker|gateway>",
+  "kind": "<service|module|library|app|worker|gateway|resource>",
   "purpose": "<one sentence description of what this does>",
   "responsibilities": ["<responsibility 1>", "..."],
   "publicInterfaces": [
@@ -36,6 +36,7 @@ Return ONLY this JSON:
 
 Rules:
 - serviceId must be kebab-case (e.g. "user-service", "auth-module")
+- kind=resource is for infrastructure components such as databases, caches, brokers, storage, or other external runtime resources that are part of the solution architecture
 - List only actual dependencies evident in the code
 - Public interfaces are externally visible APIs, events, or data sources
 - submodules: list inner organizational units visible in the code — CQRS patterns (commands/queries), feature modules, architectural layers (controllers/services/repositories), domain aggregates, or named sub-packages. Leave empty array if no clear inner structure.
@@ -43,10 +44,22 @@ Rules:
 - Risks are architectural or operational concerns`;
 }
 
-export function buildServiceAnalysisUserMessage(serviceName: string, filesContext: string): string {
+export function buildServiceAnalysisUserMessage(
+  serviceName: string,
+  filesContext: string,
+  analysisHints: string[] = []
+): string {
+  const hintsBlock = analysisHints.length > 0
+    ? `## Detected Hints
+
+${analysisHints.map(hint => `- ${hint}`).join('\n')}
+
+`
+    : '';
+
   return `## Service / Module: ${serviceName}
 
-## Source Files
+${hintsBlock}## Source Files
 
 ${filesContext}
 

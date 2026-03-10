@@ -61,7 +61,7 @@ export type PRReviewResult = {
 
 export type ServiceInterfaceType = "http" | "graphql" | "event" | "queue" | "cron" | "db";
 
-export type ServiceKind = "service" | "module" | "library" | "app" | "worker" | "gateway";
+export type ServiceKind = "service" | "module" | "library" | "app" | "worker" | "gateway" | "resource";
 
 export type ServiceDesignDoc = {
   serviceId: string;
