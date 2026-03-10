@@ -1,8 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { RepoFile, RepoIndex, ServiceDesignDoc, ServiceKind, SystemDesignResult } from '../../../types/index';
+import { RepoFile, RepoIndex, ResourceCategory, ServiceDesignDoc, ServiceInterfaceType, ServiceKind, SystemDesignResult } from '../../../types/index';
 import { buildRepoIndex, formatFilesForContext } from '../../../core/indexing/index';
-import { getRuntime } from '../../../core/runtime/factory';
+import { createRuntime, getRuntime } from '../../../core/runtime/factory';
 import { serviceDesignDocSchema, ServiceDoc } from '../../../core/validation/schemas';
 import { buildServiceAnalysisSystemPrompt, buildServiceAnalysisUserMessage } from '../../../core/prompts/system-design';
 import { synthesizeArchitecture } from '../../../core/system-design/synthesizer';
@@ -18,7 +18,7 @@ const SYSTEM_DESIGN_TEMPLATE_CANDIDATES = [
   path.resolve(__dirname, '../../../../src/features/system-design/assets/index.html'),
 ];
 
-const CONTAINER_DIRS = ['packages', 'apps', 'services', 'modules', 'infra', 'infrastructure', 'deploy', 'deployment', 'docker', 'compose'];
+const CONTAINER_DIRS = ['apps', 'services', 'modules', 'infra', 'infrastructure', 'deploy', 'deployment', 'docker', 'compose'];
 const TOP_LEVEL_SERVICE_DIRS = [
   'frontend', 'web', 'client', 'ui', 'mobile', 'admin', 'dashboard',
   'backend', 'api', 'server', 'bff',
@@ -33,6 +33,32 @@ const TOP_LEVEL_SERVICE_DIRS = [
 ];
 const COMMON_SERVICE_PREFIXES = ['apps', 'services', 'packages', 'modules', 'src', 'src/apps', 'src/services', 'src/modules'];
 const RESOURCE_NAME_PATTERN = /(redis|cache|postgres|postgresql|mysql|mariadb|mongo|mongodb|database|db|kafka|rabbitmq|nats|sqs|sns|elastic|opensearch|storage|minio|s3|bucket|queue|broker)/i;
+const SUBMODULE_SEGMENTS = new Set([
+  'api', 'app', 'application', 'components', 'commands', 'queries', 'controllers', 'services', 'repositories',
+  'domain', 'entities', 'models', 'schemas', 'db', 'data', 'workers', 'jobs', 'lib', 'server', 'client',
+  'routes', 'handlers', 'adapters', 'providers', 'features',
+]);
+const ENTITY_STOP_WORDS = new Set(['Props', 'State', 'Config', 'Options', 'Response', 'Request', 'Params']);
+const INTERFACE_LIKE_SUBMODULES = new Set(['health', 'status', 'download', 'upload', 'docs', 'webhooks']);
+const GENERIC_APP_NAMES = new Set(['web', 'web-host', 'frontend', 'client', 'app', 'site', 'portal', 'ui']);
+
+type IntegrationResource = {
+  name: string;
+  description: string;
+  category: ResourceCategory;
+  patterns: RegExp[];
+};
+
+const INTEGRATION_RESOURCES: IntegrationResource[] = [
+  { name: 'clerk', description: 'Authentication and user management provider', category: 'external-saas', patterns: [/@clerk\//i, /\bclerk\b/i] },
+  { name: 'llm', description: 'LLM provider or orchestration layer', category: 'external-api', patterns: [/\bopenai\b/i, /\banthropic\b/i, /\bgemini\b/i, /\bllm\b/i, /langchain/i] },
+  { name: 'dynamodb', description: 'AWS DynamoDB datastore', category: 'database', patterns: [/dynamodb/i, /@aws-sdk\/client-dynamodb/i] },
+  { name: 's3', description: 'AWS S3 object storage', category: 'storage', patterns: [/setup-s3/i, /@aws-sdk\/client-s3/i, /\bs3\b/i] },
+  { name: 'vector-search', description: 'Vector search or embeddings index', category: 'vector-search', patterns: [/vector-search/i, /pinecone/i, /qdrant/i, /weaviate/i] },
+  { name: 'redis', description: 'Redis cache or broker', category: 'cache', patterns: [/\bredis\b/i, /ioredis/i] },
+  { name: 'postgres', description: 'PostgreSQL relational datastore', category: 'database', patterns: [/\bpostgres\b/i, /\bpostgresql\b/i, /\bprisma\b/i, /\bdrizzle\b/i] },
+  { name: 'stripe', description: 'Payments platform', category: 'external-saas', patterns: [/\bstripe\b/i] },
+];
 
 export interface SystemDesignOptions {
   repoPath: string;
@@ -58,7 +84,12 @@ export async function runSystemDesign(
 
   log('Loading configuration...');
   const config = resolveConfig(repoPath);
-  const apiKey = resolveApiKey(config);
+  let apiKey: string | null = null;
+  try {
+    apiKey = resolveApiKey(config);
+  } catch (err) {
+    log(`API key unavailable, continuing with static architecture analysis: ${(err as Error).message}`);
+  }
 
   log('Indexing repository...');
   const index = await buildRepoIndex(repoPath, config);
@@ -68,7 +99,7 @@ export async function runSystemDesign(
   const units = await detectArchitecturalUnits(repoPath, index);
   log(`Detected ${units.length} architectural unit(s): ${units.map(unit => unit.name).join(', ')}`);
 
-  const runtime = await dependencies.getRuntime();
+  const runtime = apiKey ? await resolveSystemDesignRuntime(dependencies, log) : null;
   const services: ServiceDesignDoc[] = [];
 
   for (const unit of units) {
@@ -82,7 +113,9 @@ export async function runSystemDesign(
   const repoStructure = `Top-level directories: ${topLevelDirs.join(', ')}\nTotal files: ${index.totalFiles}`;
 
   log('Synthesizing architecture...');
-  const synthesis = await synthesizeArchitecture(services, repoStructure, config.model, apiKey);
+  const synthesis = apiKey
+    ? await synthesizeArchitecture(services, repoStructure, config.model, apiKey)
+    : synthesizeStaticArchitecture(services, repoStructure);
   const generatedAt = new Date().toISOString();
 
   const result: SystemDesignResult = {
@@ -129,8 +162,23 @@ interface ArchitecturalUnit {
   dirPath: string;
   files: RepoFile[];
   kindHint?: ServiceKind;
+  resourceCategory?: ResourceCategory;
   dependencyHints: string[];
   analysisHints: string[];
+  capabilityHints: string[];
+  integrationHints: ServiceDesignDoc['integrations'];
+  submoduleHints: string[];
+  entityHints: {
+    name: string;
+    description?: string;
+    fields?: string[];
+  }[];
+  interfaceHints: {
+    type: ServiceInterfaceType;
+    name: string;
+    description?: string;
+  }[];
+  purposeHint?: string;
 }
 
 export async function detectArchitecturalUnits(
@@ -145,18 +193,31 @@ export async function detectArchitecturalUnits(
     name: string,
     dirPath: string,
     files: RepoFile[],
-    options: Partial<Pick<ArchitecturalUnit, 'kindHint' | 'dependencyHints' | 'analysisHints'>> = {},
+    options: Partial<Pick<ArchitecturalUnit, 'kindHint' | 'resourceCategory' | 'dependencyHints' | 'analysisHints' | 'capabilityHints' | 'integrationHints' | 'submoduleHints' | 'entityHints' | 'interfaceHints' | 'purposeHint'>> = {},
   ) => {
     const normalizedPath = normalizePath(dirPath);
     const normalizedName = name.trim().toLowerCase();
-    if (files.length > 0 && !usedDirPaths.has(normalizedPath) && !usedNames.has(normalizedName)) {
+    const hasNestedCoverage = units.some(unit =>
+      unit.dirPath === normalizedPath
+      || unit.dirPath.startsWith(normalizedPath + '/')
+      || unit.dirPath.startsWith(normalizedPath + '#')
+    );
+
+    if (files.length > 0 && !usedDirPaths.has(normalizedPath) && !usedNames.has(normalizedName) && !hasNestedCoverage) {
       units.push({
         name,
         dirPath: normalizedPath,
         files,
         kindHint: options.kindHint,
+        resourceCategory: options.resourceCategory,
         dependencyHints: [...new Set(options.dependencyHints || [])],
         analysisHints: [...new Set(options.analysisHints || [])],
+        capabilityHints: dedupeStrings(options.capabilityHints || []),
+        integrationHints: dedupeIntegrations(options.integrationHints || []),
+        submoduleHints: dedupeStrings(options.submoduleHints || []),
+        entityHints: dedupeEntities(options.entityHints || []),
+        interfaceHints: dedupeInterfaces(options.interfaceHints || []),
+        purposeHint: options.purposeHint,
       });
       usedDirPaths.add(normalizedPath);
       usedNames.add(normalizedName);
@@ -168,7 +229,12 @@ export async function detectArchitecturalUnits(
     addUnit(composeUnit.name, composeUnit.dirPath, composeUnit.files, composeUnit);
   }
 
-  // Phase 1: Multi-service container directories.
+  // Phase 1: Package/workspace units. This is the primary monorepo detection path.
+  for (const packageUnit of detectPackageUnits(repoPath, index)) {
+    addUnit(packageUnit.name, packageUnit.dirPath, packageUnit.files, packageUnit);
+  }
+
+  // Phase 2: Multi-service container directories.
   for (const pattern of CONTAINER_DIRS) {
     const patternDir = path.join(repoPath, pattern);
     if (!fs.existsSync(patternDir)) continue;
@@ -184,7 +250,7 @@ export async function detectArchitecturalUnits(
     }
   }
 
-  // Phase 2: Common top-level service/resource directories.
+  // Phase 3: Common top-level service/resource directories.
   for (const dirName of TOP_LEVEL_SERVICE_DIRS) {
     const fullPath = path.join(repoPath, dirName);
     if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isDirectory()) continue;
@@ -195,7 +261,7 @@ export async function detectArchitecturalUnits(
     });
   }
 
-  // Phase 3: Look under src/ and common containers inside src/.
+  // Phase 4: Look under src/ and common containers inside src/.
   for (const parentDir of ['src', 'src/apps', 'src/services', 'src/modules']) {
     const fullPath = path.join(repoPath, parentDir);
     if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isDirectory()) continue;
@@ -228,6 +294,11 @@ export async function detectArchitecturalUnits(
         kindHint: 'app',
         dependencyHints: [],
         analysisHints: ['Fallback to src/ as a single architectural unit'],
+        capabilityHints: [],
+        integrationHints: [],
+        submoduleHints: [],
+        entityHints: [],
+        interfaceHints: [],
       }
       : {
         name: path.basename(repoPath),
@@ -236,24 +307,37 @@ export async function detectArchitecturalUnits(
         kindHint: 'app',
         dependencyHints: [],
         analysisHints: ['Fallback to repository root as a single architectural unit'],
+        capabilityHints: [],
+        integrationHints: [],
+        submoduleHints: [],
+        entityHints: [],
+        interfaceHints: [],
       });
   }
 
-  return units;
+  return enrichArchitecturalUnits(index, units);
 }
 
 async function analyzeUnit(
   unit: ArchitecturalUnit,
   model: string,
-  apiKey: string,
-  runtime: IRuntime,
+  apiKey: string | null,
+  runtime: IRuntime | null,
   log: (msg: string) => void,
 ): Promise<ServiceDesignDoc> {
-  const filesContext = formatFilesForContext(unit.files, 30, 5000);
+  if (!apiKey || !runtime) {
+    return buildStaticServiceDoc(unit);
+  }
+
+  const selectedFiles = selectFilesForAnalysis(unit);
+  const filesContext = formatFilesForContext(selectedFiles, selectedFiles.length, 5000);
   const systemPrompt = buildServiceAnalysisSystemPrompt();
   const analysisHints = [...unit.analysisHints];
   if (unit.kindHint) analysisHints.push(`Suggested kind: ${unit.kindHint}`);
   if (unit.dependencyHints.length > 0) analysisHints.push(`Known integrations: ${unit.dependencyHints.join(', ')}`);
+  if (unit.submoduleHints.length > 0) analysisHints.push(`Likely submodules: ${unit.submoduleHints.join(', ')}`);
+  if (unit.entityHints.length > 0) analysisHints.push(`Likely data models: ${unit.entityHints.map(entity => entity.name).join(', ')}`);
+  if (unit.interfaceHints.length > 0) analysisHints.push(`Likely public interfaces: ${unit.interfaceHints.map(api => `${api.type}:${api.name}`).join(', ')}`);
   const userMessage = buildServiceAnalysisUserMessage(unit.name, filesContext, analysisHints);
 
   try {
@@ -265,8 +349,26 @@ async function analyzeUnit(
     if (unit.kindHint === 'resource' && doc.kind === 'service') {
       doc.kind = 'resource';
     }
+    if (unit.resourceCategory && !doc.resourceCategory) {
+      doc.resourceCategory = unit.resourceCategory;
+    }
     if (unit.dependencyHints.length > 0) {
       doc.dependencies = [...new Set([...doc.dependencies, ...unit.dependencyHints])];
+    }
+    doc.responsibilities = dedupeStrings([...(doc.responsibilities || []), ...buildResponsibilities(unit)]).slice(0, 6);
+    doc.capabilities = dedupeStrings([...unit.capabilityHints, ...(doc.capabilities || [])]).slice(0, 12);
+    doc.integrations = dedupeIntegrations([...unit.integrationHints, ...(doc.integrations || [])]);
+    if (doc.submodules.length === 0 && unit.submoduleHints.length > 0) {
+      doc.submodules = unit.submoduleHints;
+    }
+    if (doc.entities.length === 0 && unit.entityHints.length > 0) {
+      doc.entities = unit.entityHints;
+    }
+    if (doc.publicInterfaces.length === 0 && unit.interfaceHints.length > 0) {
+      doc.publicInterfaces = unit.interfaceHints;
+    }
+    if (!doc.purpose || /service\/module detected from/i.test(doc.purpose)) {
+      doc.purpose = buildFallbackPurpose(unit);
     }
     return doc;
   } catch (err) {
@@ -275,16 +377,95 @@ async function analyzeUnit(
       serviceId: unit.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
       name: unit.name,
       kind: unit.kindHint || 'module',
+      resourceCategory: unit.resourceCategory,
       purpose: buildFallbackPurpose(unit),
-      responsibilities: [],
-      publicInterfaces: [],
+      responsibilities: buildResponsibilities(unit),
+      capabilities: unit.capabilityHints,
+      publicInterfaces: unit.interfaceHints,
+      integrations: unit.integrationHints,
       dependencies: unit.dependencyHints,
-      entities: [],
-      submodules: [],
+      entities: unit.entityHints,
+      submodules: unit.submoduleHints,
       complexityScore: estimateComplexity(unit.files, unit.kindHint),
       risks: [],
     };
   }
+}
+
+function buildStaticServiceDoc(unit: ArchitecturalUnit): ServiceDesignDoc {
+  return {
+    serviceId: unit.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
+    name: unit.name,
+    kind: unit.kindHint || 'module',
+    resourceCategory: unit.resourceCategory,
+    purpose: buildFallbackPurpose(unit),
+    responsibilities: buildResponsibilities(unit),
+    capabilities: unit.capabilityHints,
+    publicInterfaces: unit.interfaceHints,
+    integrations: unit.integrationHints,
+    dependencies: unit.dependencyHints,
+    entities: unit.entityHints,
+    submodules: unit.submoduleHints,
+    complexityScore: estimateComplexity(unit.files, unit.kindHint),
+    risks: [],
+  };
+}
+
+async function resolveSystemDesignRuntime(
+  dependencies: SystemDesignDependencies,
+  log: (msg: string) => void,
+): Promise<IRuntime> {
+  if (dependencies === defaultDependencies) {
+    try {
+      const runtime = await createRuntime('opencode-cli');
+      log('Using OpenCode CLI runtime for deeper system-design research.');
+      return runtime;
+    } catch (err) {
+      log(`OpenCode CLI unavailable, falling back to direct runtime: ${(err as Error).message}`);
+    }
+  }
+
+  return dependencies.getRuntime();
+}
+
+function buildResponsibilities(unit: ArchitecturalUnit): string[] {
+  const responsibilities: string[] = [];
+  const featureSummary = summarizeFeatureHints(unit.submoduleHints);
+  const integrationSummary = summarizeDependencies(unit.dependencyHints);
+
+  if (unit.kindHint === 'app') {
+    responsibilities.push(featureSummary
+      ? `Deliver user-facing flows for ${featureSummary}`
+      : 'Render user-facing screens and client flows');
+  }
+  if (unit.kindHint === 'gateway') {
+    responsibilities.push('Handle API orchestration and server-side request flows');
+    if (unit.interfaceHints.length > 0) {
+      responsibilities.push(`Expose ${unit.interfaceHints.length} HTTP/API interface(s)`);
+    }
+  }
+  if (unit.kindHint === 'worker') responsibilities.push('Run asynchronous or scheduled processing');
+  if (unit.kindHint === 'resource') responsibilities.push('Provide infrastructure capability to other services');
+  if (integrationSummary) responsibilities.push(`Integrate with ${integrationSummary}`);
+  if (unit.entityHints.length > 0) responsibilities.push(`Own or manipulate data models such as ${unit.entityHints.slice(0, 3).map(entity => entity.name).join(', ')}`);
+  return dedupeStrings(responsibilities);
+}
+
+function summarizeFeatureHints(submodules: string[]): string {
+  let cleaned = submodules
+    .map(normalizeSubmoduleLabel)
+    .filter(Boolean);
+
+  if (cleaned.length > 1) {
+    cleaned = cleaned.filter(label => !['App', 'API'].includes(label));
+  }
+
+  return cleaned.slice(0, 3).join(', ');
+}
+
+function summarizeDependencies(dependencies: string[]): string {
+  if (dependencies.length === 0) return '';
+  return dependencies.slice(0, 4).map(humanizeName).join(', ');
 }
 
 function normalizePath(value: string): string {
@@ -299,18 +480,33 @@ function isServiceLikeDir(dirName: string): boolean {
 
 function inferServiceKind(name: string, context = ''): ServiceKind {
   const haystack = `${name} ${context}`.toLowerCase();
-  if (/(frontend|web|client|ui|mobile|admin|dashboard)/.test(haystack)) return 'app';
-  if (/(worker|workers|job|jobs|scheduler|cron|consumer|queue)/.test(haystack)) return 'worker';
-  if (/(gateway|proxy|bff|edge)/.test(haystack)) return 'gateway';
-  if (/(shared|common|lib|libs|utils?)/.test(haystack)) return 'library';
+  if (/(^|[\s/_-])(frontend|web|client|ui|mobile|admin|dashboard)(?=$|[\s/_-])/.test(haystack)) return 'app';
+  if (/(^|[\s/_-])(worker|workers|job|jobs|scheduler|cron|consumer|queue)(?=$|[\s/_-])/.test(haystack)) return 'worker';
+  if (/(^|[\s/_-])(gateway|proxy|bff|edge)(?=$|[\s/_-])/.test(haystack)) return 'gateway';
+  if (/(^|[\s/_-])(shared|common|lib|libs|util|utils)(?=$|[\s/_-])/.test(haystack)) return 'library';
   if (RESOURCE_NAME_PATTERN.test(haystack)) return 'resource';
-  if (/(module|feature|domain)/.test(haystack)) return 'module';
+  if (/(^|[\s/_-])(module|feature|domain)(?=$|[\s/_-])/.test(haystack)) return 'module';
   return 'service';
 }
 
 function buildFallbackPurpose(unit: ArchitecturalUnit): string {
+  if (unit.purposeHint) {
+    return unit.purposeHint;
+  }
   if (unit.kindHint === 'resource') {
-    return `${unit.name} infrastructure resource used by the system.`;
+    const resource = INTEGRATION_RESOURCES.find(candidate => candidate.name === unit.name.toLowerCase());
+    return resource
+      ? `${unit.name} resource: ${resource.description}.`
+      : `${unit.name} infrastructure resource used by the system.`;
+  }
+  if (/\bbff\b/i.test(unit.name) || unit.kindHint === 'gateway') {
+    return `${unit.name} handles backend-for-frontend and API orchestration responsibilities.`;
+  }
+  if (unit.kindHint === 'app') {
+    return `${unit.name} is a user-facing application boundary.`;
+  }
+  if (unit.kindHint === 'worker') {
+    return `${unit.name} runs asynchronous or background processing workflows.`;
   }
   return `${unit.name} service/module detected from ${unit.dirPath}.`;
 }
@@ -328,6 +524,662 @@ function estimateComplexity(files: RepoFile[], kindHint?: ServiceKind): number {
   if (kindHint === 'resource') score = Math.min(score, 4);
 
   return Math.max(1, Math.min(10, score));
+}
+
+function dedupeStrings(values: string[]): string[] {
+  return [...new Set(values.map(value => value.trim()).filter(Boolean))];
+}
+
+function dedupeEntities(values: ArchitecturalUnit['entityHints']): ArchitecturalUnit['entityHints'] {
+  const seen = new Set<string>();
+  const result: ArchitecturalUnit['entityHints'] = [];
+  for (const entity of values) {
+    const key = entity.name.toLowerCase();
+    if (!entity.name || seen.has(key)) continue;
+    seen.add(key);
+    result.push(entity);
+  }
+  return result;
+}
+
+function dedupeInterfaces(values: ArchitecturalUnit['interfaceHints']): ArchitecturalUnit['interfaceHints'] {
+  const seen = new Set<string>();
+  const result: ArchitecturalUnit['interfaceHints'] = [];
+  for (const api of values) {
+    const key = `${api.type}:${api.name}`.toLowerCase();
+    if (!api.name || seen.has(key)) continue;
+    seen.add(key);
+    result.push(api);
+  }
+  return result;
+}
+
+function dedupeIntegrations(values: ArchitecturalUnit['integrationHints']): ArchitecturalUnit['integrationHints'] {
+  const seen = new Set<string>();
+  const result: ArchitecturalUnit['integrationHints'] = [];
+  for (const integration of values) {
+    const key = `${integration.name.toLowerCase()}:${integration.internal}:${integration.category || ''}`;
+    if (!integration.name || seen.has(key)) continue;
+    seen.add(key);
+    result.push({
+      ...integration,
+      description: integration.description.slice(0, 200),
+    });
+  }
+  return result;
+}
+
+function detectPackageUnits(repoPath: string, index: RepoIndex): ArchitecturalUnit[] {
+  const packageFiles = index.files.filter(file =>
+    file.relativePath.endsWith('/package.json') && file.relativePath !== 'package.json'
+  );
+  const units: ArchitecturalUnit[] = [];
+
+  for (const packageFile of packageFiles) {
+    const dirPath = normalizePath(path.posix.dirname(packageFile.relativePath));
+    if (/(^|\/)(e2e|test|tests|spec|specs)(\/|$)/.test(dirPath)) continue;
+    if (dirPath.startsWith('packages/')) continue;
+    const files = index.files.filter(file => file.relativePath.startsWith(dirPath + '/'));
+    if (files.length === 0) continue;
+
+    const manifest = readJson(packageFile.absolutePath);
+    const solutionLabel = deriveSolutionLabel(repoPath, dirPath, manifest);
+    if (manifest && isHybridWebAppPackage(manifest, files, dirPath)) {
+      units.push(...splitHybridWebAppUnit(dirPath, files, solutionLabel));
+      continue;
+    }
+
+    const folderName = path.posix.basename(dirPath);
+      units.push({
+        name: folderName,
+        dirPath,
+        files,
+        kindHint: inferPackageKind(folderName, dirPath, manifest),
+        resourceCategory: undefined,
+        dependencyHints: [],
+        analysisHints: [`Detected from package workspace: ${dirPath}`],
+        capabilityHints: [],
+        integrationHints: [],
+        submoduleHints: [],
+        entityHints: [],
+        interfaceHints: [],
+        purposeHint: inferPackagePurpose(folderName, dirPath, manifest),
+    });
+  }
+
+  return units;
+}
+
+function readJson(filePath: string): Record<string, unknown> | undefined {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+}
+
+function inferPackageKind(name: string, dirPath: string, manifest?: Record<string, unknown>): ServiceKind {
+  const dependencies = JSON.stringify(manifest?.dependencies || {});
+  const devDependencies = JSON.stringify(manifest?.devDependencies || {});
+  const haystack = `${name} ${dirPath} ${dependencies} ${devDependencies}`;
+  if (/\"next\"/.test(haystack)) return 'app';
+  return inferServiceKind(name, haystack);
+}
+
+function inferPackagePurpose(name: string, dirPath: string, manifest?: Record<string, unknown>): string | undefined {
+  const manifestName = typeof manifest?.name === 'string' ? manifest.name : name;
+  const kind = inferPackageKind(name, dirPath, manifest);
+  if (kind === 'app') return `${manifestName} is an application package.`;
+  if (kind === 'library') return `${manifestName} provides shared library capabilities.`;
+  if (kind === 'worker') return `${manifestName} provides background processing or job execution.`;
+  return undefined;
+}
+
+function deriveSolutionLabel(repoPath: string, dirPath: string, manifest?: Record<string, unknown>): string {
+  const folderName = path.posix.basename(dirPath);
+  const manifestName = typeof manifest?.name === 'string'
+    ? manifest.name.replace(/^@[^/]+\//, '')
+    : '';
+  const repoName = path.basename(repoPath);
+
+  const candidate = [folderName, manifestName]
+    .map(value => value.toLowerCase())
+    .find(value => value && !GENERIC_APP_NAMES.has(value))
+    || repoName;
+
+  return humanizeName(candidate);
+}
+
+function humanizeName(value: string): string {
+  const humanized = value
+    .replace(/^@[^/]+\//, '')
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, char => char.toUpperCase());
+
+  return humanized
+    .replace(/\bApi\b/g, 'API')
+    .replace(/\bBff\b/g, 'BFF')
+    .replace(/\bLlm\b/g, 'LLM')
+    .replace(/\bS3\b/g, 'S3')
+    .replace(/\bDynamodb\b/g, 'DynamoDB');
+}
+
+function isHybridWebAppPackage(
+  manifest: Record<string, unknown>,
+  files: RepoFile[],
+  dirPath: string,
+): boolean {
+  const dependencies = JSON.stringify(manifest.dependencies || {});
+  const hasNext = /\"next\"/.test(dependencies) || files.some(file => file.relativePath.startsWith(`${dirPath}/app/`) || file.relativePath.startsWith(`${dirPath}/src/app/`));
+  if (!hasNext) return false;
+
+  const apiFiles = files.filter(file => isApiLikeFile(file.relativePath, dirPath));
+  const uiFiles = files.filter(file => isFrontendLikeFile(file.relativePath, dirPath));
+  return apiFiles.length > 0 && uiFiles.length > 0;
+}
+
+function splitHybridWebAppUnit(dirPath: string, files: RepoFile[], solutionLabel: string): ArchitecturalUnit[] {
+  const frontendName = `${solutionLabel} Frontend`;
+  const bffName = `BFF for ${solutionLabel}`;
+
+  const sharedFiles = files.filter(file =>
+    file.relativePath === `${dirPath}/package.json`
+    || file.relativePath === `${dirPath}/next.config.ts`
+    || file.relativePath === `${dirPath}/next.config.js`
+  );
+  const serverSharedFiles = files.filter(file =>
+    file.relativePath === `${dirPath}/middleware.ts`
+    || file.relativePath === `${dirPath}/instrumentation.ts`
+  );
+  const frontendFiles = mergeFileLists(
+    sharedFiles,
+    files.filter(file => isFrontendLikeFile(file.relativePath, dirPath)),
+  );
+  const bffFiles = mergeFileLists(
+    sharedFiles,
+    serverSharedFiles,
+    files.filter(file => isApiLikeFile(file.relativePath, dirPath)),
+  );
+
+  return [
+    {
+      name: frontendName,
+      dirPath: `${dirPath}#frontend`,
+      files: frontendFiles,
+      kindHint: 'app',
+      resourceCategory: undefined,
+      dependencyHints: [bffName],
+      analysisHints: [`Split from hybrid web app package: ${dirPath}`, 'Focus on user-facing UI, pages, components, and client-side flows'],
+      capabilityHints: [],
+      integrationHints: [{
+        name: bffName,
+        description: `Calls ${bffName} endpoints to load or mutate application data.`.slice(0, 200),
+        internal: true,
+      }],
+      submoduleHints: [],
+      entityHints: [],
+      interfaceHints: [],
+      purposeHint: `${frontendName} is the user-facing web application for ${solutionLabel}.`,
+    },
+    {
+      name: bffName,
+      dirPath: `${dirPath}#bff`,
+      files: bffFiles,
+      kindHint: 'gateway',
+      resourceCategory: undefined,
+      dependencyHints: [],
+      analysisHints: [`Split from hybrid web app package: ${dirPath}`, 'Focus on API routes, server-side orchestration, middleware, and backend-for-frontend behavior'],
+      capabilityHints: [],
+      integrationHints: [],
+      submoduleHints: [],
+      entityHints: [],
+      interfaceHints: inferHttpInterfaces(bffFiles, dirPath),
+      purposeHint: `${bffName} handles API routes, middleware, and backend orchestration for ${solutionLabel}.`,
+    },
+  ];
+}
+
+function mergeFileLists(...groups: RepoFile[][]): RepoFile[] {
+  const files = new Map<string, RepoFile>();
+  for (const group of groups) {
+    for (const file of group) {
+      files.set(file.relativePath, file);
+    }
+  }
+  return [...files.values()];
+}
+
+function isApiLikeFile(relativePath: string, rootDir: string): boolean {
+  const relative = stripUnitPrefix(relativePath, rootDir);
+  return /(^|\/)(app|src\/app|pages|src\/pages)\/api\//.test(relative)
+    || /(^|\/)(server|src\/server)\//.test(relative)
+    || /(^|\/)(middleware|instrumentation)\.(ts|tsx|js|jsx)$/.test(relative)
+    || /(^|\/)(api|routes?)\//.test(relative);
+}
+
+function isFrontendLikeFile(relativePath: string, rootDir: string): boolean {
+  const relative = stripUnitPrefix(relativePath, rootDir);
+  if (isApiLikeFile(relativePath, rootDir)) return false;
+
+  return /(^|\/)(app|src\/app|pages|src\/pages)\//.test(relative)
+    || /(^|\/)(components|src\/components|public|assets)\//.test(relative)
+    || /(^|\/)(layout|page|globals|HomePageClient)\./.test(path.posix.basename(relative));
+}
+
+function stripUnitPrefix(relativePath: string, dirPath: string): string {
+  const physicalRoot = normalizePath(dirPath.split('#')[0]);
+  if (physicalRoot === '.' || !physicalRoot) return relativePath;
+  return relativePath.startsWith(`${physicalRoot}/`)
+    ? relativePath.slice(physicalRoot.length + 1)
+    : relativePath;
+}
+
+function enrichArchitecturalUnits(index: RepoIndex, units: ArchitecturalUnit[]): ArchitecturalUnit[] {
+  const enriched = units.map(unit => {
+    const signals = collectStaticSignals(unit);
+    return {
+      ...unit,
+      dependencyHints: dedupeStrings([...unit.dependencyHints, ...signals.integrations]),
+      analysisHints: dedupeStrings([
+        ...unit.analysisHints,
+        ...(signals.integrations.length > 0 ? [`Static integrations detected: ${signals.integrations.join(', ')}`] : []),
+      ]),
+      capabilityHints: dedupeStrings([...unit.capabilityHints, ...signals.capabilities]),
+      integrationHints: dedupeIntegrations([...unit.integrationHints, ...signals.integrationDetails]),
+      submoduleHints: dedupeStrings([...unit.submoduleHints, ...signals.submodules]),
+      entityHints: dedupeEntities([...unit.entityHints, ...signals.entities]),
+      interfaceHints: dedupeInterfaces([...unit.interfaceHints, ...signals.interfaces]),
+      purposeHint: unit.purposeHint || signals.purposeHint,
+    };
+  });
+
+  const existingNames = new Set(enriched.map(unit => unit.name.toLowerCase()));
+  const inferredResources: ArchitecturalUnit[] = [];
+
+  for (const resource of INTEGRATION_RESOURCES) {
+    if (existingNames.has(resource.name)) continue;
+    const matchedFiles = index.files.filter(file => fileContainsAnyPattern(file, resource.patterns)).slice(0, 20);
+    if (matchedFiles.length === 0) continue;
+
+    inferredResources.push({
+      name: resource.name,
+      dirPath: `inferred-resource/${resource.name}`,
+      files: matchedFiles,
+      kindHint: 'resource',
+      resourceCategory: resource.category,
+      dependencyHints: [],
+      analysisHints: [`Inferred resource from code/package usage`, `Resource description: ${resource.description}`],
+      capabilityHints: [humanizeName(resource.description)],
+      integrationHints: [],
+      submoduleHints: [],
+      entityHints: [],
+      interfaceHints: [],
+      purposeHint: `${resource.name} resource: ${resource.description}.`,
+    });
+    existingNames.add(resource.name);
+  }
+
+  return [...enriched, ...inferredResources];
+}
+
+function collectStaticSignals(unit: ArchitecturalUnit): {
+  integrations: string[];
+  capabilities: string[];
+  integrationDetails: ArchitecturalUnit['integrationHints'];
+  submodules: string[];
+  entities: ArchitecturalUnit['entityHints'];
+  interfaces: ArchitecturalUnit['interfaceHints'];
+  purposeHint?: string;
+} {
+  const integrations = INTEGRATION_RESOURCES
+    .filter(resource => unit.files.some(file => fileContainsAnyPattern(file, resource.patterns)))
+    .map(resource => resource.name);
+
+  const submodules = detectSubmoduleHints(unit);
+  const entities = detectEntityHints(unit.files);
+  const interfaces = inferHttpInterfaces(unit.files, unit.dirPath);
+  const capabilities = detectCapabilityHints(unit, interfaces, submodules);
+  const integrationDetails = buildIntegrationHints(unit, integrations);
+  const purposeHint = inferStaticPurpose({ ...unit, submoduleHints: dedupeStrings([...unit.submoduleHints, ...submodules]) }, integrations, interfaces);
+
+  return { integrations, capabilities, integrationDetails, submodules, entities, interfaces, purposeHint };
+}
+
+function detectSubmoduleHints(unit: ArchitecturalUnit): string[] {
+  const counts = new Map<string, number>();
+
+  for (const file of unit.files) {
+    const relative = stripUnitPrefix(file.relativePath, unit.dirPath);
+    const parts = relative.split('/').slice(0, -1);
+    for (const part of parts) {
+      const normalized = part.toLowerCase();
+      if (isInterfaceLikeSegment(normalized)) continue;
+      if (!SUBMODULE_SEGMENTS.has(normalized) && normalized.length < 4) continue;
+      counts.set(normalized, (counts.get(normalized) || 0) + 1);
+    }
+  }
+
+  return [...counts.entries()]
+    .filter(([, count]) => count >= 2)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([segment]) => normalizeSubmoduleLabel(segment))
+    .filter(Boolean);
+}
+
+function isInterfaceLikeSegment(segment: string): boolean {
+  return !segment
+    || /^\[.+\]$/.test(segment)
+    || INTERFACE_LIKE_SUBMODULES.has(segment)
+    || /^(v\d+|ai|cron)$/.test(segment);
+}
+
+function normalizeSubmoduleLabel(segment: string): string {
+  if (!segment) return '';
+  if (/^\(.+\)$/.test(segment)) {
+    return humanizeName(segment.slice(1, -1));
+  }
+  return humanizeName(segment.replace(/^\[|\]$/g, ''));
+}
+
+function detectEntityHints(files: RepoFile[]): ArchitecturalUnit['entityHints'] {
+  const entities = new Map<string, ArchitecturalUnit['entityHints'][number]>();
+  const likelyEntityFiles = files.filter(file => /(entity|model|schema|types|dto|record|patient|medicine|table|db|data)/i.test(file.relativePath)).slice(0, 30);
+
+  for (const file of likelyEntityFiles) {
+    const content = readFileSafe(file.absolutePath);
+    if (!content) continue;
+
+    const patterns = [
+      /\binterface\s+([A-Z][A-Za-z0-9]+)/g,
+      /\btype\s+([A-Z][A-Za-z0-9]+)\s*=/g,
+      /\bclass\s+([A-Z][A-Za-z0-9]+)/g,
+      /\bmodel\s+([A-Z][A-Za-z0-9]+)/g,
+    ];
+
+    for (const pattern of patterns) {
+      for (const match of content.matchAll(pattern)) {
+        const name = match[1];
+        if (!name || ENTITY_STOP_WORDS.has(name)) continue;
+        entities.set(name, { name });
+      }
+    }
+  }
+
+  return [...entities.values()].slice(0, 12);
+}
+
+function inferHttpInterfaces(files: RepoFile[], dirPath: string): ArchitecturalUnit['interfaceHints'] {
+  const interfaces: ArchitecturalUnit['interfaceHints'] = [];
+
+  for (const file of files) {
+    const relative = stripUnitPrefix(file.relativePath, dirPath);
+    const routeMatch = relative.match(/(?:^|\/)(?:app|src\/app|pages|src\/pages)\/api\/(.+)\/route\.(ts|tsx|js|jsx)$/);
+    if (routeMatch) {
+      interfaces.push({ type: 'http', name: '/' + routeMatch[1].replace(/\/route$/, ''), description: 'Detected API route' });
+      continue;
+    }
+
+    const legacyApiMatch = relative.match(/(?:^|\/)(?:pages|src\/pages)\/api\/(.+)\.(ts|tsx|js|jsx)$/);
+    if (legacyApiMatch) {
+      interfaces.push({ type: 'http', name: '/' + legacyApiMatch[1], description: 'Detected API route' });
+      continue;
+    }
+
+    if (/(^|\/)middleware\.(ts|tsx|js|jsx)$/.test(relative)) {
+      interfaces.push({ type: 'http', name: 'middleware', description: 'HTTP request middleware' });
+    }
+  }
+
+  return dedupeInterfaces(interfaces);
+}
+
+function inferStaticPurpose(
+  unit: ArchitecturalUnit,
+  integrations: string[],
+  interfaces: ArchitecturalUnit['interfaceHints'],
+): string | undefined {
+  const featureSummary = summarizeFeatureHints(unit.submoduleHints);
+  const integrationSummary = summarizeDependencies(integrations);
+  if (unit.kindHint === 'app' && /frontend/i.test(unit.name)) {
+    return `${unit.name} is the user-facing frontend application${featureSummary ? ` for ${featureSummary}` : ''}${integrationSummary ? ` and integrates with ${integrationSummary}` : ''}.`;
+  }
+  if (/\bbff\b/i.test(unit.name) || unit.kindHint === 'gateway') {
+    return `${unit.name} is the backend-for-frontend and API orchestration layer${interfaces.length ? ` exposing ${interfaces.length} interface(s)` : ''}${integrationSummary ? ` and integrating with ${integrationSummary}` : ''}.`;
+  }
+  if (unit.kindHint === 'resource') {
+    return buildFallbackPurpose(unit);
+  }
+  if (interfaces.length > 0) {
+    return `${unit.name} exposes ${interfaces.length} public interface(s) and service logic.`;
+  }
+  return undefined;
+}
+
+function detectCapabilityHints(
+  unit: ArchitecturalUnit,
+  interfaces: ArchitecturalUnit['interfaceHints'],
+  submodules: string[],
+): string[] {
+  const capabilities: string[] = [];
+
+  if (unit.kindHint === 'app') {
+    for (const submodule of submodules.slice(0, 8)) {
+      const capability = capabilityFromFeature(submodule);
+      if (capability) capabilities.push(capability);
+    }
+  }
+
+  for (const api of interfaces) {
+    const capability = capabilityFromInterface(api.name, unit.files);
+    if (capability) capabilities.push(capability);
+  }
+
+  return dedupeStrings(capabilities).slice(0, 12);
+}
+
+function capabilityFromFeature(submodule: string): string {
+  const label = normalizeSubmoduleLabel(submodule);
+  if (!label || ['App', 'API', 'Components', 'Lib', 'Server', 'Client'].includes(label)) return '';
+  if (/dashboard/i.test(label)) return 'Review dashboard summaries and recent activity';
+  if (/patient/i.test(label)) return 'Manage patients and their medical data';
+  if (/record/i.test(label)) return 'Review and manage medical records';
+  if (/medicine/i.test(label)) return 'Manage medicines and treatment details';
+  if (/search/i.test(label)) return 'Search records and clinical information';
+  if (/auth/i.test(label)) return 'Authenticate users and manage signed-in access';
+  if (/settings/i.test(label)) return 'Configure account and workspace settings';
+  if (/legal/i.test(label)) return 'Access legal, compliance, and policy information';
+  if (/attachment/i.test(label)) return 'Manage attachments and supporting documents';
+  if (/onboarding/i.test(label)) return 'Guide users through onboarding and setup';
+  return `Support ${label.toLowerCase()} workflows`;
+}
+
+function capabilityFromInterface(interfaceName: string, files: RepoFile[]): string {
+  if (!interfaceName || interfaceName === 'middleware') return '';
+
+  const normalized = interfaceName.toLowerCase();
+  if (/\/health$/.test(normalized) || /\/docs$/.test(normalized) || /^\/health$/.test(normalized)) return '';
+  const targetFile = files.find(file => normalizedRouteFromPath(file.relativePath).toLowerCase() === normalized);
+  const content = targetFile ? readFileSafe(targetFile.absolutePath) : '';
+  const methods = [...content.matchAll(/export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE)\b/g)]
+    .map(match => match[1].toUpperCase());
+  const segments = normalized
+    .replace(/^\/+/, '')
+    .split('/')
+    .filter(part => part && !part.startsWith('[') && !/^(ai|v\d+|cron)$/.test(part));
+
+  if (segments.length === 0) return '';
+
+  const last = segments[segments.length - 1];
+  const parent = segments[segments.length - 2] || '';
+  const subject = humanizeName(segments.slice(-2).join(' ')).toLowerCase();
+
+  if (segments[0] === 'webhooks' && methods.includes('POST')) {
+    return `Process ${humanizeName(segments[1] || 'external').toLowerCase()} webhooks`;
+  }
+  if (segments.join('/') === 'process-stuck-ai') return 'Process stuck AI jobs';
+  if (segments.join('/') === 'onboarding/status') return 'Check onboarding status';
+  if (segments.join('/') === 'onboarding/clone-test-patient') return 'Clone a test patient for onboarding';
+  if (segments.join('/') === 'dashboard/stats') return 'Review dashboard statistics';
+  if (segments.join('/') === 'chat/conversations') return 'Review chat conversations';
+  if (segments.join('/') === 'subscription/usage') return 'Review subscription usage';
+  if (segments.join('/') === 'search') return 'Search records and related information';
+  if (segments.join('/') === 'auth/me') return 'View the signed-in user profile';
+  if (segments.join('/') === 'auth/users') return methods.includes('GET') ? 'Review users and access assignments' : 'Manage users and access assignments';
+  if (last === 'summarize') return `Summarize ${humanizeName(parent || 'content').toLowerCase()} with AI`;
+  if (last === 'describe') return `Describe ${humanizeName(parent || 'content').toLowerCase()} with AI`;
+  if (last === 'retry-ai') return `Retry AI processing for ${humanizeName(parent || 'records').toLowerCase()}`;
+  if (last === 'upload-url') return `Generate upload URLs for ${humanizeName(parent || 'files').toLowerCase()}`;
+  if (last === 'upload') return `Upload ${humanizeName(parent || 'files').toLowerCase()}`;
+  if (last === 'download' || last === 'download-url') return `Download ${humanizeName(parent || 'files').toLowerCase()}`;
+  if (last === 'stats') return `Review ${humanizeName(parent || 'dashboard').toLowerCase()} statistics`;
+  if (last === 'recent') return `Review recent ${humanizeName(parent || 'items').toLowerCase()}`;
+  if (last === 'usage') return `Review ${humanizeName(parent || 'usage').toLowerCase()}`;
+
+  if (methods.includes('POST')) return `Create or submit ${subject}`;
+  if (methods.includes('DELETE')) return `Delete ${subject}`;
+  if (methods.includes('PATCH') || methods.includes('PUT')) return `Update ${subject}`;
+  if (methods.includes('GET')) return `Read ${subject}`;
+
+  return `Serve ${subject} operations`;
+}
+
+function buildIntegrationHints(
+  unit: ArchitecturalUnit,
+  integrations: string[],
+): ArchitecturalUnit['integrationHints'] {
+  return integrations.map(name => {
+    const resource = INTEGRATION_RESOURCES.find(candidate => candidate.name === name);
+    if (!resource) {
+      return {
+        name,
+        description: `Integrates with ${humanizeName(name)} as part of ${unit.name}.`.slice(0, 200),
+        internal: false,
+      };
+    }
+
+    return {
+      name,
+      description: integrationDescriptionFor(resource),
+      internal: false,
+      category: resource.category,
+    };
+  });
+}
+
+function integrationDescriptionFor(resource: IntegrationResource): string {
+  switch (resource.name) {
+    case 'clerk':
+      return 'Handles authentication, sessions, and user identity flows.';
+    case 'llm':
+      return 'Calls LLM APIs for summaries, chat responses, or other AI-generated outputs.';
+    case 'dynamodb':
+      return 'Stores and queries operational records in DynamoDB.';
+    case 's3':
+      return 'Uploads, stores, and retrieves files or attachments in S3.';
+    case 'vector-search':
+      return 'Indexes embeddings and runs semantic retrieval queries.';
+    case 'redis':
+      return 'Caches transient data or coordinates broker-style workflows.';
+    case 'postgres':
+      return 'Reads and writes relational data in PostgreSQL.';
+    case 'stripe':
+      return 'Handles billing, checkout, subscriptions, or payment webhooks.';
+    default:
+      return `Integrates with ${humanizeName(resource.name)}.`;
+  }
+}
+
+function inferResourceCategory(name: string): ResourceCategory | undefined {
+  const resource = INTEGRATION_RESOURCES.find(candidate => candidate.name === name.toLowerCase());
+  return resource?.category;
+}
+
+function normalizedRouteFromPath(relativePath: string): string {
+  const normalized = normalizePath(relativePath);
+  const routeMatch = normalized.match(/(?:^|\/)(?:app|src\/app|pages|src\/pages)\/api\/(.+)\/route\.(ts|tsx|js|jsx)$/);
+  if (routeMatch) {
+    return '/' + routeMatch[1];
+  }
+
+  const legacyApiMatch = normalized.match(/(?:^|\/)(?:pages|src\/pages)\/api\/(.+)\.(ts|tsx|js|jsx)$/);
+  if (legacyApiMatch) {
+    return '/' + legacyApiMatch[1];
+  }
+
+  return '';
+}
+
+function fileContainsAnyPattern(file: RepoFile, patterns: RegExp[]): boolean {
+  if (patterns.some(pattern => pattern.test(file.relativePath))) {
+    return true;
+  }
+
+  const content = readFileSafe(file.absolutePath);
+  if (!content) return false;
+  return patterns.some(pattern => pattern.test(content));
+}
+
+function readFileSafe(filePath: string): string {
+  try {
+    return fs.readFileSync(filePath, 'utf-8');
+  } catch {
+    return '';
+  }
+}
+
+function selectFilesForAnalysis(unit: ArchitecturalUnit): RepoFile[] {
+  const scored = unit.files.map(file => ({ file, score: scoreFileForAnalysis(file, unit) }))
+    .sort((a, b) => b.score - a.score);
+
+  return scored.slice(0, 48).map(entry => entry.file);
+}
+
+function scoreFileForAnalysis(file: RepoFile, unit: ArchitecturalUnit): number {
+  const relative = stripUnitPrefix(file.relativePath, unit.dirPath).toLowerCase();
+  let score = 1;
+
+  if (/package\.json$/.test(relative)) score += 20;
+  if (/(next\.config|middleware|instrumentation|turbo\.json|docker-compose|compose)/.test(relative)) score += 16;
+  if (/(app\/api|pages\/api|server|route\.(ts|js)|controller|service|repository|handler|worker|job|queue)/.test(relative)) score += 14;
+  if (/(schema|model|entity|table|db|data|record|patient|medicine)/.test(relative)) score += 12;
+  if (/(components|app\/|pages\/|layout|page)/.test(relative)) score += 8;
+  if (/(llm|clerk|auth|search|vector|redis|postgres|dynamodb|s3)/.test(relative)) score += 10;
+  if (/\.d\.ts$/.test(relative)) score -= 5;
+  if (/(dist|build|coverage|\.next|node_modules)\//.test(relative)) score -= 30;
+
+  return score;
+}
+
+function synthesizeStaticArchitecture(
+  services: ServiceDesignDoc[],
+  repoStructure: string,
+): {
+  architectureType: SystemDesignResult['architectureType'];
+  score: number;
+  strengths: string[];
+  weaknesses: string[];
+  globalSummary: string;
+} {
+  const appCount = services.filter(service => service.kind === 'app').length;
+  const gatewayCount = services.filter(service => service.kind === 'gateway').length;
+  const resourceCount = services.filter(service => service.kind === 'resource').length;
+
+  const architectureType = appCount > 0 && (gatewayCount > 0 || resourceCount > 0)
+    ? 'hybrid-service-oriented'
+    : services.length > 1
+      ? 'modular-monolith'
+      : 'monolith';
+
+  return {
+    architectureType,
+    score: 70,
+    strengths: ['Static architecture analysis completed without LLM runtime'],
+    weaknesses: ['Narrative synthesis is heuristically generated'],
+    globalSummary: `Detected ${services.length} architectural unit(s) from repository structure. ${repoStructure}.`,
+  };
 }
 
 function detectComposeUnits(repoPath: string, index: RepoIndex): ArchitecturalUnit[] {
@@ -367,8 +1219,14 @@ function detectComposeUnits(repoPath: string, index: RepoIndex): ArchitecturalUn
         dirPath: buildContext || `${composeFile.relativePath}#${service.name}`,
         files: [...files.values()],
         kindHint,
+        resourceCategory: kindHint === 'resource' ? inferResourceCategory(service.name) : undefined,
         dependencyHints: service.dependsOn,
         analysisHints,
+        capabilityHints: [],
+        integrationHints: [],
+        submoduleHints: [],
+        entityHints: [],
+        interfaceHints: [],
       });
     }
   }
