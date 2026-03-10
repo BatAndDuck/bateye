@@ -8,6 +8,13 @@ export function ensureDir(dirPath: string): void {
   }
 }
 
+function emptyDir(dirPath: string): void {
+  if (!fs.existsSync(dirPath)) return;
+  for (const entry of fs.readdirSync(dirPath)) {
+    fs.rmSync(path.join(dirPath, entry), { recursive: true, force: true });
+  }
+}
+
 export function writeJson(filePath: string, data: unknown): void {
   ensureDir(path.dirname(filePath));
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n', 'utf-8');
@@ -28,12 +35,14 @@ export function writePRReviewResult(outputPath: string, result: PRReviewResult):
 
 export function writeSystemDesignResult(outputDir: string, result: SystemDesignResult): void {
   ensureDir(outputDir);
-  ensureDir(path.join(outputDir, 'services'));
+  const servicesDir = path.join(outputDir, 'services');
+  ensureDir(servicesDir);
+  emptyDir(servicesDir);
   // Write each service
   for (const service of result.services) {
-    writeJson(path.join(outputDir, 'services', `${service.serviceId}.json`), service);
+    writeJson(path.join(servicesDir, `${service.serviceId}.json`), service);
     writeText(
-      path.join(outputDir, 'services', `${service.serviceId}.md`),
+      path.join(servicesDir, `${service.serviceId}.md`),
       generateServiceMarkdown(service)
     );
   }

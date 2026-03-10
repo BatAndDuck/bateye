@@ -46,18 +46,19 @@ type IntegrationResource = {
   name: string;
   description: string;
   category: ResourceCategory;
-  patterns: RegExp[];
+  packages: string[];
+  codePatterns: RegExp[];
 };
 
 const INTEGRATION_RESOURCES: IntegrationResource[] = [
-  { name: 'clerk', description: 'Authentication and user management provider', category: 'external-saas', patterns: [/@clerk\//i, /\bclerk\b/i] },
-  { name: 'llm', description: 'LLM provider or orchestration layer', category: 'external-api', patterns: [/\bopenai\b/i, /\banthropic\b/i, /\bgemini\b/i, /\bllm\b/i, /langchain/i] },
-  { name: 'dynamodb', description: 'AWS DynamoDB datastore', category: 'database', patterns: [/dynamodb/i, /@aws-sdk\/client-dynamodb/i] },
-  { name: 's3', description: 'AWS S3 object storage', category: 'storage', patterns: [/setup-s3/i, /@aws-sdk\/client-s3/i, /\bs3\b/i] },
-  { name: 'vector-search', description: 'Vector search or embeddings index', category: 'vector-search', patterns: [/vector-search/i, /pinecone/i, /qdrant/i, /weaviate/i] },
-  { name: 'redis', description: 'Redis cache or broker', category: 'cache', patterns: [/\bredis\b/i, /ioredis/i] },
-  { name: 'postgres', description: 'PostgreSQL relational datastore', category: 'database', patterns: [/\bpostgres\b/i, /\bpostgresql\b/i, /\bprisma\b/i, /\bdrizzle\b/i] },
-  { name: 'stripe', description: 'Payments platform', category: 'external-saas', patterns: [/\bstripe\b/i] },
+  { name: 'clerk', description: 'Authentication and user management provider', category: 'external-saas', packages: ['@clerk/nextjs', '@clerk/backend', '@clerk/clerk-sdk-node', '@clerk/express'], codePatterns: [/^\s*import\s+.*['"]@clerk\//m, /^\s*(?:const|let|var)\s+.*=\s*require\(['"]@clerk\//m] },
+  { name: 'llm', description: 'LLM provider or orchestration layer', category: 'external-api', packages: ['openai', '@anthropic-ai/sdk', 'anthropic', 'langchain', '@langchain/openai', '@google/generative-ai', 'ollama'], codePatterns: [/^\s*import\s+.*['"]openai['"]/m, /^\s*import\s+.*['"]@anthropic-ai\/sdk['"]/m, /^\s*import\s+.*['"]langchain/m, /\bnew\s+OpenAI\s*\(/, /\bnew\s+Anthropic\s*\(/] },
+  { name: 'dynamodb', description: 'AWS DynamoDB datastore', category: 'database', packages: ['@aws-sdk/client-dynamodb'], codePatterns: [/^\s*import\s+.*['"]@aws-sdk\/client-dynamodb['"]/m, /\bnew\s+DynamoDBClient\s*\(/] },
+  { name: 's3', description: 'AWS S3 object storage', category: 'storage', packages: ['@aws-sdk/client-s3'], codePatterns: [/^\s*import\s+.*['"]@aws-sdk\/client-s3['"]/m, /\bnew\s+S3Client\s*\(/] },
+  { name: 'vector-search', description: 'Vector search or embeddings index', category: 'vector-search', packages: ['@pinecone-database/pinecone', 'pinecone', '@qdrant/js-client-rest', 'weaviate-client', '@weaviate/weaviate-ts-client'], codePatterns: [/^\s*import\s+.*pinecone/m, /^\s*import\s+.*qdrant/m, /^\s*import\s+.*weaviate/m, /\bnew\s+Pinecone\s*\(/, /\bnew\s+QdrantClient\s*\(/, /\bweaviateClient\s*\(/] },
+  { name: 'redis', description: 'Redis cache or broker', category: 'cache', packages: ['redis', 'ioredis'], codePatterns: [/^\s*import\s+.*['"]redis['"]/m, /^\s*import\s+.*['"]ioredis['"]/m, /\bnew\s+Redis\s*\(/] },
+  { name: 'postgres', description: 'PostgreSQL relational datastore', category: 'database', packages: ['pg', 'postgres', '@prisma/client', 'drizzle-orm'], codePatterns: [/^\s*import\s+.*['"]pg['"]/m, /^\s*import\s+.*['"]postgres['"]/m, /^\s*import\s+.*['"]@prisma\/client['"]/m, /^\s*import\s+.*['"]drizzle-orm['"]/m, /\bnew\s+PrismaClient\s*\(/, /postgres:\/\//i] },
+  { name: 'stripe', description: 'Payments platform', category: 'external-saas', packages: ['stripe'], codePatterns: [/^\s*import\s+.*['"]stripe['"]/m, /\bnew\s+Stripe\s*\(/] },
 ];
 
 export interface SystemDesignOptions {
@@ -181,6 +182,18 @@ interface ArchitecturalUnit {
   purposeHint?: string;
 }
 
+interface WorkspacePackageInfo {
+  name: string;
+  dirPath: string;
+  files: RepoFile[];
+  manifestDependencies: Set<string>;
+  importedPackages: Set<string>;
+}
+
+interface WorkspaceContext {
+  packagesByName: Map<string, WorkspacePackageInfo>;
+}
+
 export async function detectArchitecturalUnits(
   repoPath: string,
   index: RepoIndex,
@@ -234,6 +247,8 @@ export async function detectArchitecturalUnits(
     addUnit(packageUnit.name, packageUnit.dirPath, packageUnit.files, packageUnit);
   }
 
+  const hasRootApplicationBoundary = units.some(unit => unit.dirPath === '.' || unit.dirPath.startsWith('.#'));
+
   // Phase 2: Multi-service container directories.
   for (const pattern of CONTAINER_DIRS) {
     const patternDir = path.join(repoPath, pattern);
@@ -263,6 +278,7 @@ export async function detectArchitecturalUnits(
 
   // Phase 4: Look under src/ and common containers inside src/.
   for (const parentDir of ['src', 'src/apps', 'src/services', 'src/modules']) {
+    if (parentDir === 'src' && hasRootApplicationBoundary) continue;
     const fullPath = path.join(repoPath, parentDir);
     if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isDirectory()) continue;
     const subdirs = fs.readdirSync(fullPath)
@@ -571,30 +587,42 @@ function dedupeIntegrations(values: ArchitecturalUnit['integrationHints']): Arch
 
 function detectPackageUnits(repoPath: string, index: RepoIndex): ArchitecturalUnit[] {
   const packageFiles = index.files.filter(file =>
-    file.relativePath.endsWith('/package.json') && file.relativePath !== 'package.json'
+    file.relativePath === 'package.json' || file.relativePath.endsWith('/package.json')
   );
   const units: ArchitecturalUnit[] = [];
+  const hasNestedPackages = packageFiles.some(file => file.relativePath !== 'package.json');
 
   for (const packageFile of packageFiles) {
-    const dirPath = normalizePath(path.posix.dirname(packageFile.relativePath));
+    const dirPath = packageFile.relativePath === 'package.json'
+      ? '.'
+      : normalizePath(path.posix.dirname(packageFile.relativePath));
     if (/(^|\/)(e2e|test|tests|spec|specs)(\/|$)/.test(dirPath)) continue;
     if (dirPath.startsWith('packages/')) continue;
-    const files = index.files.filter(file => file.relativePath.startsWith(dirPath + '/'));
+    const manifest = readJson(packageFile.absolutePath);
+    if (dirPath === '.' && shouldSkipRootPackageManifest(manifest, hasNestedPackages)) continue;
+    const files = dirPath === '.'
+      ? index.files
+      : index.files.filter(file => file.relativePath.startsWith(dirPath + '/'));
     if (files.length === 0) continue;
 
-    const manifest = readJson(packageFile.absolutePath);
     const solutionLabel = deriveSolutionLabel(repoPath, dirPath, manifest);
     if (manifest && isHybridWebAppPackage(manifest, files, dirPath)) {
       units.push(...splitHybridWebAppUnit(dirPath, files, solutionLabel));
       continue;
     }
 
-    const folderName = path.posix.basename(dirPath);
-      units.push({
-        name: folderName,
+    const unitName = dirPath === '.'
+      ? deriveRootApplicationName(repoPath, manifest, files)
+      : path.posix.basename(dirPath);
+    units.push({
+        name: unitName,
         dirPath,
-        files,
-        kindHint: inferPackageKind(folderName, dirPath, manifest),
+        files: dirPath === '.'
+          ? files.filter(isArchitectureRelevantFile)
+          : files,
+        kindHint: dirPath === '.'
+          ? inferRootPackageKind(repoPath, manifest, files)
+          : inferPackageKind(unitName, dirPath, manifest),
         resourceCategory: undefined,
         dependencyHints: [],
         analysisHints: [`Detected from package workspace: ${dirPath}`],
@@ -603,7 +631,9 @@ function detectPackageUnits(repoPath: string, index: RepoIndex): ArchitecturalUn
         submoduleHints: [],
         entityHints: [],
         interfaceHints: [],
-        purposeHint: inferPackagePurpose(folderName, dirPath, manifest),
+        purposeHint: dirPath === '.'
+          ? inferRootPackagePurpose(repoPath, manifest, files)
+          : inferPackagePurpose(unitName, dirPath, manifest),
     });
   }
 
@@ -616,6 +646,86 @@ function readJson(filePath: string): Record<string, unknown> | undefined {
   } catch {
     return undefined;
   }
+}
+
+function shouldSkipRootPackageManifest(
+  manifest: Record<string, unknown> | undefined,
+  hasNestedPackages: boolean,
+): boolean {
+  if (!manifest) return hasNestedPackages;
+  if (!hasNestedPackages) return false;
+  if (isCliLikeManifest(manifest)) return false;
+  if (hasDependency(manifest, 'next')) return false;
+  return hasWorkspaceConfig(manifest);
+}
+
+function deriveRootApplicationName(
+  repoPath: string,
+  manifest: Record<string, unknown> | undefined,
+  files: RepoFile[],
+): string {
+  const solutionLabel = deriveSolutionLabel(repoPath, '.', manifest);
+  return isCliLikeManifest(manifest, files) && !/\bcli\b/i.test(solutionLabel)
+    ? `${solutionLabel} CLI`
+    : solutionLabel;
+}
+
+function inferRootPackageKind(
+  repoPath: string,
+  manifest: Record<string, unknown> | undefined,
+  files: RepoFile[],
+): ServiceKind {
+  const solutionLabel = deriveSolutionLabel(repoPath, '.', manifest);
+  if (isCliLikeManifest(manifest, files)) return 'app';
+  return inferPackageKind(solutionLabel, '.', manifest);
+}
+
+function inferRootPackagePurpose(
+  repoPath: string,
+  manifest: Record<string, unknown> | undefined,
+  files: RepoFile[],
+): string | undefined {
+  const solutionLabel = deriveRootApplicationName(repoPath, manifest, files);
+  if (isCliLikeManifest(manifest, files)) {
+    return `${solutionLabel} is the main command-line application for the repository.`;
+  }
+  return inferPackagePurpose(solutionLabel, '.', manifest);
+}
+
+function isCliLikeManifest(
+  manifest: Record<string, unknown> | undefined,
+  files: RepoFile[] = [],
+): boolean {
+  if (!manifest) return false;
+  const hasBin = typeof manifest.bin === 'string'
+    || (typeof manifest.bin === 'object' && manifest.bin !== null && Object.keys(manifest.bin as Record<string, unknown>).length > 0);
+  return hasBin
+    || hasDependency(manifest, 'commander')
+    || files.some(file => /^src\/(cli|commands)\//.test(file.relativePath));
+}
+
+function hasWorkspaceConfig(manifest: Record<string, unknown>): boolean {
+  return Array.isArray(manifest.workspaces)
+    || (typeof manifest.workspaces === 'object' && manifest.workspaces !== null);
+}
+
+function hasDependency(manifest: Record<string, unknown>, packageName: string): boolean {
+  return collectManifestDependencies(manifest).has(packageName.toLowerCase());
+}
+
+function collectManifestDependencies(manifest: Record<string, unknown> | undefined): Set<string> {
+  const names = new Set<string>();
+  if (!manifest) return names;
+
+  for (const key of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+    const section = manifest[key];
+    if (!section || typeof section !== 'object') continue;
+    for (const name of Object.keys(section as Record<string, unknown>)) {
+      names.add(name.toLowerCase());
+    }
+  }
+
+  return names;
 }
 
 function inferPackageKind(name: string, dirPath: string, manifest?: Record<string, unknown>): ServiceKind {
@@ -636,7 +746,7 @@ function inferPackagePurpose(name: string, dirPath: string, manifest?: Record<st
 }
 
 function deriveSolutionLabel(repoPath: string, dirPath: string, manifest?: Record<string, unknown>): string {
-  const folderName = path.posix.basename(dirPath);
+  const folderName = dirPath === '.' ? '' : path.posix.basename(dirPath);
   const manifestName = typeof manifest?.name === 'string'
     ? manifest.name.replace(/^@[^/]+\//, '')
     : '';
@@ -776,9 +886,16 @@ function stripUnitPrefix(relativePath: string, dirPath: string): string {
     : relativePath;
 }
 
+function isArchitectureRelevantFile(file: RepoFile): boolean {
+  const relativePath = normalizePath(file.relativePath);
+  return !/(^|\/)(test|tests|spec|specs|__tests__|fixtures?|e2e)(\/|$)/.test(relativePath)
+    && !/^\.(codeowl|claude)(\/|$)/.test(relativePath);
+}
+
 function enrichArchitecturalUnits(index: RepoIndex, units: ArchitecturalUnit[]): ArchitecturalUnit[] {
+  const workspaceContext = buildWorkspaceContext(index);
   const enriched = units.map(unit => {
-    const signals = collectStaticSignals(unit);
+    const signals = collectStaticSignals(unit, workspaceContext);
     return {
       ...unit,
       dependencyHints: dedupeStrings([...unit.dependencyHints, ...signals.integrations]),
@@ -800,7 +917,10 @@ function enrichArchitecturalUnits(index: RepoIndex, units: ArchitecturalUnit[]):
 
   for (const resource of INTEGRATION_RESOURCES) {
     if (existingNames.has(resource.name)) continue;
-    const matchedFiles = index.files.filter(file => fileContainsAnyPattern(file, resource.patterns)).slice(0, 20);
+    const matchedFiles = index.files
+      .filter(isArchitectureRelevantFile)
+      .filter(file => fileContainsResourceEvidence(file, resource))
+      .slice(0, 20);
     if (matchedFiles.length === 0) continue;
 
     inferredResources.push({
@@ -824,7 +944,7 @@ function enrichArchitecturalUnits(index: RepoIndex, units: ArchitecturalUnit[]):
   return [...enriched, ...inferredResources];
 }
 
-function collectStaticSignals(unit: ArchitecturalUnit): {
+function collectStaticSignals(unit: ArchitecturalUnit, workspaceContext: WorkspaceContext): {
   integrations: string[];
   capabilities: string[];
   integrationDetails: ArchitecturalUnit['integrationHints'];
@@ -833,18 +953,137 @@ function collectStaticSignals(unit: ArchitecturalUnit): {
   interfaces: ArchitecturalUnit['interfaceHints'];
   purposeHint?: string;
 } {
-  const integrations = INTEGRATION_RESOURCES
-    .filter(resource => unit.files.some(file => fileContainsAnyPattern(file, resource.patterns)))
-    .map(resource => resource.name);
+  const relevantFiles = unit.files.filter(isArchitectureRelevantFile);
+  const integrations = detectUnitIntegrations(unit, relevantFiles, workspaceContext);
 
-  const submodules = detectSubmoduleHints(unit);
-  const entities = detectEntityHints(unit.files);
-  const interfaces = inferHttpInterfaces(unit.files, unit.dirPath);
-  const capabilities = detectCapabilityHints(unit, interfaces, submodules);
+  const staticUnit = { ...unit, files: relevantFiles };
+  const submodules = detectSubmoduleHints(staticUnit);
+  const entities = detectEntityHints(relevantFiles);
+  const interfaces = inferHttpInterfaces(relevantFiles, unit.dirPath);
+  const capabilities = detectCapabilityHints(staticUnit, interfaces, submodules);
   const integrationDetails = buildIntegrationHints(unit, integrations);
-  const purposeHint = inferStaticPurpose({ ...unit, submoduleHints: dedupeStrings([...unit.submoduleHints, ...submodules]) }, integrations, interfaces);
+  const purposeHint = inferStaticPurpose({ ...unit, files: relevantFiles, submoduleHints: dedupeStrings([...unit.submoduleHints, ...submodules]) }, integrations, interfaces);
 
   return { integrations, capabilities, integrationDetails, submodules, entities, interfaces, purposeHint };
+}
+
+function buildWorkspaceContext(index: RepoIndex): WorkspaceContext {
+  const packagesByName = new Map<string, WorkspacePackageInfo>();
+  const packageFiles = index.files.filter(file => /(^|\/)package\.json$/.test(file.relativePath));
+
+  for (const packageFile of packageFiles) {
+    const manifest = readJson(packageFile.absolutePath);
+    if (!manifest || typeof manifest.name !== 'string') continue;
+
+    const dirPath = packageFile.relativePath === 'package.json'
+      ? '.'
+      : normalizePath(path.posix.dirname(packageFile.relativePath));
+    const files = (dirPath === '.'
+      ? index.files
+      : index.files.filter(file => file.relativePath.startsWith(dirPath + '/')))
+      .filter(isArchitectureRelevantFile);
+
+    packagesByName.set(manifest.name, {
+      name: manifest.name,
+      dirPath,
+      files,
+      manifestDependencies: collectManifestDependencies(manifest),
+      importedPackages: collectImportedPackages(files),
+    });
+  }
+
+  return { packagesByName };
+}
+
+function detectUnitIntegrations(
+  unit: ArchitecturalUnit,
+  relevantFiles: RepoFile[],
+  workspaceContext: WorkspaceContext,
+): string[] {
+  const integrations = new Set<string>();
+  const importedPackages = collectImportedPackages(relevantFiles);
+  const useManifestDependencies = !unit.dirPath.includes('#');
+  const allowWorkspaceResourcePropagation = shouldPropagateWorkspaceResources(unit, relevantFiles);
+
+  for (const resource of INTEGRATION_RESOURCES) {
+    if (relevantFiles.some(file => fileContainsResourceCodeEvidence(file, resource))) {
+      integrations.add(resource.name);
+      continue;
+    }
+
+    if (useManifestDependencies && relevantFiles.some(file => fileContainsResourcePackageEvidence(file, resource))) {
+      integrations.add(resource.name);
+    }
+  }
+
+  for (const importedPackage of importedPackages) {
+    const directResource = inferResourceFromPackageName(importedPackage);
+    if (directResource) {
+      integrations.add(directResource);
+      continue;
+    }
+
+    if (!allowWorkspaceResourcePropagation) continue;
+
+    for (const resource of collectWorkspacePackageResources(importedPackage, workspaceContext)) {
+      integrations.add(resource);
+    }
+  }
+
+  return [...integrations];
+}
+
+function shouldPropagateWorkspaceResources(unit: ArchitecturalUnit, relevantFiles: RepoFile[]): boolean {
+  if (unit.kindHint === 'resource') return false;
+  if (unit.kindHint === 'gateway' || unit.kindHint === 'service' || unit.kindHint === 'worker') return true;
+  if (unit.dirPath.endsWith('#bff')) return true;
+  if (unit.dirPath.endsWith('#frontend')) return false;
+  if (unit.kindHint !== 'app') return true;
+
+  return relevantFiles.some(file => {
+    if (isApiLikeFile(file.relativePath, unit.dirPath)) return true;
+    const relative = stripUnitPrefix(file.relativePath, unit.dirPath).toLowerCase();
+    return /(^|\/)(server|src\/server|actions|src\/actions)\//.test(relative)
+      || /(^|\/)(middleware|instrumentation)\.(ts|tsx|js|jsx)$/.test(relative);
+  });
+}
+
+function collectWorkspacePackageResources(
+  packageName: string,
+  workspaceContext: WorkspaceContext,
+  visiting = new Set<string>(),
+): Set<string> {
+  const normalizedName = packageName.toLowerCase();
+  if (visiting.has(normalizedName)) return new Set<string>();
+  const workspacePackage = workspaceContext.packagesByName.get(packageName);
+  if (!workspacePackage) return new Set<string>();
+
+  visiting.add(normalizedName);
+  const resources = new Set<string>();
+
+  for (const resource of INTEGRATION_RESOURCES) {
+    if (workspacePackage.files.some(file => fileContainsResourceCodeEvidence(file, resource))) {
+      resources.add(resource.name);
+    }
+    if (workspacePackage.files.some(file => fileContainsResourcePackageEvidence(file, resource))) {
+      resources.add(resource.name);
+    }
+  }
+
+  for (const dependency of new Set([...workspacePackage.importedPackages, ...workspacePackage.manifestDependencies])) {
+    const directResource = inferResourceFromPackageName(dependency);
+    if (directResource) {
+      resources.add(directResource);
+      continue;
+    }
+
+    for (const nestedResource of collectWorkspacePackageResources(dependency, workspaceContext, visiting)) {
+      resources.add(nestedResource);
+    }
+  }
+
+  visiting.delete(normalizedName);
+  return resources;
 }
 
 function detectSubmoduleHints(unit: ArchitecturalUnit): string[] {
@@ -1112,14 +1351,84 @@ function normalizedRouteFromPath(relativePath: string): string {
   return '';
 }
 
-function fileContainsAnyPattern(file: RepoFile, patterns: RegExp[]): boolean {
-  if (patterns.some(pattern => pattern.test(file.relativePath))) {
-    return true;
+function fileContainsResourceEvidence(file: RepoFile, resource: IntegrationResource): boolean {
+  return fileContainsResourcePackageEvidence(file, resource) || fileContainsResourceCodeEvidence(file, resource);
+}
+
+function fileContainsResourcePackageEvidence(file: RepoFile, resource: IntegrationResource): boolean {
+  if (!/package\.json$/i.test(file.relativePath)) {
+    return false;
+  }
+
+  const manifest = readJson(file.absolutePath);
+  if (!manifest) return false;
+  const dependencies = collectManifestDependencies(manifest);
+  return resource.packages.some(packageName => dependencies.has(packageName.toLowerCase()));
+}
+
+function fileContainsResourceCodeEvidence(file: RepoFile, resource: IntegrationResource): boolean {
+  if (/(\.md|\.html|\.css|\.scss|\.sass|\.less|\.txt)$/i.test(file.relativePath)) {
+    return false;
+  }
+
+  if (/package\.json$/i.test(file.relativePath)) return false;
+
+  if (!/\.(ts|tsx|js|jsx|mjs|cjs|py|rb|go|rs|java|kt|scala|cs|sql|graphql|gql|prisma)$/i.test(file.relativePath)) {
+    return false;
   }
 
   const content = readFileSafe(file.absolutePath);
   if (!content) return false;
-  return patterns.some(pattern => pattern.test(content));
+  return resource.codePatterns.some(pattern => pattern.test(content));
+}
+
+function collectImportedPackages(files: RepoFile[]): Set<string> {
+  const imports = new Set<string>();
+
+  for (const file of files) {
+    if (!/\.(ts|tsx|js|jsx|mjs|cjs)$/i.test(file.relativePath)) continue;
+    const content = readFileSafe(file.absolutePath);
+    if (!content) continue;
+
+    const patterns = [
+      /\bfrom\s+['"]([^'"]+)['"]/g,
+      /\brequire\(\s*['"]([^'"]+)['"]\s*\)/g,
+      /\bimport\(\s*['"]([^'"]+)['"]\s*\)/g,
+    ];
+
+    for (const pattern of patterns) {
+      for (const match of content.matchAll(pattern)) {
+        const packageName = normalizeImportPackageName(match[1]);
+        if (packageName) imports.add(packageName);
+      }
+    }
+  }
+
+  return imports;
+}
+
+function normalizeImportPackageName(specifier: string): string | undefined {
+  if (!specifier || specifier.startsWith('.') || specifier.startsWith('/') || specifier.startsWith('node:')) {
+    return undefined;
+  }
+  if (specifier.startsWith('@/') || specifier.startsWith('~/')) {
+    return undefined;
+  }
+
+  const parts = specifier.split('/');
+  if (specifier.startsWith('@')) {
+    if (parts.length < 2 || parts[0] === '@') return undefined;
+    return `${parts[0]}/${parts[1]}`;
+  }
+
+  return parts[0] || undefined;
+}
+
+function inferResourceFromPackageName(packageName: string): string | undefined {
+  const normalized = packageName.toLowerCase();
+  return INTEGRATION_RESOURCES.find(resource =>
+    resource.packages.some(candidate => candidate.toLowerCase() === normalized)
+  )?.name;
 }
 
 function readFileSafe(filePath: string): string {
