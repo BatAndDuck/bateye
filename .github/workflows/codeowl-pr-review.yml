@@ -74,22 +74,8 @@ jobs:
       - name: Link CodeOwl globally
         run: npm link
 
-      # Create a minimal config if the repo doesn't have one yet.
-      # To customise the model or reviewers, commit a .codeowl/config.json
-      # (see https://github.com/CodeNinjaArea/CodeOwl#configuration).
-      - name: Initialize CodeOwl config (if absent)
-        run: |
-          if [ ! -f .codeowl/config.json ]; then
-            mkdir -p .codeowl
-            cat > .codeowl/config.json << 'EOF'
-          {
-            "model": "google/gemini-3-flash-preview",
-            "fallbackModel": "openai/gpt-5.1-codex-mini",
-            "apiKeyEnvVariable": "CODE_OWL_LLM_MODEL_API_KEY"
-          }
-          EOF
-          fi
-
+      # Model and reviewer config is read from .codeowl/config.json in the repository.
+      # See https://github.com/CodeNinjaArea/CodeOwl#configuration
       - name: Run CodeOwl PR Review
         env:
           CODE_OWL_LLM_MODEL_API_KEY: ${{ secrets.CODE_OWL_LLM_MODEL_API_KEY }}

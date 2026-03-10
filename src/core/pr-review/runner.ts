@@ -34,6 +34,9 @@ export async function runPRReview(options: PRReviewOptions): Promise<PRReviewRes
   // Optional fallback model + key — used when primary is rate-limited
   const fallbackModel = config.fallbackModel;
   const fallbackApiKey = fallbackModel ? process.env['CODE_OWL_LLM_MODEL_API_KEY_FALLBACK'] : undefined;
+  if (fallbackModel && !fallbackApiKey) {
+    console.warn(`Warning: fallbackModel "${fallbackModel}" is configured but CODE_OWL_LLM_MODEL_API_KEY_FALLBACK is not set — fallback will not be used.`);
+  }
 
   const baseRef = options.baseRef || 'origin/main';
   const headRef = options.headRef || 'HEAD';

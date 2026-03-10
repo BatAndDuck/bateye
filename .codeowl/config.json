@@ -1,5 +1,6 @@
 {
   "$schema": "./node_modules/codeowl/schemas/codeowl-config.schema.json",
   "model": "google/gemini-3-flash-preview",
+  "fallbackModel": "openai/gpt-5.1-codex-mini",
   "exclude": ["generated", "vendor"]
 }
