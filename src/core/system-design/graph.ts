@@ -28,6 +28,23 @@ export function buildGraph(result: SystemDesignResult): ArchitectureGraph {
         }
       }
     }
+
+    for (const integration of service.integrations || []) {
+      const targetService = findMatchingIntegrationService(result.services, integration);
+      if (targetService && targetService.serviceId !== service.serviceId) {
+        const edgeId = `${service.serviceId}=>${targetService.serviceId}`;
+        if (!edgeIds.has(edgeId)) {
+          edgeIds.add(edgeId);
+          edges.push({
+            id: edgeId,
+            source: service.serviceId,
+            target: targetService.serviceId,
+            label: integration.category || 'integration',
+            type: inferEdgeType(targetService),
+          });
+        }
+      }
+    }
   }
 
   return {
@@ -40,8 +57,22 @@ export function buildGraph(result: SystemDesignResult): ArchitectureGraph {
       weaknesses: result.weaknesses,
       globalSummary: result.globalSummary,
       generatedAt: result.generatedAt,
+      coverage: result.coverage,
     },
   };
+}
+
+function findMatchingIntegrationService(
+  services: ServiceDesignDoc[],
+  integration: ServiceDesignDoc['integrations'][number],
+): ServiceDesignDoc | undefined {
+  const integrationInstanceAlias = normalizeToken(`${integration.name} ${integration.instanceKey || ''}`);
+  if (integration.instanceKey) {
+    const exact = services.find(service => buildAliases(service).has(integrationInstanceAlias));
+    if (exact) return exact;
+  }
+
+  return findMatchingService(services, integration.name);
 }
 
 function findMatchingService(services: ServiceDesignDoc[], dependency: string): ServiceDesignDoc | undefined {
@@ -70,6 +101,10 @@ function buildAliases(service: ServiceDesignDoc): Set<string> {
   }
   if (/(redis|cache)/.test(name)) ['redis', 'cache'].forEach(alias => aliases.add(alias));
   if (/(kafka|rabbitmq|nats|queue|broker)/.test(name)) ['kafka', 'rabbitmq', 'nats', 'broker'].forEach(alias => aliases.add(alias));
+  for (const integration of service.integrations || []) {
+    const normalized = normalizeToken(integration.name);
+    if (normalized) aliases.add(normalized);
+  }
 
   return aliases;
 }

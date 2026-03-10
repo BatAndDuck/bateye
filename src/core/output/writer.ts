@@ -71,12 +71,18 @@ ${service.submodules.length === 0 ? '_None detected_' : service.submodules.map(m
 ${service.publicInterfaces.length === 0 ? '_None_' : service.publicInterfaces.map(i => `- **${i.type}** \`${i.name}\`${i.description ? ': ' + i.description : ''}`).join('\n')}
 
 ## Integrations
-${service.integrations.length === 0 ? '_None_' : service.integrations.map(i => `- ${i.name}${i.category ? ` [${i.category}]` : ''}: ${i.description}`).join('\n')}
+${service.integrations.length === 0 ? '_None_' : service.integrations.map(i => `- ${i.name}${i.instanceKey ? ` (${i.instanceKey})` : ''}${i.category ? ` [${i.category}]` : ''}: ${i.description}`).join('\n')}
 
 ## Dependencies
 ${service.dependencies.length === 0 ? '_None_' : service.dependencies.map(d => `- ${d}`).join('\n')}
 
 ## Entities / Data
 ${service.entities.length === 0 ? '_None_' : service.entities.map(e => `### ${e.name}${e.description ? '\n' + e.description : ''}${e.fields ? '\n\nFields: ' + e.fields.join(', ') : ''}`).join('\n\n')}
+
+## Evidence
+${service.evidence.filePaths.length === 0 ? '_None_' : service.evidence.filePaths.map(file => `- ${file}`).join('\n')}
+
+## Gaps
+${service.gaps.length === 0 ? '_None_' : service.gaps.map(gap => `- ${gap}`).join('\n')}
 `;
 }

@@ -189,6 +189,28 @@ test('detectArchitecturalUnits assigns library kind to lib directories', async (
   assert.equal(libUnit.kindHint, 'library');
 });
 
+test('detectArchitecturalUnits classifies frontend packages as apps even with data dependencies', async () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-system-design-frontend-'));
+
+  fs.mkdirSync(path.join(repoPath, 'GeoRating.UserPanel', 'src'), { recursive: true });
+  fs.writeFileSync(path.join(repoPath, 'GeoRating.UserPanel', 'package.json'), JSON.stringify({
+    name: 'GeoRating.UserPanel',
+    dependencies: {
+      react: '^18.0.0',
+      'react-dom': '^18.0.0',
+      mongodb: '^6.0.0',
+    },
+  }, null, 2));
+  fs.writeFileSync(path.join(repoPath, 'GeoRating.UserPanel', 'src', 'index.tsx'), 'export const App = () => null;\n');
+
+  const index = await buildRepoIndex(repoPath, { exclude: [] });
+  const units = await detectArchitecturalUnits(repoPath, index);
+
+  const userPanel = units.find(unit => unit.name === 'GeoRating.UserPanel');
+  assert.ok(userPanel);
+  assert.equal(userPanel.kindHint, 'app');
+});
+
 // ── Compose-based detection (from main) ───────────────────────────────────────
 
 test('detectArchitecturalUnits includes compose services and infrastructure resources', async () => {
@@ -235,6 +257,33 @@ services:
   assert.equal(byName.get('postgres').kindHint, 'resource');
   assert.deepEqual(byName.get('api').dependencyHints.sort(), ['postgres', 'redis']);
   assert.deepEqual(byName.get('worker').dependencyHints.sort(), ['redis']);
+});
+
+test('detectArchitecturalUnits classifies dotted compose workers and seq correctly', async () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-system-design-compose-kind-'));
+
+  fs.mkdirSync(path.join(repoPath, 'src', 'GeoRating.Worker'), { recursive: true });
+  fs.writeFileSync(path.join(repoPath, 'src', 'GeoRating.Worker', 'Program.cs'), 'public class Program {}');
+  fs.writeFileSync(path.join(repoPath, 'docker-compose.yml'), `
+services:
+  georating.worker:
+    build: ./src/GeoRating.Worker
+    depends_on:
+      - seq
+  seq:
+    image: datalust/seq:latest
+`);
+
+  const index = await buildRepoIndex(repoPath, { exclude: [] });
+  const units = await detectArchitecturalUnits(repoPath, index);
+
+  const worker = units.find(unit => unit.name === 'georating.worker');
+  const seq = units.find(unit => unit.name === 'seq');
+
+  assert.ok(worker);
+  assert.ok(seq);
+  assert.equal(worker.kindHint, 'worker');
+  assert.equal(seq.kindHint, 'resource');
 });
 
 test('detectArchitecturalUnits splits a hybrid Next.js app into frontend and bff and infers resources', async () => {
