@@ -66,12 +66,25 @@ export async function runPRReview(options: PRReviewOptions): Promise<PRReviewRes
   // Run each reviewer
   const runtime = await getRuntime();
   const allFindings: Finding[] = [];
+  const reviewerErrors: { id: string; name: string; message: string }[] = [];
 
   for (const reviewer of selectedReviewers) {
     log(`Running reviewer: ${reviewer.name}...`);
-    const findings = await runPRReviewer(reviewer, diff, changedFiles, config.model, apiKey, runtime);
-    allFindings.push(...findings);
-    log(`  ✓ ${reviewer.name}: ${findings.length} findings`);
+    try {
+      const findings = await runPRReviewer(reviewer, diff, changedFiles, config.model, apiKey, runtime);
+      allFindings.push(...findings);
+      log(`  ✓ ${reviewer.name}: ${findings.length} findings`);
+    } catch (err) {
+      const message = (err as Error).message;
+      console.warn(`Reviewer ${reviewer.id} failed: ${message}`);
+      reviewerErrors.push({ id: reviewer.id, name: reviewer.name, message });
+    }
+  }
+
+  if (reviewerErrors.length === selectedReviewers.length) {
+    throw new Error(
+      `All reviewers failed. Errors:\n${reviewerErrors.map(e => `  - ${e.name}: ${e.message}`).join('\n')}`
+    );
   }
 
   const result: PRReviewResult = {
@@ -79,7 +92,7 @@ export async function runPRReview(options: PRReviewOptions): Promise<PRReviewRes
     baseRef,
     headRef,
     selectedReviewers: orchestratorResult.selectedReviewers,
-    summary: buildPRSummaryPrompt(allFindings),
+    summary: buildPRSummaryPrompt(allFindings, reviewerErrors),
     findings: allFindings,
     generatedAt: new Date().toISOString(),
   };
@@ -97,6 +110,15 @@ export async function runPRReview(options: PRReviewOptions): Promise<PRReviewRes
   return result;
 }
 
+function is429Error(err: unknown): boolean {
+  const msg = (err as Error).message || '';
+  return msg.includes('429') || msg.toLowerCase().includes('rate limit') || msg.toLowerCase().includes('too many requests');
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function runPRReviewer(
   reviewer: Reviewer,
   diff: string,
@@ -108,20 +130,34 @@ async function runPRReviewer(
   const systemPrompt = buildPRReviewSystemPrompt(reviewer.instructions, reviewer.id, reviewer.name);
   const userMessage = buildPRReviewUserMessage(diff, changedFiles);
 
-  try {
-    const runResult = await runtime.run<ReviewerAnalysis>(
-      { systemPrompt, userMessage, model: reviewer.model || model, apiKey, maxTokens: 8096 },
-      reviewerAnalysisSchema
-    );
-    return runResult.data.findings.map(f => ({
-      ...f,
-      reviewerId: reviewer.id,
-      reviewerName: reviewer.name,
-    }));
-  } catch (err) {
-    console.warn(`Reviewer ${reviewer.id} failed: ${(err as Error).message}`);
-    return [];
+  const maxRetries = 3;
+  const backoffMs = [10000, 30000, 60000];
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const runResult = await runtime.run<ReviewerAnalysis>(
+        { systemPrompt, userMessage, model: reviewer.model || model, apiKey, maxTokens: 8096 },
+        reviewerAnalysisSchema
+      );
+      return runResult.data.findings.map(f => ({
+        ...f,
+        reviewerId: reviewer.id,
+        reviewerName: reviewer.name,
+      }));
+    } catch (err) {
+      const isRateLimit = is429Error(err);
+      if (isRateLimit && attempt < maxRetries) {
+        const waitMs = backoffMs[attempt];
+        console.warn(`Reviewer ${reviewer.id} rate-limited (429), retrying in ${waitMs / 1000}s... (attempt ${attempt + 1}/${maxRetries})`);
+        await sleep(waitMs);
+        continue;
+      }
+      // Throw so the caller can track which reviewers failed
+      throw err;
+    }
   }
+  // Unreachable, but TypeScript needs it
+  return [];
 }
 
 async function postToGitHub(
