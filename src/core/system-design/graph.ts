@@ -81,7 +81,7 @@ function normalizeToken(value: string): string {
 function inferEdgeType(target: ServiceDesignDoc): GraphEdge['type'] {
   const haystack = `${target.name} ${target.serviceId}`.toLowerCase();
 
-  if (target.kind === 'resource' && /(database|db|postgres|mysql|mongo|redis|cache)/.test(haystack)) {
+  if (target.kind === 'resource' && (target.resourceCategory === 'database' || /(database|db|postgres|mysql|mongo|redis|cache)/.test(haystack))) {
     return 'db';
   }
   if (target.kind === 'gateway' || /(api|http|gateway|proxy)/.test(haystack)) {
@@ -95,6 +95,19 @@ function inferEdgeType(target: ServiceDesignDoc): GraphEdge['type'] {
 }
 
 function buildEdgeLabel(target: ServiceDesignDoc): string {
+  if (target.kind === 'resource') {
+    switch (target.resourceCategory) {
+      case 'database': return 'reads/writes';
+      case 'cache': return 'uses cache';
+      case 'queue': return 'publishes/consumes';
+      case 'storage': return 'stores files';
+      case 'vector-search': return 'semantic search';
+      case 'external-saas': return 'integrates';
+      case 'external-api': return 'calls API';
+      case 'internal-platform': return 'uses platform';
+      default: break;
+    }
+  }
   const edgeType = inferEdgeType(target);
   if (edgeType === 'db') return 'reads/writes';
   if (edgeType === 'http') return 'calls';

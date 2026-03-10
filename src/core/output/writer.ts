@@ -43,8 +43,8 @@ function generateServiceMarkdown(service: import('../../types/index').ServiceDes
   return `# ${service.name}
 
 **Kind:** ${service.kind}
-**ID:** ${service.serviceId}
-**Complexity:** ${service.complexityScore}/10
+${service.resourceCategory ? `**Resource Category:** ${service.resourceCategory}\n` : ''}**ID:** ${service.serviceId}
+${service.kind === 'resource' ? '' : `**Complexity:** ${service.complexityScore}/10\n`}
 
 ## Purpose
 ${service.purpose}
@@ -52,11 +52,17 @@ ${service.purpose}
 ## Responsibilities
 ${service.responsibilities.map(r => `- ${r}`).join('\n')}
 
+## Capabilities
+${service.capabilities.length === 0 ? '_None detected_' : service.capabilities.map(capability => `- ${capability}`).join('\n')}
+
 ## Submodules
 ${service.submodules.length === 0 ? '_None detected_' : service.submodules.map(module => `- ${module}`).join('\n')}
 
 ## Public Interfaces
 ${service.publicInterfaces.length === 0 ? '_None_' : service.publicInterfaces.map(i => `- **${i.type}** \`${i.name}\`${i.description ? ': ' + i.description : ''}`).join('\n')}
+
+## Integrations
+${service.integrations.length === 0 ? '_None_' : service.integrations.map(i => `- ${i.name}${i.category ? ` [${i.category}]` : ''}: ${i.description}`).join('\n')}
 
 ## Dependencies
 ${service.dependencies.length === 0 ? '_None_' : service.dependencies.map(d => `- ${d}`).join('\n')}

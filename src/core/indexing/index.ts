@@ -59,11 +59,12 @@ export async function buildRepoIndex(repoPath: string, config: Config): Promise<
   const repoFiles: RepoFile[] = [];
 
   for (const relPath of allFiles) {
+    const normalizedRelPath = relPath.replace(/\\/g, '/');
     // Check gitignore
-    if (ig.ignores(relPath)) continue;
+    if (ig.ignores(normalizedRelPath)) continue;
 
-    const ext = path.extname(relPath).toLowerCase();
-    if (!TEXT_EXTENSIONS.has(ext) && !relPath.includes('Dockerfile')) continue;
+    const ext = path.extname(normalizedRelPath).toLowerCase();
+    if (!TEXT_EXTENSIONS.has(ext) && !normalizedRelPath.includes('Dockerfile')) continue;
 
     const absPath = path.join(repoPath, relPath);
     try {
@@ -71,7 +72,7 @@ export async function buildRepoIndex(repoPath: string, config: Config): Promise<
       if (stat.size > MAX_FILE_SIZE_BYTES) continue;
 
       repoFiles.push({
-        relativePath: relPath,
+        relativePath: normalizedRelPath,
         absolutePath: absPath,
         sizeBytes: stat.size,
         extension: ext,
