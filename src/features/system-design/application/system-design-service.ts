@@ -288,6 +288,10 @@ export async function runSystemDesign(
   return result;
 }
 
+/**
+ * Writes all system design output files to disk and returns the architecture graph.
+ * Produces per-unit JSON docs, graph data, inventory, coverage, architecture summary, and the HTML report.
+ */
 function writeSystemDesignOutputs(
   outputDir: string,
   result: SystemDesignResult,
@@ -380,6 +384,7 @@ function writeSystemDesignOutputs(
   return graph;
 }
 
+/** A detected architectural unit (service, module, or app) with its directory path and enriched analysis hints */
 interface ArchitecturalUnit {
   name: string;
   dirPath: string;
