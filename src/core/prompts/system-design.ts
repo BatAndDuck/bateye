@@ -79,44 +79,183 @@ ${filesContext}
 Analyze this service/module and return the JSON document.`;
 }
 
+export function buildRelevantFileSelectionSystemPrompt(): string {
+  return `You are selecting all repository files relevant to understanding one architectural unit.
+
+Return ONLY valid JSON:
+\`\`\`json
+{
+  "filePaths": ["<relative path>", "..."],
+  "reasons": ["<why additional files were selected>", "..."],
+  "confidence": <0-1>,
+  "gaps": ["<what may still be missing>", "..."]
+}
+\`\`\`
+
+Rules:
+- Prefer recall over brevity: include every file that is plausibly useful for understanding this unit's controllers, frontend, dependencies, integrations, domain models, configuration, infra, and interfaces.
+- You are choosing from the provided repository inventory. Do not invent file paths.
+- Include files outside the obvious unit directory when they materially affect the unit.
+- confidence reflects how complete the selected set appears.`;
+}
+
+export function buildRelevantFileSelectionUserMessage(
+  unitName: string,
+  unitHints: string[],
+  selectedFiles: string[],
+  allRepoFiles: string[],
+): string {
+  return `## Unit
+${unitName}
+
+## Hints
+${unitHints.length > 0 ? unitHints.map(hint => `- ${hint}`).join('\n') : '- No hints'}
+
+## Already Selected Files
+${selectedFiles.length > 0 ? selectedFiles.map(file => `- ${file}`).join('\n') : '- None'}
+
+## Repository Inventory
+${allRepoFiles.map(file => `- ${file}`).join('\n')}
+
+Select every additional relevant file for this unit and return JSON only.`;
+}
+
+export function buildFileSummarySystemPrompt(): string {
+  return `You are analyzing one source file as part of software architecture reconstruction.
+
+Return ONLY valid JSON:
+\`\`\`json
+{
+  "summary": "<1-3 sentence summary of the file's architectural role>",
+  "interfaces": [
+    {
+      "type": "<http|graphql|event|queue|cron|db>",
+      "name": "<interface name>",
+      "description": "<optional>"
+    }
+  ],
+  "integrations": [
+    {
+      "name": "<integration or resource name>",
+      "description": "<short explanation>",
+      "internal": <true|false>,
+      "category": "<optional database|cache|queue|storage|vector-search|external-saas|external-api|internal-platform>",
+      "instanceKey": "<optional stable identifier if this is a distinct instance>"
+    }
+  ],
+  "dependencies": ["<internal dependency>", "..."],
+  "entities": [
+    {
+      "name": "<entity name>",
+      "description": "<optional>",
+      "fields": ["<optional field>", "..."]
+    }
+  ],
+  "submodules": ["<submodule hint>", "..."],
+  "capabilities": ["<capability>", "..."],
+  "importance": <1-10>
+}
+\`\`\`
+
+Rules:
+- Focus on what the file contributes architecturally.
+- Include integrations only when supported by code or config in this file.
+- Use \`instanceKey\` only when the file clearly points to a distinct resource instance or endpoint.
+- Keep descriptions short and concrete.`;
+}
+
+export function buildFileSummaryUserMessage(
+  serviceName: string,
+  filePath: string,
+  fileContent: string,
+  analysisHints: string[] = [],
+): string {
+  const hintsBlock = analysisHints.length > 0
+    ? `## Hints
+
+${analysisHints.map(hint => `- ${hint}`).join('\n')}
+
+`
+    : '';
+
+  return `## Service
+${serviceName}
+
+## File
+${filePath}
+
+${hintsBlock}## Content
+
+${fileContent}
+
+Summarize this file and return JSON only.`;
+}
+
+export function buildServiceSynthesisFromFilesSystemPrompt(): string {
+  return `You are synthesizing one service from per-file architecture summaries.
+
+Return ONLY valid JSON matching the service design document schema already used by the system design command.
+
+Rules:
+- Use the file summaries as the source of truth.
+- Merge duplicate integrations when they refer to the same thing.
+- Keep distinct integration instances separate when instance keys or descriptions indicate they are different.
+- Prefer completeness over brevity.`;
+}
+
+export function buildServiceSynthesisFromFilesUserMessage(
+  serviceName: string,
+  analysisHints: string[],
+  fileSummaries: string,
+): string {
+  const hintsBlock = analysisHints.length > 0
+    ? `## Service Hints
+
+${analysisHints.map(hint => `- ${hint}`).join('\n')}
+
+`
+    : '';
+
+  return `## Service
+${serviceName}
+
+${hintsBlock}## File Summaries
+
+${fileSummaries}
+
+Synthesize the service and return JSON only.`;
+}
+
 export function buildSystemSynthesisSystemPrompt(): string {
   return `You are a software architect synthesizing an overall system architecture analysis.
 
-Given individual service/module analyses, describe the overall system architecture.
-
-## Output Requirements
-
-Return ONLY this JSON:
+Return ONLY valid JSON:
 \`\`\`json
 {
   "architectureType": "<monolith|modular-monolith|distributed-monolith|microservices|hybrid-service-oriented|event-driven-hybrid>",
   "score": <0-100>,
-  "strengths": ["<strength 1>", "..."],
-  "weaknesses": ["<weakness 1>", "..."],
-  "globalSummary": "<2-3 paragraph summary of the architecture>"
+  "strengths": ["<strength>", "..."],
+  "weaknesses": ["<weakness>", "..."],
+  "globalSummary": "<2-3 paragraph summary of the verified architecture and confidence>"
 }
 \`\`\`
 
-Architecture type definitions:
-- monolith: single deployable unit, tightly coupled
-- modular-monolith: single deployment but well-structured modules
-- distributed-monolith: multiple services but tightly coupled
-- microservices: independent services with clear boundaries
-- hybrid-service-oriented: mix of monolith and services
-- event-driven-hybrid: event-driven with some synchronous services
-
-Score: 100 = excellent architecture, 0 = severely problematic`;
+Use the coverage and gaps metadata. Do not hide uncertainty.`;
 }
 
 export function buildSystemSynthesisUserMessage(
   services: import('../../types/index').ServiceDesignDoc[],
-  repoStructure: string
+  repoStructure: string,
+  coverage?: import('../../types/index').SystemDesignResult['coverage'],
 ): string {
   return `## Repository Structure
 ${repoStructure}
 
-## Service Analyses
-${services.map(s => JSON.stringify(s, null, 2)).join('\n\n---\n\n')}
+## Coverage
+${coverage ? JSON.stringify(coverage, null, 2) : 'No coverage data'}
 
-Synthesize the overall architecture and return the JSON result.`;
+## Verified Units
+${services.map(service => JSON.stringify(service, null, 2)).join('\n\n---\n\n')}
+
+Synthesize the overall architecture and return JSON only.`;
 }

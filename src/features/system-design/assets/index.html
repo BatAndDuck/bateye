@@ -27,6 +27,7 @@
     --node-gateway: #dc2626;
     --node-library: #6b7280;
     --node-resource: #0f766e;
+    --node-integration: #0ea5e9;
   }
   body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
   header { padding: 12px 20px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
@@ -139,6 +140,8 @@
 </main>
 <div id="summary-bar">
   <div>Services: <span id="svc-count">0</span></div>
+  <div>Confidence: <span id="coverage-confidence">0%</span></div>
+  <div>Gaps: <span id="coverage-gaps">0</span></div>
   <div id="arch-summary"></div>
   <div id="global-summary"></div>
 </div>
@@ -210,6 +213,10 @@ function init() {
     DATA.metadata.architectureType.replace(/-/g, ' ');
 
   document.getElementById('svc-count').textContent = nodes.length;
+  document.getElementById('coverage-confidence').textContent =
+    `${Math.round(((DATA.metadata.coverage || {}).overallConfidence || 0) * 100)}%`;
+  document.getElementById('coverage-gaps').textContent =
+    ((DATA.metadata.coverage || {}).gaps || []).length;
   document.getElementById('arch-summary').textContent = DATA.metadata.architectureType.replace(/-/g, ' ');
   document.getElementById('global-summary').textContent = DATA.metadata.globalSummary || '';
 

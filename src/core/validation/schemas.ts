@@ -63,6 +63,7 @@ export const serviceDesignDocSchema = z.object({
     name: z.string(),
     description: z.string().max(200),
     internal: z.boolean(),
+    instanceKey: z.string().optional(),
     category: z.enum([
       'database',
       'cache',
@@ -83,6 +84,14 @@ export const serviceDesignDocSchema = z.object({
   submodules: z.array(z.string()),
   complexityScore: z.number().min(1).max(10),
   risks: z.array(z.string()),
+  confidence: z.number().min(0).max(1).default(0.5),
+  evidence: z.object({
+    filePaths: z.array(z.string()),
+    reasons: z.array(z.string()),
+  }).default({ filePaths: [], reasons: [] }),
+  discoverySources: z.array(z.string()).default([]),
+  gaps: z.array(z.string()).default([]),
+  conflicts: z.array(z.string()).default([]),
 });
 
 export const orchestratorResultSchema = z.object({

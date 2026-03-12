@@ -73,6 +73,20 @@ export type ResourceCategory =
   | "external-api"
   | "internal-platform";
 
+export type EvidenceRef = {
+  filePath: string;
+  reason: string;
+  signal?: string;
+};
+
+export type IntegrationRef = {
+  name: string;
+  description: string;
+  internal: boolean;
+  category?: ResourceCategory;
+  instanceKey?: string;
+};
+
 export type ServiceDesignDoc = {
   serviceId: string;
   name: string;
@@ -86,12 +100,7 @@ export type ServiceDesignDoc = {
     name: string;
     description?: string;
   }[];
-  integrations: {
-    name: string;
-    description: string;
-    internal: boolean;
-    category?: ResourceCategory;
-  }[];
+  integrations: IntegrationRef[];
   dependencies: string[];
   entities: {
     name: string;
@@ -101,6 +110,14 @@ export type ServiceDesignDoc = {
   submodules: string[];
   complexityScore: number;
   risks: string[];
+  confidence: number;
+  evidence: {
+    filePaths: string[];
+    reasons: string[];
+  };
+  discoverySources: string[];
+  gaps: string[];
+  conflicts: string[];
 };
 
 export type ArchitectureType =
@@ -120,12 +137,56 @@ export type SystemDesignResult = {
   weaknesses: string[];
   services: ServiceDesignDoc[];
   globalSummary: string;
+  coverage: {
+    overallConfidence: number;
+    gaps: string[];
+    conflicts: string[];
+    unitCoverage: Array<{
+      unitId: string;
+      name: string;
+      confidence: number;
+      seedFileCount: number;
+      selectedFileCount: number;
+      analyzedFileCount: number;
+      retrievalIterations: number;
+      gaps: string[];
+      conflicts: string[];
+    }>;
+  };
   artifacts: {
     htmlReportPath: string;
     graphDataPath: string;
     servicesDir: string;
+    unitsDir: string;
+    inventoryPath: string;
+    coveragePath: string;
+    architecturePath: string;
   };
   generatedAt: string;
+};
+
+export type SystemDesignInventoryUnit = {
+  unitId: string;
+  name: string;
+  kindHint?: ServiceKind;
+  dirPath: string;
+  seedFiles: string[];
+  candidateFiles: string[];
+  selectedFiles: string[];
+  dependencyHints: string[];
+  integrationHints: IntegrationRef[];
+  discoverySources: string[];
+  evidence: EvidenceRef[];
+  confidence: number;
+};
+
+export type SystemDesignInventory = {
+  generatedAt: string;
+  repoPath: string;
+  units: SystemDesignInventoryUnit[];
+  integrations: IntegrationRef[];
+  gaps: string[];
+  conflicts: string[];
 };
 
 export type Config = {
@@ -191,6 +252,7 @@ export type ArchitectureGraph = {
     weaknesses: string[];
     globalSummary: string;
     generatedAt: string;
+    coverage?: SystemDesignResult["coverage"];
   };
 };
 

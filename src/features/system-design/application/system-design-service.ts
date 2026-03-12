@@ -1,21 +1,38 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import execa from 'execa';
+import { z } from 'zod';
 import { RepoFile, RepoIndex, ResourceCategory, ServiceDesignDoc, ServiceInterfaceType, ServiceKind, SystemDesignResult } from '../../../types/index';
-import { buildRepoIndex, formatFilesForContext } from '../../../core/indexing/index';
+import { buildRepoIndex, formatFilesForContext, readFileContent } from '../../../core/indexing/index';
 import { createRuntime, getRuntime } from '../../../core/runtime/factory';
 import { serviceDesignDocSchema, ServiceDoc } from '../../../core/validation/schemas';
-import { buildServiceAnalysisSystemPrompt, buildServiceAnalysisUserMessage } from '../../../core/prompts/system-design';
+import {
+  buildFileSummarySystemPrompt,
+  buildFileSummaryUserMessage,
+  buildRelevantFileSelectionSystemPrompt,
+  buildRelevantFileSelectionUserMessage,
+  buildServiceAnalysisSystemPrompt,
+  buildServiceAnalysisUserMessage,
+  buildServiceSynthesisFromFilesSystemPrompt,
+  buildServiceSynthesisFromFilesUserMessage,
+} from '../../../core/prompts/system-design';
 import { synthesizeArchitecture } from '../../../core/system-design/synthesizer';
 import { buildGraph } from '../../../core/system-design/graph';
 import { ensureDir, writeJson, writeSystemDesignResult, writeText } from '../../../core/output/writer';
 import { SYSTEM_DESIGN_OUTPUT_DIR } from '../../../core/config/defaults';
 import { listTopLevelDirs } from '../../../core/git/index';
-import { IRuntime } from '../../../core/runtime/interface';
+import { IRuntime, RunResult } from '../../../core/runtime/interface';
 import { resolveApiKey, resolveConfig } from '../../config/application/config-service';
 
 const SYSTEM_DESIGN_TEMPLATE_CANDIDATES = [
   path.resolve(__dirname, '../assets/index.html'),
   path.resolve(__dirname, '../../../../src/features/system-design/assets/index.html'),
+];
+const DEPENDENCY_CRUISER_BIN_CANDIDATES = [
+  path.resolve(__dirname, '../../../../node_modules/.bin/depcruise.cmd'),
+  path.resolve(__dirname, '../../../../node_modules/.bin/depcruise'),
+  path.resolve(process.cwd(), 'node_modules/.bin/depcruise.cmd'),
+  path.resolve(process.cwd(), 'node_modules/.bin/depcruise'),
 ];
 
 const CONTAINER_DIRS = ['apps', 'services', 'modules', 'infra', 'infrastructure', 'deploy', 'deployment', 'docker', 'compose'];
@@ -58,6 +75,10 @@ const INTEGRATION_RESOURCES: IntegrationResource[] = [
   { name: 'vector-search', description: 'Vector search or embeddings index', category: 'vector-search', packages: ['@pinecone-database/pinecone', 'pinecone', '@qdrant/js-client-rest', 'weaviate-client', '@weaviate/weaviate-ts-client'], codePatterns: [/^\s*import\s+.*pinecone/m, /^\s*import\s+.*qdrant/m, /^\s*import\s+.*weaviate/m, /\bnew\s+Pinecone\s*\(/, /\bnew\s+QdrantClient\s*\(/, /\bweaviateClient\s*\(/] },
   { name: 'redis', description: 'Redis cache or broker', category: 'cache', packages: ['redis', 'ioredis'], codePatterns: [/^\s*import\s+.*['"]redis['"]/m, /^\s*import\s+.*['"]ioredis['"]/m, /\bnew\s+Redis\s*\(/] },
   { name: 'postgres', description: 'PostgreSQL relational datastore', category: 'database', packages: ['pg', 'postgres', '@prisma/client', 'drizzle-orm'], codePatterns: [/^\s*import\s+.*['"]pg['"]/m, /^\s*import\s+.*['"]postgres['"]/m, /^\s*import\s+.*['"]@prisma\/client['"]/m, /^\s*import\s+.*['"]drizzle-orm['"]/m, /\bnew\s+PrismaClient\s*\(/, /postgres:\/\//i] },
+  { name: 'mongo', description: 'MongoDB document datastore', category: 'database', packages: ['mongodb', 'mongoose'], codePatterns: [/^\s*import\s+.*['"]mongodb['"]/m, /^\s*import\s+.*['"]mongoose['"]/m, /mongodb:\/\//i] },
+  { name: 'azure.storage', description: 'Azure Storage or Azurite blob/queue storage', category: 'storage', packages: ['@azure/storage-blob', '@azure/storage-queue'], codePatterns: [/^\s*import\s+.*@azure\/storage-(blob|queue)/m, /DefaultEndpointsProtocol=https;AccountName=/i] },
+  { name: 'mongo-express', description: 'MongoDB administrative UI', category: 'internal-platform', packages: [], codePatterns: [] },
+  { name: 'seq', description: 'Structured log aggregation and search service', category: 'internal-platform', packages: [], codePatterns: [] },
   { name: 'stripe', description: 'Payments platform', category: 'external-saas', packages: ['stripe'], codePatterns: [/^\s*import\s+.*['"]stripe['"]/m, /\bnew\s+Stripe\s*\(/] },
 ];
 
@@ -74,6 +95,109 @@ export interface SystemDesignDependencies {
 const defaultDependencies: SystemDesignDependencies = {
   getRuntime,
 };
+
+const relevantFileSelectionSchema = z.object({
+  filePaths: z.array(z.string()),
+  reasons: z.array(z.string()).default([]),
+  confidence: z.number().min(0).max(1).default(0.5),
+  gaps: z.array(z.string()).default([]),
+});
+
+const fileSummarySchema = z.object({
+  summary: z.string(),
+  interfaces: z.array(z.object({
+    type: z.enum(['http', 'graphql', 'event', 'queue', 'cron', 'db']),
+    name: z.string(),
+    description: z.string().optional(),
+  })).default([]),
+  integrations: z.array(z.object({
+    name: z.string(),
+    description: z.string().max(200),
+    internal: z.boolean(),
+    category: z.enum([
+      'database',
+      'cache',
+      'queue',
+      'storage',
+      'vector-search',
+      'external-saas',
+      'external-api',
+      'internal-platform',
+    ]).optional(),
+    instanceKey: z.string().optional(),
+  })).default([]),
+  dependencies: z.array(z.string()).default([]),
+  entities: z.array(z.object({
+    name: z.string(),
+    description: z.string().optional(),
+    fields: z.array(z.string()).optional(),
+  })).default([]),
+  submodules: z.array(z.string()).default([]),
+  capabilities: z.array(z.string()).default([]),
+  importance: z.number().int().min(1).max(10).default(5),
+});
+
+type FileSummary = z.infer<typeof fileSummarySchema> & {
+  filePath: string;
+};
+
+type RelevantFileSelectionResult = {
+  seedFiles: RepoFile[];
+  candidateFiles: RepoFile[];
+  selectedFiles: RepoFile[];
+  retrievalIterations: number;
+  confidence: number;
+  reasons: string[];
+  gaps: string[];
+  dependencyCruiser: DependencyCruiserInsights | null;
+};
+
+type UnitAnalysisResult = {
+  service: ServiceDesignDoc;
+  seedFiles: string[];
+  candidateFiles: string[];
+  selectedFiles: string[];
+  fileSummaries: FileSummary[];
+  retrievalIterations: number;
+  selectionConfidence: number;
+  selectionReasons: string[];
+  dependencyCruiser: DependencyCruiserInsights | null;
+};
+
+type DependencyCruiserEdge = {
+  sourcePath: string;
+  targetPath: string;
+};
+
+type DependencyCruiserInsights = {
+  reachableFiles: RepoFile[];
+  importEdges: DependencyCruiserEdge[];
+  npmPackages: string[];
+  integrations: ServiceDesignDoc['integrations'];
+  warnings: string[];
+};
+
+type DependencyCruiserReport = {
+  modules?: Array<{
+    source: string;
+    dependencies?: Array<{
+      module?: string;
+      resolved?: string;
+      dependencyTypes?: string[];
+      coreModule?: boolean;
+      couldNotResolve?: boolean;
+    }>;
+  }>;
+};
+
+type AIRuntimeContext = {
+  apiKey: string | null;
+  runtime: IRuntime | null;
+  enabled: boolean;
+  authFailureMessage?: string;
+};
+
+const dependencyCruiserCache = new Map<string, Promise<DependencyCruiserInsights | null>>();
 
 export async function runSystemDesign(
   options: SystemDesignOptions,
@@ -101,21 +225,37 @@ export async function runSystemDesign(
   log(`Detected ${units.length} architectural unit(s): ${units.map(unit => unit.name).join(', ')}`);
 
   const runtime = apiKey ? await resolveSystemDesignRuntime(dependencies, log) : null;
+  const aiContext: AIRuntimeContext = {
+    apiKey,
+    runtime,
+    enabled: Boolean(apiKey && runtime),
+  };
   const services: ServiceDesignDoc[] = [];
+  const unitAnalyses: UnitAnalysisResult[] = [];
 
   for (const unit of units) {
     log(`Analyzing: ${unit.name}...`);
-    const serviceDoc = await analyzeUnit(unit, config.model, apiKey, runtime, log);
-    services.push(serviceDoc);
-    log(`  ✓ ${unit.name}: ${serviceDoc.kind}`);
+    const analysis = await analyzeUnit(unit, index, config.model, aiContext, log);
+    services.push(analysis.service);
+    unitAnalyses.push(analysis);
+    log(`  ✓ ${unit.name}: ${analysis.service.kind} from ${analysis.fileSummaries.length} file summary(ies)`);
+  }
+
+  reconcileServiceConnections(services, unitAnalyses, index);
+  const coverage = buildCoverageSummary(unitAnalyses, services);
+  const integrationServices = buildIntegrationServices(services);
+  for (const integrationService of integrationServices) {
+    if (!services.some(service => service.serviceId === integrationService.serviceId)) {
+      services.push(integrationService);
+    }
   }
 
   const topLevelDirs = await listTopLevelDirs(repoPath);
   const repoStructure = `Top-level directories: ${topLevelDirs.join(', ')}\nTotal files: ${index.totalFiles}`;
 
   log('Synthesizing architecture...');
-  const synthesis = apiKey
-    ? await synthesizeArchitecture(services, repoStructure, config.model, apiKey)
+  const synthesis = aiContext.enabled && aiContext.apiKey
+    ? await synthesizeArchitecture(services, repoStructure, config.model, aiContext.apiKey, coverage)
     : synthesizeStaticArchitecture(services, repoStructure);
   const generatedAt = new Date().toISOString();
 
@@ -128,10 +268,15 @@ export async function runSystemDesign(
     weaknesses: synthesis.weaknesses,
     services,
     globalSummary: synthesis.globalSummary,
+    coverage,
     artifacts: {
       htmlReportPath: path.join(outputDir, 'index.html'),
       graphDataPath: path.join(outputDir, 'graph.json'),
       servicesDir: path.join(outputDir, 'services'),
+      unitsDir: path.join(outputDir, 'units'),
+      inventoryPath: path.join(outputDir, 'inventory.json'),
+      coveragePath: path.join(outputDir, 'coverage.json'),
+      architecturePath: path.join(outputDir, 'architecture.json'),
     },
     generatedAt,
   };
@@ -139,9 +284,72 @@ export async function runSystemDesign(
   log('Writing output files...');
   ensureDir(outputDir);
   writeSystemDesignResult(outputDir, result);
+  ensureDir(result.artifacts.unitsDir);
+
+  for (const analysis of unitAnalyses) {
+    writeJson(path.join(result.artifacts.unitsDir, `${analysis.service.serviceId}.json`), {
+      serviceId: analysis.service.serviceId,
+      name: analysis.service.name,
+      kind: analysis.service.kind,
+      seedFiles: analysis.seedFiles,
+      candidateFiles: analysis.candidateFiles,
+      selectedFiles: analysis.selectedFiles,
+      fileSummaries: analysis.fileSummaries,
+      integrations: analysis.service.integrations,
+      dependencies: analysis.service.dependencies,
+      publicInterfaces: analysis.service.publicInterfaces,
+      confidence: analysis.service.confidence,
+      selectionConfidence: analysis.selectionConfidence,
+      selectionReasons: analysis.selectionReasons,
+      retrievalIterations: analysis.retrievalIterations,
+      dependencyCruiser: analysis.dependencyCruiser
+        ? {
+          reachableFiles: analysis.dependencyCruiser.reachableFiles.map(file => file.relativePath),
+          npmPackages: analysis.dependencyCruiser.npmPackages,
+          importEdges: analysis.dependencyCruiser.importEdges,
+          integrations: analysis.dependencyCruiser.integrations,
+          warnings: analysis.dependencyCruiser.warnings,
+        }
+        : null,
+      gaps: analysis.service.gaps,
+      conflicts: analysis.service.conflicts,
+    });
+  }
 
   const graph = buildGraph(result);
   writeJson(path.join(outputDir, 'graph.json'), graph);
+  writeJson(result.artifacts.coveragePath, coverage);
+  writeJson(result.artifacts.inventoryPath, {
+    generatedAt,
+    repoPath: result.repoPath,
+    units: unitAnalyses.map(analysis => ({
+      unitId: analysis.service.serviceId,
+      name: analysis.service.name,
+      kindHint: analysis.service.kind,
+      dirPath: units.find(unit => unit.name === analysis.service.name)?.dirPath || analysis.service.serviceId,
+      seedFiles: analysis.seedFiles,
+      candidateFiles: analysis.candidateFiles,
+      selectedFiles: analysis.selectedFiles,
+      dependencyHints: analysis.service.dependencies,
+      integrationHints: analysis.service.integrations,
+      discoverySources: analysis.service.discoverySources,
+      evidence: analysis.fileSummaries.map(summary => ({ filePath: summary.filePath, reason: summary.summary })),
+      confidence: analysis.service.confidence,
+    })),
+    integrations: services.flatMap(service => service.integrations.filter(integration => !integration.internal)),
+    gaps: coverage.gaps,
+    conflicts: coverage.conflicts,
+  });
+  writeJson(result.artifacts.architecturePath, {
+    architectureType: result.architectureType,
+    score: result.score,
+    strengths: result.strengths,
+    weaknesses: result.weaknesses,
+    globalSummary: result.globalSummary,
+    coverage,
+    services,
+    generatedAt,
+  });
   writeJson(path.join(outputDir, 'summary.json'), {
     architectureType: result.architectureType,
     score: result.score,
@@ -149,6 +357,7 @@ export async function runSystemDesign(
     weaknesses: result.weaknesses,
     globalSummary: result.globalSummary,
     serviceCount: services.length,
+    coverage,
     generatedAt,
   });
 
@@ -336,80 +545,35 @@ export async function detectArchitecturalUnits(
 
 async function analyzeUnit(
   unit: ArchitecturalUnit,
+  index: RepoIndex,
   model: string,
-  apiKey: string | null,
-  runtime: IRuntime | null,
+  aiContext: AIRuntimeContext,
   log: (msg: string) => void,
-): Promise<ServiceDesignDoc> {
-  if (!apiKey || !runtime) {
-    return buildStaticServiceDoc(unit);
-  }
+): Promise<UnitAnalysisResult> {
+  const selection = await selectRelevantFilesForUnit(unit, index, model, aiContext, log);
+  const fileSummaries = await summarizeSelectedFiles(unit, selection.selectedFiles, model, aiContext, log);
+  const synthesized = await synthesizeServiceFromFileSummaries(unit, fileSummaries, model, aiContext, log);
+  const service = enrichServiceDocFromFileSummaries(unit, synthesized, selection, fileSummaries);
 
-  const selectedFiles = selectFilesForAnalysis(unit);
-  const filesContext = formatFilesForContext(selectedFiles, selectedFiles.length, 5000);
-  const systemPrompt = buildServiceAnalysisSystemPrompt();
-  const analysisHints = [...unit.analysisHints];
-  if (unit.kindHint) analysisHints.push(`Suggested kind: ${unit.kindHint}`);
-  if (unit.dependencyHints.length > 0) analysisHints.push(`Known integrations: ${unit.dependencyHints.join(', ')}`);
-  if (unit.submoduleHints.length > 0) analysisHints.push(`Likely submodules: ${unit.submoduleHints.join(', ')}`);
-  if (unit.entityHints.length > 0) analysisHints.push(`Likely data models: ${unit.entityHints.map(entity => entity.name).join(', ')}`);
-  if (unit.interfaceHints.length > 0) analysisHints.push(`Likely public interfaces: ${unit.interfaceHints.map(api => `${api.type}:${api.name}`).join(', ')}`);
-  const userMessage = buildServiceAnalysisUserMessage(unit.name, filesContext, analysisHints);
-
-  try {
-    const result = await runtime.run<ServiceDoc>(
-      { systemPrompt, userMessage, model, apiKey, maxTokens: 4096 },
-      serviceDesignDocSchema,
-    );
-    const doc = result.data as ServiceDesignDoc;
-    if (unit.kindHint === 'resource' && doc.kind === 'service') {
-      doc.kind = 'resource';
-    }
-    if (unit.resourceCategory && !doc.resourceCategory) {
-      doc.resourceCategory = unit.resourceCategory;
-    }
-    if (unit.dependencyHints.length > 0) {
-      doc.dependencies = [...new Set([...doc.dependencies, ...unit.dependencyHints])];
-    }
-    doc.responsibilities = dedupeStrings([...(doc.responsibilities || []), ...buildResponsibilities(unit)]).slice(0, 6);
-    doc.capabilities = dedupeStrings([...unit.capabilityHints, ...(doc.capabilities || [])]).slice(0, 12);
-    doc.integrations = dedupeIntegrations([...unit.integrationHints, ...(doc.integrations || [])]);
-    if (doc.submodules.length === 0 && unit.submoduleHints.length > 0) {
-      doc.submodules = unit.submoduleHints;
-    }
-    if (doc.entities.length === 0 && unit.entityHints.length > 0) {
-      doc.entities = unit.entityHints;
-    }
-    if (doc.publicInterfaces.length === 0 && unit.interfaceHints.length > 0) {
-      doc.publicInterfaces = unit.interfaceHints;
-    }
-    if (!doc.purpose || /service\/module detected from/i.test(doc.purpose)) {
-      doc.purpose = buildFallbackPurpose(unit);
-    }
-    return doc;
-  } catch (err) {
-    log(`  Warning: Analysis failed for ${unit.name}: ${(err as Error).message}`);
-    return {
-      serviceId: unit.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-      name: unit.name,
-      kind: unit.kindHint || 'module',
-      resourceCategory: unit.resourceCategory,
-      purpose: buildFallbackPurpose(unit),
-      responsibilities: buildResponsibilities(unit),
-      capabilities: unit.capabilityHints,
-      publicInterfaces: unit.interfaceHints,
-      integrations: unit.integrationHints,
-      dependencies: unit.dependencyHints,
-      entities: unit.entityHints,
-      submodules: unit.submoduleHints,
-      complexityScore: estimateComplexity(unit.files, unit.kindHint),
-      risks: [],
-    };
-  }
+  return {
+    service,
+    seedFiles: selection.seedFiles.map(file => file.relativePath),
+    candidateFiles: selection.candidateFiles.map(file => file.relativePath),
+    selectedFiles: selection.selectedFiles.map(file => file.relativePath),
+    fileSummaries,
+    retrievalIterations: selection.retrievalIterations,
+    selectionConfidence: selection.confidence,
+    selectionReasons: selection.reasons,
+    dependencyCruiser: selection.dependencyCruiser,
+  };
 }
 
-function buildStaticServiceDoc(unit: ArchitecturalUnit): ServiceDesignDoc {
-  return {
+function buildStaticServiceDoc(unit: ArchitecturalUnit, evidenceFiles: string[] = unit.files.map(file => file.relativePath)): ServiceDesignDoc {
+  const architectureRelevantFiles = evidenceFiles.length > 0
+    ? evidenceFiles
+    : selectDeterministicSeedFiles(unit, { includeCrossUnitFiles: false }).map(file => file.relativePath);
+
+  return ensureServiceDoc(unit, {
     serviceId: unit.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
     name: unit.name,
     kind: unit.kindHint || 'module',
@@ -424,7 +588,1218 @@ function buildStaticServiceDoc(unit: ArchitecturalUnit): ServiceDesignDoc {
     submodules: unit.submoduleHints,
     complexityScore: estimateComplexity(unit.files, unit.kindHint),
     risks: [],
+    confidence: 0.45,
+    evidence: {
+      filePaths: architectureRelevantFiles,
+      reasons: unit.analysisHints.slice(0, 12),
+    },
+    discoverySources: unit.analysisHints,
+    gaps: [],
+    conflicts: [],
+  });
+}
+
+function ensureServiceDoc(unit: ArchitecturalUnit, doc: ServiceDesignDoc): ServiceDesignDoc {
+  return {
+    ...doc,
+    confidence: doc.confidence ?? 0.5,
+    evidence: {
+      filePaths: uniqueStrings(doc.evidence?.filePaths || unit.files.map(file => file.relativePath)),
+      reasons: doc.evidence?.reasons || unit.analysisHints.slice(0, 12),
+    },
+    discoverySources: doc.discoverySources?.length ? doc.discoverySources : unit.analysisHints,
+    gaps: doc.gaps || [],
+    conflicts: doc.conflicts || [],
   };
+}
+
+function buildCoverageSummary(
+  unitAnalyses: UnitAnalysisResult[],
+  services: ServiceDesignDoc[],
+): SystemDesignResult['coverage'] {
+  const unitCoverage = unitAnalyses.map(analysis => ({
+    unitId: analysis.service.serviceId,
+    name: analysis.service.name,
+    confidence: analysis.service.confidence,
+    seedFileCount: analysis.seedFiles.length,
+    selectedFileCount: analysis.selectedFiles.length,
+    analyzedFileCount: analysis.fileSummaries.length,
+    retrievalIterations: analysis.retrievalIterations,
+    gaps: analysis.service.gaps,
+    conflicts: analysis.service.conflicts,
+  }));
+  const overallConfidence = unitCoverage.length === 0
+    ? 0
+    : unitCoverage.reduce((sum, service) => sum + service.confidence, 0) / unitCoverage.length;
+
+  return {
+    overallConfidence,
+    gaps: uniqueStrings(services.flatMap(service => service.gaps)),
+    conflicts: uniqueStrings(services.flatMap(service => service.conflicts)),
+    unitCoverage,
+  };
+}
+
+function reconcileServiceConnections(
+  services: ServiceDesignDoc[],
+  unitAnalyses: UnitAnalysisResult[],
+  index: RepoIndex,
+): void {
+  const filesByPath = new Map(index.files.map(file => [file.relativePath, file]));
+  const serviceById = new Map(services.map(service => [service.serviceId, service]));
+  const serviceIdByFilePath = new Map<string, string>();
+
+  for (const analysis of unitAnalyses) {
+    for (const filePath of analysis.selectedFiles) {
+      serviceIdByFilePath.set(filePath, analysis.service.serviceId);
+    }
+  }
+
+  for (const analysis of unitAnalyses) {
+    const service = serviceById.get(analysis.service.serviceId);
+    if (!service) continue;
+    const files = analysis.selectedFiles
+      .map(filePath => filesByPath.get(filePath))
+      .filter((file): file is RepoFile => Boolean(file));
+    const extractedInterfaces = extractPublicInterfacesFromFiles(files);
+    if (extractedInterfaces.length > 0) {
+      service.publicInterfaces = dedupeInterfaces([...(service.publicInterfaces || []), ...extractedInterfaces]);
+    }
+  }
+
+  const serviceRouteInventory = services
+    .filter(service => service.kind !== 'resource')
+    .map(service => ({
+      service,
+      routes: (service.publicInterfaces || [])
+        .filter(iface => iface.type === 'http')
+        .map(iface => ({
+          method: normalizeHttpMethodPrefix(iface.name),
+          path: normalizeHttpPath(stripHttpMethodPrefix(iface.name)),
+          raw: iface.name,
+        }))
+        .filter(route => route.path),
+    }))
+    .filter(entry => entry.routes.length > 0);
+
+  for (const analysis of unitAnalyses) {
+    const service = serviceById.get(analysis.service.serviceId);
+    if (!service || service.kind === 'resource') continue;
+
+    const files = analysis.selectedFiles
+      .map(filePath => filesByPath.get(filePath))
+      .filter((file): file is RepoFile => Boolean(file));
+    const outboundCalls = dedupeHttpCalls(extractOutboundHttpCalls(files));
+    const matchedDependencies = new Set<string>(service.dependencies || []);
+    const matchedIntegrations = [...(service.integrations || [])];
+
+    for (const edge of analysis.dependencyCruiser?.importEdges || []) {
+      const targetServiceId = serviceIdByFilePath.get(edge.targetPath);
+      if (!targetServiceId || targetServiceId === service.serviceId) continue;
+      const targetService = serviceById.get(targetServiceId);
+      if (targetService) {
+        matchedDependencies.add(targetService.name);
+      }
+    }
+
+    for (const call of outboundCalls) {
+      const targetService = findBestServiceForHttpCall(call, serviceRouteInventory, service.serviceId);
+      if (targetService) {
+        matchedDependencies.add(targetService.name);
+        continue;
+      }
+
+      if (call.host && !isLikelyInternalHost(call.host)) {
+        matchedIntegrations.push({
+          name: call.host,
+          description: `Calls external HTTP endpoint ${call.host}${call.path || ''}`.slice(0, 200),
+          internal: false,
+          category: 'external-api',
+          instanceKey: call.host,
+        });
+      }
+    }
+
+    service.dependencies = uniqueStrings([...matchedDependencies])
+      .filter(dependency => !dependency.startsWith('/'));
+    service.integrations = dedupeIntegrations(matchedIntegrations);
+  }
+}
+
+async function selectRelevantFilesForUnit(
+  unit: ArchitecturalUnit,
+  index: RepoIndex,
+  model: string,
+  aiContext: AIRuntimeContext,
+  log: (msg: string) => void,
+): Promise<RelevantFileSelectionResult> {
+  const candidateFiles = index.files.filter(isArchitectureRelevantFile);
+  const candidatePool = new Map(candidateFiles.map(file => [file.relativePath, file]));
+  const seedFiles = selectDeterministicSeedFiles(unit);
+  const selected = new Map(seedFiles.map(file => [file.relativePath, file]));
+  let dependencyCruiser = createEmptyDependencyCruiserInsights();
+  const reasons = [
+    `Deterministic seeds selected from ${seedFiles.length} architecture-relevant file(s).`,
+  ];
+  const gaps: string[] = [];
+
+  dependencyCruiser = mergeDependencyCruiserInsights(
+    dependencyCruiser,
+    await runDependencyCruiser(unit, [...selected.values()], index, log),
+  );
+  applyDependencyCruiserInsights(unit, dependencyCruiser, selected, candidatePool, reasons, gaps);
+
+  if (!aiContext.enabled || !aiContext.apiKey || !aiContext.runtime) {
+    return {
+      seedFiles,
+      candidateFiles: sortFilesForAnalysis([...candidatePool.values()], unit),
+      selectedFiles: sortFilesForAnalysis([...selected.values()], unit),
+      retrievalIterations: 0,
+      confidence: seedFiles.length > 0 ? 0.55 : 0.35,
+      reasons,
+      gaps,
+      dependencyCruiser,
+    };
+  }
+
+  const chunkSize = 250;
+  const maxIterations = 2;
+  let retrievalIterations = 0;
+  const confidences: number[] = [];
+
+  for (let iteration = 0; iteration < maxIterations; iteration += 1) {
+    retrievalIterations += 1;
+    let newSelections = 0;
+    const remainingFiles = candidateFiles.filter(file => !selected.has(file.relativePath));
+
+    for (const chunk of chunkFiles(remainingFiles, chunkSize)) {
+      if (chunk.length === 0) continue;
+      try {
+        const result = await runSystemDesignAIRuntime(
+          aiContext,
+          {
+            systemPrompt: buildRelevantFileSelectionSystemPrompt(),
+            userMessage: buildRelevantFileSelectionUserMessage(
+              unit.name,
+              buildUnitAnalysisHints(unit),
+              [...selected.keys()],
+              chunk.map(file => file.relativePath),
+            ),
+            model,
+            apiKey: aiContext.apiKey,
+            maxTokens: 4096,
+          },
+          relevantFileSelectionSchema,
+          log,
+        );
+        if (!result) {
+          break;
+        }
+
+        const selection = relevantFileSelectionSchema.parse(result.data);
+        confidences.push(selection.confidence);
+        reasons.push(...selection.reasons);
+        gaps.push(...selection.gaps);
+
+        for (const filePath of selection.filePaths) {
+          const file = chunk.find(candidate => candidate.relativePath === filePath);
+          if (file && !selected.has(file.relativePath)) {
+            selected.set(file.relativePath, file);
+            newSelections += 1;
+          }
+        }
+      } catch (err) {
+        if (handleSystemDesignAIError(aiContext, err, log, `relevant-file selection for ${unit.name}`)) {
+          break;
+        }
+        log(`  Warning: relevant-file selection failed for ${unit.name}: ${(err as Error).message}`);
+        gaps.push(`AI file-selection failed for one inventory chunk: ${(err as Error).message}`);
+      }
+    }
+
+    if (!aiContext.enabled) {
+      break;
+    }
+
+    if (newSelections === 0) {
+      break;
+    }
+  }
+
+  dependencyCruiser = mergeDependencyCruiserInsights(
+    dependencyCruiser,
+    await runDependencyCruiser(unit, [...selected.values()], index, log),
+  );
+  applyDependencyCruiserInsights(unit, dependencyCruiser, selected, candidatePool, reasons, gaps);
+
+  const selectedFiles = sortFilesForAnalysis([...selected.values()], unit);
+  return {
+    seedFiles,
+    candidateFiles: sortFilesForAnalysis([...candidatePool.values()], unit),
+    selectedFiles,
+    retrievalIterations,
+    confidence: confidences.length > 0
+      ? confidences.reduce((sum, value) => sum + value, 0) / confidences.length
+      : 0.7,
+    reasons: uniqueStrings(reasons).slice(0, 60),
+    gaps: uniqueStrings(gaps),
+    dependencyCruiser,
+  };
+}
+
+function createEmptyDependencyCruiserInsights(): DependencyCruiserInsights {
+  return {
+    reachableFiles: [],
+    importEdges: [],
+    npmPackages: [],
+    integrations: [],
+    warnings: [],
+  };
+}
+
+function mergeDependencyCruiserInsights(
+  base: DependencyCruiserInsights,
+  next: DependencyCruiserInsights | null,
+): DependencyCruiserInsights {
+  if (!next) return base;
+  return {
+    reachableFiles: dedupeRepoFiles([...base.reachableFiles, ...next.reachableFiles]),
+    importEdges: dedupeDependencyCruiserEdges([...base.importEdges, ...next.importEdges]),
+    npmPackages: uniqueStrings([...base.npmPackages, ...next.npmPackages]),
+    integrations: dedupeIntegrations([...base.integrations, ...next.integrations]),
+    warnings: uniqueStrings([...base.warnings, ...next.warnings]),
+  };
+}
+
+function dedupeDependencyCruiserEdges(edges: DependencyCruiserEdge[]): DependencyCruiserEdge[] {
+  const seen = new Set<string>();
+  const result: DependencyCruiserEdge[] = [];
+  for (const edge of edges) {
+    const key = `${edge.sourcePath}->${edge.targetPath}`;
+    if (!edge.sourcePath || !edge.targetPath || seen.has(key)) continue;
+    seen.add(key);
+    result.push(edge);
+  }
+  return result;
+}
+
+function applyDependencyCruiserInsights(
+  unit: ArchitecturalUnit,
+  insights: DependencyCruiserInsights | null,
+  selected: Map<string, RepoFile>,
+  candidatePool: Map<string, RepoFile>,
+  reasons: string[],
+  gaps: string[],
+): void {
+  if (!insights) return;
+
+  let addedFiles = 0;
+  for (const file of insights.reachableFiles) {
+    candidatePool.set(file.relativePath, file);
+    if (!selected.has(file.relativePath)) {
+      selected.set(file.relativePath, file);
+      addedFiles += 1;
+    }
+  }
+
+  if (addedFiles > 0) {
+    reasons.push(`Dependency-cruiser added ${addedFiles} import-reachable file(s) for ${unit.name}.`);
+  }
+  if (insights.npmPackages.length > 0) {
+    reasons.push(`Dependency-cruiser observed npm dependencies: ${insights.npmPackages.slice(0, 12).join(', ')}.`);
+  }
+  gaps.push(...insights.warnings);
+}
+
+async function runDependencyCruiser(
+  unit: ArchitecturalUnit,
+  selectedFiles: RepoFile[],
+  index: RepoIndex,
+  log: (msg: string) => void,
+): Promise<DependencyCruiserInsights | null> {
+  const targetFiles = selectedFiles.filter(isDependencyCruiserRelevantFile);
+  if (targetFiles.length === 0) {
+    return null;
+  }
+
+  const cruiseTargets = resolveDependencyCruiserTargets(unit, targetFiles, index.repoPath);
+  if (cruiseTargets.length === 0) {
+    return null;
+  }
+
+  const cacheKey = `${normalizePath(index.repoPath)}::${cruiseTargets.join('|')}`;
+  if (!dependencyCruiserCache.has(cacheKey)) {
+    dependencyCruiserCache.set(cacheKey, (async () => {
+      try {
+        const dependencyCruiserBin = resolveDependencyCruiserBinary();
+        const result = await execa(dependencyCruiserBin, [
+          '--no-config',
+          '--output-type',
+          'json',
+          '--exclude',
+          '^(node_modules|dist|build|coverage|\\.next|\\.git|\\.codeowl)(/|$)',
+          '--do-not-follow',
+          '^(node_modules|dist|build|coverage|\\.next|\\.git|\\.codeowl)(/|$)',
+          ...cruiseTargets,
+        ], {
+          cwd: index.repoPath,
+        });
+
+        return parseDependencyCruiserReport(result.stdout, index);
+      } catch (err) {
+        const message = (err as Error).message;
+        log(`  Warning: dependency-cruiser failed for ${unit.name}: ${message}`);
+        return {
+          ...createEmptyDependencyCruiserInsights(),
+          warnings: [`Dependency-cruiser failed for ${unit.name}: ${message}`],
+        };
+      }
+    })());
+  }
+
+  return dependencyCruiserCache.get(cacheKey)!;
+}
+
+function resolveDependencyCruiserBinary(): string {
+  for (const candidate of DEPENDENCY_CRUISER_BIN_CANDIDATES) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return 'depcruise';
+}
+
+function isDependencyCruiserRelevantFile(file: RepoFile): boolean {
+  return /\.(ts|tsx|js|jsx|mjs|cjs)$/i.test(file.relativePath);
+}
+
+function resolveDependencyCruiserTargets(
+  unit: ArchitecturalUnit,
+  selectedFiles: RepoFile[],
+  repoPath: string,
+): string[] {
+  if (unit.dirPath !== '.' && !unit.dirPath.includes('#')) {
+    const absolutePath = path.join(repoPath, unit.dirPath);
+    if (fs.existsSync(absolutePath)) {
+      return [normalizePath(unit.dirPath)];
+    }
+  }
+
+  return uniqueStrings(selectedFiles.map(file => normalizePath(file.relativePath)));
+}
+
+function parseDependencyCruiserReport(
+  rawOutput: string,
+  index: RepoIndex,
+): DependencyCruiserInsights {
+  const report = JSON.parse(rawOutput) as DependencyCruiserReport;
+  const fileByPath = new Map(index.files.map(file => [normalizePath(file.relativePath), file]));
+  const reachableFiles = new Map<string, RepoFile>();
+  const importEdges: DependencyCruiserEdge[] = [];
+  const npmPackages = new Set<string>();
+  const integrationNames = new Set<string>();
+
+  for (const moduleRecord of report.modules || []) {
+    const sourcePath = normalizeDependencyCruiserPath(moduleRecord.source, index.repoPath);
+    const sourceFile = fileByPath.get(sourcePath);
+    if (sourceFile) {
+      reachableFiles.set(sourceFile.relativePath, sourceFile);
+    }
+
+    for (const dependency of moduleRecord.dependencies || []) {
+      if (dependency.module && dependency.dependencyTypes?.includes('npm')) {
+        const packageName = normalizePackageName(dependency.module);
+        npmPackages.add(packageName);
+        const resource = inferResourceFromPackageName(packageName);
+        if (resource) {
+          integrationNames.add(resource);
+        }
+      }
+
+      if (!sourceFile) continue;
+
+      const targetPath = normalizeDependencyCruiserPath(dependency.resolved || dependency.module || '', index.repoPath);
+      const targetFile = fileByPath.get(targetPath);
+      if (!targetFile) continue;
+
+      reachableFiles.set(targetFile.relativePath, targetFile);
+      importEdges.push({
+        sourcePath: sourceFile.relativePath,
+        targetPath: targetFile.relativePath,
+      });
+    }
+  }
+
+  return {
+    reachableFiles: dedupeRepoFiles([...reachableFiles.values()]),
+    importEdges: dedupeDependencyCruiserEdges(importEdges),
+    npmPackages: [...npmPackages].sort((left, right) => left.localeCompare(right)),
+    integrations: buildIntegrationHints({
+      name: 'Dependency Cruiser',
+      dirPath: '.',
+      files: [],
+      dependencyHints: [],
+      analysisHints: [],
+      capabilityHints: [],
+      integrationHints: [],
+      submoduleHints: [],
+      entityHints: [],
+      interfaceHints: [],
+    }, [...integrationNames]),
+    warnings: [],
+  };
+}
+
+function normalizeDependencyCruiserPath(value: string, repoPath: string): string {
+  if (!value) return '';
+  const normalized = normalizePath(value);
+  if (/^[A-Za-z]:\//.test(normalized)) {
+    return normalizePath(path.relative(repoPath, normalized));
+  }
+  return normalized;
+}
+
+function normalizePackageName(value: string): string {
+  if (value.startsWith('@')) {
+    const [scope, name] = value.split('/');
+    return name ? `${scope}/${name}` : value;
+  }
+  return value.split('/')[0];
+}
+
+function selectDeterministicSeedFiles(
+  unit: ArchitecturalUnit,
+  options: { includeCrossUnitFiles?: boolean } = {},
+): RepoFile[] {
+  const selected = new Map<string, RepoFile>();
+
+  for (const file of unit.files) {
+    if (!isArchitectureRelevantFile(file)) continue;
+    if (scoreFileForAnalysis(file, unit) < 8) continue;
+    selected.set(file.relativePath, file);
+  }
+
+  if (options.includeCrossUnitFiles !== false) {
+    for (const file of unit.files) {
+      const relative = normalizePath(file.relativePath);
+      if (/^(package\.json|pnpm-workspace\.ya?ml|turbo\.json|docker-compose.*\.ya?ml|compose.*\.ya?ml|\.env(\.|$)|k8s\/|helm\/|terraform\/|infra\/)/i.test(relative)) {
+        selected.set(file.relativePath, file);
+      }
+    }
+  }
+
+  return sortFilesForAnalysis([...selected.values()], unit);
+}
+
+function sortFilesForAnalysis(files: RepoFile[], unit: ArchitecturalUnit): RepoFile[] {
+  return [...dedupeRepoFiles(files)].sort((left, right) => {
+    const scoreDelta = scoreFileForAnalysis(right, unit) - scoreFileForAnalysis(left, unit);
+    if (scoreDelta !== 0) return scoreDelta;
+    return left.relativePath.localeCompare(right.relativePath);
+  });
+}
+
+function dedupeRepoFiles(files: RepoFile[]): RepoFile[] {
+  const seen = new Set<string>();
+  const result: RepoFile[] = [];
+
+  for (const file of files) {
+    if (!file || !file.relativePath || seen.has(file.relativePath)) continue;
+    seen.add(file.relativePath);
+    result.push(file);
+  }
+
+  return result;
+}
+
+function buildUnitAnalysisHints(unit: ArchitecturalUnit): string[] {
+  const hints = [...unit.analysisHints];
+  if (unit.kindHint) hints.push(`Suggested kind: ${unit.kindHint}`);
+  if (unit.dependencyHints.length > 0) hints.push(`Known dependencies or integrations: ${unit.dependencyHints.join(', ')}`);
+  if (unit.capabilityHints.length > 0) hints.push(`Likely capabilities: ${unit.capabilityHints.join(', ')}`);
+  if (unit.submoduleHints.length > 0) hints.push(`Likely submodules: ${unit.submoduleHints.join(', ')}`);
+  if (unit.entityHints.length > 0) hints.push(`Likely data models: ${unit.entityHints.map(entity => entity.name).join(', ')}`);
+  if (unit.interfaceHints.length > 0) hints.push(`Likely public interfaces: ${unit.interfaceHints.map(api => `${api.type}:${api.name}`).join(', ')}`);
+  return uniqueStrings(hints);
+}
+
+async function summarizeSelectedFiles(
+  unit: ArchitecturalUnit,
+  files: RepoFile[],
+  model: string,
+  aiContext: AIRuntimeContext,
+  log: (msg: string) => void,
+): Promise<FileSummary[]> {
+  const summaries: FileSummary[] = [];
+  let fileIndex = 0;
+
+  for (const file of files) {
+    fileIndex += 1;
+    if (fileIndex === 1 || fileIndex === files.length || fileIndex % 10 === 0) {
+      log(`  Summarizing files for ${unit.name}: ${fileIndex}/${files.length}`);
+    }
+
+    if (!aiContext.enabled || !aiContext.apiKey || !aiContext.runtime) {
+      summaries.push(buildStaticFileSummary(unit, file));
+      continue;
+    }
+
+    const content = readFileContent(file.absolutePath, 6000);
+    if (!content) {
+      summaries.push(buildStaticFileSummary(unit, file));
+      continue;
+    }
+
+    try {
+      const result = await runSystemDesignAIRuntime(
+        aiContext,
+        {
+          systemPrompt: buildFileSummarySystemPrompt(),
+          userMessage: buildFileSummaryUserMessage(unit.name, file.relativePath, content, buildFileAnalysisHints(unit, file)),
+          model,
+          apiKey: aiContext.apiKey,
+          maxTokens: 2048,
+        },
+        fileSummarySchema,
+        log,
+      );
+      if (!result) {
+        summaries.push(buildStaticFileSummary(unit, file));
+        continue;
+      }
+      const summary = fileSummarySchema.parse(result.data);
+      summaries.push({
+        ...summary,
+        filePath: file.relativePath,
+        integrations: dedupeIntegrations(summary.integrations),
+        dependencies: uniqueStrings(summary.dependencies),
+        submodules: uniqueStrings(summary.submodules),
+        capabilities: uniqueStrings(summary.capabilities),
+      });
+    } catch (err) {
+      if (handleSystemDesignAIError(aiContext, err, log, `file summary for ${file.relativePath}`)) {
+        summaries.push(buildStaticFileSummary(unit, file));
+        continue;
+      }
+      log(`  Warning: file summary failed for ${file.relativePath}: ${(err as Error).message}`);
+      summaries.push(buildStaticFileSummary(unit, file));
+    }
+  }
+
+  return summaries;
+}
+
+function buildFileAnalysisHints(unit: ArchitecturalUnit, file: RepoFile): string[] {
+  const hints = [`Unit kind hint: ${unit.kindHint || 'unknown'}`];
+  const relative = stripUnitPrefix(file.relativePath, unit.dirPath).toLowerCase();
+
+  if (/(controller|route|handler|pages\/api|app\/api)/.test(relative)) hints.push('This file may define HTTP/controller interfaces.');
+  if (/(components|page|layout|screen|view|app\/)/.test(relative)) hints.push('This file may define frontend UI or user-facing flows.');
+  if (/(worker|job|queue|scheduler|cron)/.test(relative)) hints.push('This file may define background or scheduled processing.');
+  if (/(schema|model|entity|table|db|data)/.test(relative)) hints.push('This file may define data models or persistence details.');
+  if (/(env|config|terraform|compose|docker|k8s|helm)/.test(relative)) hints.push('This file may define infrastructure, deployment, or integration configuration.');
+
+  return hints;
+}
+
+function buildStaticFileSummary(unit: ArchitecturalUnit, file: RepoFile): FileSummary {
+  const relative = stripUnitPrefix(file.relativePath, unit.dirPath).toLowerCase();
+  const route = normalizedRouteFromPath(file.relativePath);
+  const interfaces = dedupeInterfaces([
+    ...extractPublicInterfacesFromFile(file),
+    ...(route ? [{ type: 'http' as const, name: route, description: 'Detected API route from file path' }] : []),
+    ...(/(controller|handler)/.test(relative)
+      ? [{ type: 'http' as const, name: file.relativePath, description: 'Controller or handler file' }]
+      : []),
+  ]);
+  const integrations = INTEGRATION_RESOURCES
+    .filter(resource => fileContainsResourceEvidence(file, resource))
+    .map(resource => ({
+      name: resource.name,
+      description: integrationDescriptionFor(resource),
+      internal: false,
+      category: resource.category,
+    }));
+  const outboundCalls = extractOutboundHttpCalls([file]);
+  const entities = detectEntityHints([file]);
+  const submodules = relative.split('/').filter(segment => SUBMODULE_SEGMENTS.has(segment)).map(normalizeSubmoduleLabel);
+  const capabilities = route ? [capabilityFromInterface(route, [file])] : [];
+
+  return {
+    filePath: file.relativePath,
+    summary: summarizeFileRole(unit, file),
+    interfaces,
+    integrations: dedupeIntegrations(integrations),
+    dependencies: outboundCalls
+      .filter(call => !call.host && Boolean(call.path))
+      .map(call => call.path),
+    entities,
+    submodules: uniqueStrings(submodules.filter(Boolean)),
+    capabilities: uniqueStrings(capabilities.filter(Boolean)),
+    importance: Math.max(1, Math.min(10, Math.ceil(scoreFileForAnalysis(file, unit) / 4))),
+  };
+}
+
+function summarizeFileRole(unit: ArchitecturalUnit, file: RepoFile): string {
+  const relative = stripUnitPrefix(file.relativePath, unit.dirPath).toLowerCase();
+  if (/package\.json$/.test(relative)) return `Package manifest for ${unit.name} that declares dependencies and execution metadata.`;
+  if (/(docker|compose|terraform|k8s|helm|deployment|infra|\.env)/.test(relative)) return `Infrastructure or runtime configuration that influences how ${unit.name} is deployed and connected.`;
+  if (/(controller|route|handler|pages\/api|app\/api)/.test(relative)) return `API surface or request-handling file for ${unit.name}.`;
+  if (/(worker|job|queue|scheduler|cron)/.test(relative)) return `Background-processing file for ${unit.name}.`;
+  if (/(components|page|layout|screen|view)/.test(relative)) return `Frontend UI file contributing user-facing flows in ${unit.name}.`;
+  if (/(schema|model|entity|table|db|data)/.test(relative)) return `Data-model or persistence-related file used by ${unit.name}.`;
+  return `Supporting source or configuration file within ${unit.name}.`;
+}
+
+type ExtractedHttpCall = {
+  method?: string;
+  path: string;
+  host?: string;
+};
+
+function extractPublicInterfacesFromFiles(files: RepoFile[]): ArchitecturalUnit['interfaceHints'] {
+  return dedupeInterfaces(files.flatMap(file => extractPublicInterfacesFromFile(file)));
+}
+
+function extractPublicInterfacesFromFile(file: RepoFile): ArchitecturalUnit['interfaceHints'] {
+  const normalizedPath = normalizePath(file.relativePath).toLowerCase();
+  if (/controller\.cs$/.test(normalizedPath)) {
+    return extractAspNetControllerInterfaces(file);
+  }
+
+  const route = normalizedRouteFromPath(file.relativePath);
+  return route
+    ? [{ type: 'http', name: route, description: 'Detected API route from file path' }]
+    : [];
+}
+
+function extractAspNetControllerInterfaces(file: RepoFile): ArchitecturalUnit['interfaceHints'] {
+  const content = readFileSafe(file.absolutePath);
+  if (!content) return [];
+
+  const classDeclaration = content.match(/public\s+class\s+([A-Za-z0-9_]+Controller)\b/);
+  const controllerName = classDeclaration?.[1] || path.basename(file.relativePath, path.extname(file.relativePath));
+  const controllerSegment = controllerName.replace(/Controller$/, '');
+  const classAttributes = typeof classDeclaration?.index === 'number'
+    ? content.slice(Math.max(0, classDeclaration.index - 500), classDeclaration.index)
+    : '';
+  const baseRoute = resolveAspNetRouteTemplate(extractRouteAttribute(classAttributes), controllerSegment);
+  const methodInterfaces: ArchitecturalUnit['interfaceHints'] = [];
+  const methodPattern = /((?:\s*\[[^\]]+\]\s*)+)public\s+(?:async\s+)?(?:Task(?:<[^>]+>)?|ActionResult(?:<[^>]+>)?|IActionResult|IEnumerable<[^>]+>|[A-Za-z0-9_<>,\[\]\?]+)\s+([A-Za-z0-9_]+)\s*\(/g;
+
+  for (const match of content.matchAll(methodPattern)) {
+    const attributes = match[1];
+    const httpMethodMatch = attributes.match(/\[Http(Get|Post|Put|Patch|Delete)(?:\("([^"]*)"\))?\]/i);
+    if (!httpMethodMatch) continue;
+
+    const method = httpMethodMatch[1].toUpperCase();
+    const httpRoute = httpMethodMatch[2] || '';
+    const explicitRoute = extractRouteAttribute(attributes);
+    const routePath = buildAspNetRoutePath(baseRoute, explicitRoute || httpRoute, controllerSegment);
+    methodInterfaces.push({
+      type: 'http',
+      name: `${method} ${routePath}`,
+      description: `ASP.NET controller action in ${controllerName}`,
+    });
+  }
+
+  if (methodInterfaces.length > 0) {
+    return dedupeInterfaces(methodInterfaces);
+  }
+
+  const fallbackRoute = buildAspNetRoutePath(baseRoute, '', controllerSegment);
+  return [{
+    type: 'http',
+    name: fallbackRoute,
+    description: `ASP.NET controller in ${controllerName}`,
+  }];
+}
+
+function extractRouteAttribute(attributes: string): string {
+  const match = attributes.match(/\[Route\("([^"]+)"\)\]/i);
+  return match?.[1] || '';
+}
+
+function resolveAspNetRouteTemplate(template: string, controllerSegment: string): string {
+  if (!template) {
+    return `/${controllerSegment}`;
+  }
+
+  return normalizeHttpPath(
+    template
+      .replace(/\[controller\]/ig, controllerSegment)
+      .replace(/\[action\]/ig, '')
+      .replace(/\/+/g, '/'),
+  );
+}
+
+function buildAspNetRoutePath(baseRoute: string, routeFragment: string, controllerSegment: string): string {
+  const resolvedBase = baseRoute || `/${controllerSegment}`;
+  const resolvedFragment = routeFragment
+    .replace(/\[controller\]/ig, controllerSegment)
+    .replace(/\[action\]/ig, '')
+    .trim();
+
+  if (!resolvedFragment) {
+    return normalizeHttpPath(resolvedBase);
+  }
+
+  if (/^\//.test(resolvedFragment)) {
+    return normalizeHttpPath(resolvedFragment);
+  }
+
+  return normalizeHttpPath(`${resolvedBase}/${resolvedFragment}`);
+}
+
+function extractOutboundHttpCalls(files: RepoFile[]): ExtractedHttpCall[] {
+  return files.flatMap(file => extractOutboundHttpCallsFromFile(file));
+}
+
+function extractOutboundHttpCallsFromFile(file: RepoFile): ExtractedHttpCall[] {
+  if (!/\.(ts|tsx|js|jsx|cs)$/i.test(file.relativePath)) {
+    return [];
+  }
+
+  const content = readFileSafe(file.absolutePath);
+  if (!content) return [];
+
+  const variableExpressions = new Map<string, string>();
+  const assignmentPattern = /(?:const|let|var|private|public|protected)?\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;\n]+);/g;
+  for (const match of content.matchAll(assignmentPattern)) {
+    const variableName = match[1];
+    const expression = match[2].trim();
+    variableExpressions.set(variableName, expression);
+    variableExpressions.set(`this.${variableName}`, expression);
+  }
+
+  const calls: ExtractedHttpCall[] = [];
+  const callPatterns = [
+    /\.(get|post|put|patch|delete)\s*(?:<[^>]+>)?\(\s*([^,\)\r\n]+)/gi,
+    /\bfetch\(\s*([^,\)\r\n]+)/gi,
+    /\baxios\.(get|post|put|patch|delete)\(\s*([^,\)\r\n]+)/gi,
+  ];
+
+  for (const pattern of callPatterns) {
+    for (const match of content.matchAll(pattern)) {
+      const hasMethod = Boolean(match[2]);
+      const method = hasMethod ? match[1]?.toUpperCase() : 'GET';
+      const expression = hasMethod ? match[2] : match[1];
+      const resolved = resolveHttpExpression(expression, variableExpressions);
+      for (const value of resolved) {
+        const normalized = normalizeHttpCallValue(value);
+        if (!normalized) continue;
+        calls.push({
+          method,
+          path: normalized.path,
+          host: normalized.host,
+        });
+      }
+    }
+  }
+
+  return dedupeHttpCalls(calls);
+}
+
+function resolveHttpExpression(
+  expression: string,
+  variableExpressions: Map<string, string>,
+  visiting = new Set<string>(),
+): string[] {
+  const trimmed = expression.trim();
+  if (!trimmed) return [];
+
+  const stringLiteral = extractStringLiteral(trimmed);
+  if (stringLiteral !== undefined) {
+    return [stringLiteral];
+  }
+
+  const directVariable = trimmed.replace(/\?\.?/g, '.');
+  if (variableExpressions.has(directVariable)) {
+    if (visiting.has(directVariable)) return [];
+    visiting.add(directVariable);
+    const resolved = resolveHttpExpression(variableExpressions.get(directVariable) || '', variableExpressions, visiting);
+    visiting.delete(directVariable);
+    return resolved;
+  }
+
+  if (trimmed.includes('+')) {
+    const parts = trimmed.split('+').map(part => part.trim()).filter(Boolean);
+    const resolvedParts = parts.map(part => resolveHttpExpression(part, variableExpressions, visiting));
+    const combined = resolvedParts
+      .map(values => values[0] || '')
+      .join('');
+    return combined ? [combined] : [];
+  }
+
+  return [];
+}
+
+function extractStringLiteral(value: string): string | undefined {
+  const singleQuoted = value.match(/^'([^']*)'$/);
+  if (singleQuoted) return singleQuoted[1];
+  const doubleQuoted = value.match(/^"([^"]*)"$/);
+  if (doubleQuoted) return doubleQuoted[1];
+  const template = value.match(/^`([^`]*)`$/);
+  if (template) return template[1].replace(/\$\{[^}]+\}/g, '');
+  return undefined;
+}
+
+function normalizeHttpCallValue(value: string): { path: string; host?: string } | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const url = new URL(trimmed);
+      return {
+        host: url.host.toLowerCase(),
+        path: normalizeHttpPath(url.pathname),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  const withoutQuery = trimmed.split('?')[0];
+  const normalizedPath = normalizeHttpPath(withoutQuery);
+  return normalizedPath ? { path: normalizedPath } : null;
+}
+
+function normalizeHttpPath(value: string): string {
+  const withoutQuery = value
+    .replace(/\$\{[^}]+\}/g, '')
+    .replace(/\[controller\]/ig, '')
+    .split('?')[0]
+    .trim();
+  const normalized = withoutQuery
+    .replace(/\\/g, '/')
+    .replace(/^https?:\/\/[^/]+/i, '')
+    .replace(/\/+/g, '/')
+    .replace(/\/$/, '');
+  if (!normalized || normalized === '.') return '';
+  return normalized.startsWith('/') ? normalized.toLowerCase() : `/${normalized.toLowerCase()}`;
+}
+
+function stripHttpMethodPrefix(value: string): string {
+  return value.replace(/^(GET|POST|PUT|PATCH|DELETE)\s+/i, '');
+}
+
+function normalizeHttpMethodPrefix(value: string): string | undefined {
+  const match = value.match(/^(GET|POST|PUT|PATCH|DELETE)\s+/i);
+  return match?.[1]?.toUpperCase();
+}
+
+function dedupeHttpCalls(calls: ExtractedHttpCall[]): ExtractedHttpCall[] {
+  const seen = new Set<string>();
+  const result: ExtractedHttpCall[] = [];
+  for (const call of calls) {
+    const key = `${call.method || ''}:${call.host || ''}:${call.path}`;
+    if (!call.path || seen.has(key)) continue;
+    seen.add(key);
+    result.push(call);
+  }
+  return result;
+}
+
+function findBestServiceForHttpCall(
+  call: ExtractedHttpCall,
+  serviceRoutes: Array<{
+    service: ServiceDesignDoc;
+    routes: Array<{ method?: string; path: string; raw: string }>;
+  }>,
+  sourceServiceId: string,
+): ServiceDesignDoc | undefined {
+  let bestMatch: { service: ServiceDesignDoc; score: number } | undefined;
+
+  for (const candidate of serviceRoutes) {
+    if (candidate.service.serviceId === sourceServiceId) continue;
+    for (const route of candidate.routes) {
+      const score = scoreHttpRouteMatch(call, route);
+      if (!score) continue;
+      if (!bestMatch || score > bestMatch.score) {
+        bestMatch = { service: candidate.service, score };
+      }
+    }
+  }
+
+  return bestMatch?.service;
+}
+
+function scoreHttpRouteMatch(
+  call: ExtractedHttpCall,
+  route: { method?: string; path: string },
+): number {
+  if (!call.path || !route.path) return 0;
+  if (call.method && route.method && call.method !== route.method) return 0;
+
+  const callPath = normalizeHttpPath(call.path);
+  const routePath = normalizeHttpPath(route.path);
+  if (!callPath || !routePath) return 0;
+
+  if (callPath === routePath) return 100;
+  if (routePath.endsWith(callPath)) return 80 + callPath.length;
+  if (callPath.endsWith(routePath)) return 70 + routePath.length;
+
+  const callSegments = callPath.split('/').filter(Boolean);
+  const routeSegments = routePath.split('/').filter(Boolean);
+  let sharedSuffix = 0;
+
+  while (
+    sharedSuffix < callSegments.length
+    && sharedSuffix < routeSegments.length
+    && callSegments[callSegments.length - 1 - sharedSuffix] === routeSegments[routeSegments.length - 1 - sharedSuffix]
+  ) {
+    sharedSuffix += 1;
+  }
+
+  return sharedSuffix >= 2 ? sharedSuffix * 20 : 0;
+}
+
+function isLikelyInternalHost(host: string): boolean {
+  return /^(localhost|127\.0\.0\.1|0\.0\.0\.0)/i.test(host)
+    || /\.local$/i.test(host)
+    || /\.internal$/i.test(host);
+}
+
+async function synthesizeServiceFromFileSummaries(
+  unit: ArchitecturalUnit,
+  fileSummaries: FileSummary[],
+  model: string,
+  aiContext: AIRuntimeContext,
+  log: (msg: string) => void,
+): Promise<ServiceDesignDoc> {
+  const staticDoc = buildServiceDocFromFileSummaries(unit, fileSummaries);
+
+  if (!aiContext.enabled || !aiContext.apiKey || !aiContext.runtime || fileSummaries.length === 0) {
+    return staticDoc;
+  }
+
+  try {
+    const result = await runSystemDesignAIRuntime(
+      aiContext,
+      {
+        systemPrompt: buildServiceSynthesisFromFilesSystemPrompt(),
+        userMessage: buildServiceSynthesisFromFilesUserMessage(
+          unit.name,
+          buildUnitAnalysisHints(unit),
+          formatFileSummariesForSynthesis(fileSummaries),
+        ),
+        model,
+        apiKey: aiContext.apiKey,
+        maxTokens: 4096,
+      },
+      serviceDesignDocSchema,
+      log,
+    );
+    if (!result) {
+      return staticDoc;
+    }
+
+    return mergeServiceDocs(staticDoc, serviceDesignDocSchema.parse(result.data) as ServiceDesignDoc);
+  } catch (err) {
+    if (handleSystemDesignAIError(aiContext, err, log, `service synthesis for ${unit.name}`)) {
+      return staticDoc;
+    }
+    log(`  Warning: service synthesis failed for ${unit.name}: ${(err as Error).message}`);
+    return staticDoc;
+  }
+}
+
+function buildServiceDocFromFileSummaries(
+  unit: ArchitecturalUnit,
+  fileSummaries: FileSummary[],
+): ServiceDesignDoc {
+  const responsibilities = dedupeStrings([
+    ...buildResponsibilities(unit),
+    ...fileSummaries
+      .filter(summary => summary.importance >= 6)
+      .map(summary => summary.summary.replace(/\s+/g, ' ').trim())
+      .slice(0, 6),
+  ]).slice(0, 8);
+  const integrations = dedupeIntegrations([
+    ...unit.integrationHints,
+    ...fileSummaries.flatMap(summary => summary.integrations),
+  ]);
+  const dependencies = uniqueStrings([
+    ...unit.dependencyHints,
+    ...fileSummaries.flatMap(summary => summary.dependencies),
+  ]);
+  const entities = dedupeEntities([
+    ...unit.entityHints,
+    ...fileSummaries.flatMap(summary => summary.entities),
+  ]);
+  const submodules = uniqueStrings([
+    ...unit.submoduleHints,
+    ...fileSummaries.flatMap(summary => summary.submodules),
+  ]).slice(0, 20);
+  const publicInterfaces = dedupeInterfaces([
+    ...unit.interfaceHints,
+    ...fileSummaries.flatMap(summary => summary.interfaces),
+  ]);
+  const capabilities = dedupeStrings([
+    ...unit.capabilityHints,
+    ...fileSummaries.flatMap(summary => summary.capabilities),
+  ]).slice(0, 20);
+  const importance = fileSummaries.length === 0
+    ? 0
+    : fileSummaries.reduce((sum, summary) => sum + summary.importance, 0) / fileSummaries.length;
+
+  return ensureServiceDoc(unit, {
+    ...buildStaticServiceDoc(unit, fileSummaries.map(summary => summary.filePath)),
+    responsibilities,
+    integrations,
+    dependencies,
+    entities,
+    submodules,
+    publicInterfaces,
+    capabilities,
+    complexityScore: Math.max(1, Math.min(10, Math.round(Math.max(estimateComplexity(unit.files, unit.kindHint), importance)))),
+    confidence: Math.min(0.95, 0.45 + Math.min(fileSummaries.length, 40) / 100),
+  });
+}
+
+function mergeServiceDocs(base: ServiceDesignDoc, override: ServiceDesignDoc): ServiceDesignDoc {
+  return {
+    ...base,
+    ...override,
+    responsibilities: dedupeStrings([...(base.responsibilities || []), ...(override.responsibilities || [])]).slice(0, 12),
+    capabilities: dedupeStrings([...(base.capabilities || []), ...(override.capabilities || [])]).slice(0, 20),
+    publicInterfaces: dedupeInterfaces([...(base.publicInterfaces || []), ...(override.publicInterfaces || [])]),
+    integrations: dedupeIntegrations([...(base.integrations || []), ...(override.integrations || [])]),
+    dependencies: uniqueStrings([...(base.dependencies || []), ...(override.dependencies || [])]),
+    entities: dedupeEntities([...(base.entities || []), ...(override.entities || [])]),
+    submodules: uniqueStrings([...(base.submodules || []), ...(override.submodules || [])]),
+    evidence: {
+      filePaths: uniqueStrings([...(base.evidence?.filePaths || []), ...(override.evidence?.filePaths || [])]),
+      reasons: uniqueStrings([...(base.evidence?.reasons || []), ...(override.evidence?.reasons || [])]),
+    },
+    discoverySources: uniqueStrings([...(base.discoverySources || []), ...(override.discoverySources || [])]),
+    gaps: uniqueStrings([...(base.gaps || []), ...(override.gaps || [])]),
+    conflicts: uniqueStrings([...(base.conflicts || []), ...(override.conflicts || [])]),
+    confidence: Math.max(base.confidence || 0, override.confidence || 0),
+  };
+}
+
+function enrichServiceDocFromFileSummaries(
+  unit: ArchitecturalUnit,
+  doc: ServiceDesignDoc,
+  selection: RelevantFileSelectionResult,
+  fileSummaries: FileSummary[],
+): ServiceDesignDoc {
+  const merged = mergeServiceDocs(buildServiceDocFromFileSummaries(unit, fileSummaries), doc);
+  const gaps = [...merged.gaps, ...selection.gaps, ...(selection.dependencyCruiser?.warnings || [])];
+
+  if (unit.kindHint === 'app' && !fileSummaries.some(summary => /(components?|page|layout|screen|view|frontend|ui|main\.ts|app\.module|app\.component)/i.test(summary.filePath))) {
+    gaps.push('Frontend surface not confidently identified from selected files.');
+  }
+  if ((unit.kindHint === 'gateway' || unit.kindHint === 'service') && merged.publicInterfaces.length === 0) {
+    gaps.push('No public interfaces were confidently identified for this service.');
+  }
+  if (merged.integrations.length === 0 && unit.integrationHints.length > 0) {
+    gaps.push('Static integration hints exist, but file analysis did not confirm them directly.');
+  }
+
+  return ensureServiceDoc(unit, {
+    ...merged,
+    kind: unit.kindHint === 'resource' ? 'resource' : merged.kind,
+    resourceCategory: merged.resourceCategory || unit.resourceCategory,
+    purpose: !merged.purpose || /service\/module detected from/i.test(merged.purpose)
+      ? buildFallbackPurpose(unit)
+      : merged.purpose,
+    integrations: dedupeIntegrations([
+      ...merged.integrations,
+      ...(selection.dependencyCruiser?.integrations || []),
+    ]),
+    dependencies: uniqueStrings(merged.dependencies),
+    evidence: {
+      filePaths: uniqueStrings(selection.selectedFiles.map(file => file.relativePath)),
+      reasons: uniqueStrings([
+        ...selection.reasons,
+        ...fileSummaries.slice(0, 40).map(summary => `${summary.filePath}: ${summary.summary}`),
+      ]).slice(0, 80),
+    },
+    discoverySources: uniqueStrings([
+      ...unit.analysisHints,
+      ...selection.reasons,
+    ]),
+    confidence: Math.max(
+      merged.confidence,
+      Math.min(
+        0.98,
+        0.4
+          + Math.min(selection.selectedFiles.length, 80) / 160
+          + Math.min(fileSummaries.length, 80) / 160
+          + (selection.confidence * 0.15),
+      ),
+    ),
+    gaps: uniqueStrings(gaps),
+  });
+}
+
+function formatFileSummariesForSynthesis(fileSummaries: FileSummary[]): string {
+  return fileSummaries
+    .map(summary => JSON.stringify(summary, null, 2))
+    .join('\n\n---\n\n');
+}
+
+function chunkFiles(files: RepoFile[], chunkSize: number): RepoFile[][] {
+  const chunks: RepoFile[][] = [];
+  for (let index = 0; index < files.length; index += chunkSize) {
+    chunks.push(files.slice(index, index + chunkSize));
+  }
+  return chunks;
+}
+
+async function runSystemDesignAIRuntime<T>(
+  aiContext: AIRuntimeContext,
+  options: Parameters<IRuntime['run']>[0],
+  schema: z.ZodSchema<T>,
+  log: (msg: string) => void,
+): Promise<RunResult<T> | null> {
+  if (!aiContext.enabled || !aiContext.apiKey || !aiContext.runtime) {
+    return null;
+  }
+
+  try {
+    return await aiContext.runtime.run(options, schema);
+  } catch (err) {
+    if (handleSystemDesignAIError(aiContext, err, log)) {
+      return null;
+    }
+    throw err;
+  }
+}
+
+function handleSystemDesignAIError(
+  aiContext: AIRuntimeContext,
+  err: unknown,
+  log: (msg: string) => void,
+  scope?: string,
+): boolean {
+  const message = (err as Error).message || String(err);
+  if (!isAuthenticationFailure(message)) {
+    return false;
+  }
+
+  if (!aiContext.authFailureMessage) {
+    aiContext.authFailureMessage = message;
+    log(`AI authentication failed${scope ? ` during ${scope}` : ''}; continuing with static system-design analysis for the remaining steps.`);
+  }
+
+  aiContext.enabled = false;
+  aiContext.runtime = null;
+  return true;
+}
+
+function isAuthenticationFailure(message: string): boolean {
+  const normalized = message.toLowerCase();
+  return normalized.includes('401')
+    || normalized.includes('unauthorized')
+    || normalized.includes('authorization')
+    || normalized.includes('invalid api key')
+    || normalized.includes('api secret key')
+    || normalized.includes('login fail');
 }
 
 async function resolveSystemDesignRuntime(
@@ -432,12 +1807,30 @@ async function resolveSystemDesignRuntime(
   log: (msg: string) => void,
 ): Promise<IRuntime> {
   if (dependencies === defaultDependencies) {
+    if (process.env.CODEOWL_RUNTIME === 'mock') {
+      log('Using mock runtime for system-design analysis.');
+      return createRuntime('mock');
+    }
+
+    if (process.env.CODEOWL_SYSTEM_DESIGN_RUNTIME === 'opencode-cli') {
+      try {
+        const runtime = await createRuntime('opencode-cli');
+        log('Using OpenCode CLI runtime for deeper system-design research.');
+        return runtime;
+      } catch (err) {
+        log(`OpenCode CLI unavailable, falling back to direct runtime: ${(err as Error).message}`);
+      }
+    } else {
+      log('Using direct AI runtime for system-design analysis.');
+    }
+
     try {
+      return await createRuntime('direct');
+    } catch (err) {
+      log(`Direct runtime unavailable, falling back to default runtime: ${(err as Error).message}`);
       const runtime = await createRuntime('opencode-cli');
       log('Using OpenCode CLI runtime for deeper system-design research.');
       return runtime;
-    } catch (err) {
-      log(`OpenCode CLI unavailable, falling back to direct runtime: ${(err as Error).message}`);
     }
   }
 
@@ -496,12 +1889,12 @@ function isServiceLikeDir(dirName: string): boolean {
 
 function inferServiceKind(name: string, context = ''): ServiceKind {
   const haystack = `${name} ${context}`.toLowerCase();
-  if (/(^|[\s/_-])(frontend|web|client|ui|mobile|admin|dashboard)(?=$|[\s/_-])/.test(haystack)) return 'app';
-  if (/(^|[\s/_-])(worker|workers|job|jobs|scheduler|cron|consumer|queue)(?=$|[\s/_-])/.test(haystack)) return 'worker';
-  if (/(^|[\s/_-])(gateway|proxy|bff|edge)(?=$|[\s/_-])/.test(haystack)) return 'gateway';
-  if (/(^|[\s/_-])(shared|common|lib|libs|util|utils)(?=$|[\s/_-])/.test(haystack)) return 'library';
+  if (/(^|[\s./_-])(frontend|web|client|ui|mobile|admin|dashboard)(?=$|[\s./_-])/.test(haystack)) return 'app';
+  if (/(^|[\s./_-])(worker|workers|job|jobs|scheduler|cron|consumer|queue)(?=$|[\s./_-])/.test(haystack)) return 'worker';
+  if (/(^|[\s./_-])(gateway|proxy|bff|edge)(?=$|[\s./_-])/.test(haystack)) return 'gateway';
+  if (/(^|[\s./_-])(shared|common|lib|libs|util|utils)(?=$|[\s./_-])/.test(haystack)) return 'library';
   if (RESOURCE_NAME_PATTERN.test(haystack)) return 'resource';
-  if (/(^|[\s/_-])(module|feature|domain)(?=$|[\s/_-])/.test(haystack)) return 'module';
+  if (/(^|[\s./_-])(module|feature|domain)(?=$|[\s./_-])/.test(haystack)) return 'module';
   return 'service';
 }
 
@@ -546,6 +1939,14 @@ function dedupeStrings(values: string[]): string[] {
   return [...new Set(values.map(value => value.trim()).filter(Boolean))];
 }
 
+function uniqueStrings(values: string[]): string[] {
+  return dedupeStrings(values);
+}
+
+function normalizeToken(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
 function dedupeEntities(values: ArchitecturalUnit['entityHints']): ArchitecturalUnit['entityHints'] {
   const seen = new Set<string>();
   const result: ArchitecturalUnit['entityHints'] = [];
@@ -574,7 +1975,7 @@ function dedupeIntegrations(values: ArchitecturalUnit['integrationHints']): Arch
   const seen = new Set<string>();
   const result: ArchitecturalUnit['integrationHints'] = [];
   for (const integration of values) {
-    const key = `${integration.name.toLowerCase()}:${integration.internal}:${integration.category || ''}`;
+    const key = buildIntegrationIdentityKey(integration);
     if (!integration.name || seen.has(key)) continue;
     seen.add(key);
     result.push({
@@ -583,6 +1984,104 @@ function dedupeIntegrations(values: ArchitecturalUnit['integrationHints']): Arch
     });
   }
   return result;
+}
+
+function buildIntegrationIdentityKey(integration: { name: string; internal: boolean; category?: ResourceCategory; instanceKey?: string }): string {
+  return [
+    normalizeToken(integration.name),
+    integration.internal ? 'internal' : 'external',
+    integration.category || '',
+    normalizeToken(integration.instanceKey || ''),
+  ].join(':');
+}
+
+function buildIntegrationServices(services: ServiceDesignDoc[]): ServiceDesignDoc[] {
+  const existingResourceKeys = new Set(
+    services
+      .filter(service => service.kind === 'resource')
+      .map(service => normalizeToken(service.name))
+      .filter(Boolean),
+  );
+  const integrations = new Map<string, {
+    integration: ServiceDesignDoc['integrations'][number];
+    consumers: Set<string>;
+    evidence: Set<string>;
+    confidence: number;
+  }>();
+
+  for (const service of services) {
+    for (const integration of service.integrations) {
+      if (integration.internal) continue;
+      const key = buildIntegrationIdentityKey(integration);
+      if (!integrations.has(key)) {
+        integrations.set(key, {
+          integration,
+          consumers: new Set<string>(),
+          evidence: new Set<string>(),
+          confidence: 0,
+        });
+      }
+
+      const current = integrations.get(key)!;
+      current.consumers.add(service.name);
+      current.confidence = Math.max(current.confidence, service.confidence);
+      for (const filePath of service.evidence.filePaths) {
+        current.evidence.add(filePath);
+      }
+      if (integration.description.length > current.integration.description.length) {
+        current.integration = integration;
+      }
+    }
+  }
+
+  const resources: ServiceDesignDoc[] = [];
+
+  for (const { integration, consumers, evidence, confidence } of integrations.values()) {
+    if (existingResourceKeys.has(normalizeToken(integration.name))) continue;
+    const serviceName = integration.instanceKey
+      ? `${humanizeName(integration.name)} (${integration.instanceKey})`
+      : humanizeName(integration.name);
+
+    resources.push({
+      serviceId: buildIntegrationServiceId(integration),
+      name: serviceName,
+      kind: 'resource',
+      resourceCategory: integration.category,
+      purpose: integration.description,
+      responsibilities: [
+        consumers.size > 1
+          ? `Provide ${humanizeName(integration.name).toLowerCase()} capability shared by ${consumers.size} services`
+          : `Provide ${humanizeName(integration.name).toLowerCase()} capability to ${[...consumers][0]}`,
+      ],
+      capabilities: [],
+      publicInterfaces: [],
+      integrations: [],
+      dependencies: [],
+      entities: [],
+      submodules: [],
+      complexityScore: 1,
+      risks: [],
+      confidence: Math.max(0.55, confidence),
+      evidence: {
+        filePaths: [...evidence].slice(0, 60),
+        reasons: [
+          `Referenced by ${[...consumers].join(', ')}`,
+          ...(integration.instanceKey ? [`Distinct instance key: ${integration.instanceKey}`] : []),
+        ],
+      },
+      discoverySources: [`Synthesized from service integrations for ${[...consumers].join(', ')}`],
+      gaps: [],
+      conflicts: [],
+    });
+  }
+
+  return resources.sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function buildIntegrationServiceId(integration: { name: string; instanceKey?: string }): string {
+  const base = normalizeToken(integration.name) || 'integration';
+  const instance = normalizeToken(integration.instanceKey || '');
+  return instance ? `integration-${base}-${instance}` : `integration-${base}`;
 }
 
 function detectPackageUnits(repoPath: string, index: RepoIndex): ArchitecturalUnit[] {
@@ -622,7 +2121,7 @@ function detectPackageUnits(repoPath: string, index: RepoIndex): ArchitecturalUn
           : files,
         kindHint: dirPath === '.'
           ? inferRootPackageKind(repoPath, manifest, files)
-          : inferPackageKind(unitName, dirPath, manifest),
+          : inferPackageKind(unitName, dirPath, manifest, files),
         resourceCategory: undefined,
         dependencyHints: [],
         analysisHints: [`Detected from package workspace: ${dirPath}`],
@@ -633,7 +2132,7 @@ function detectPackageUnits(repoPath: string, index: RepoIndex): ArchitecturalUn
         interfaceHints: [],
         purposeHint: dirPath === '.'
           ? inferRootPackagePurpose(repoPath, manifest, files)
-          : inferPackagePurpose(unitName, dirPath, manifest),
+          : inferPackagePurpose(unitName, dirPath, manifest, files),
     });
   }
 
@@ -677,7 +2176,7 @@ function inferRootPackageKind(
 ): ServiceKind {
   const solutionLabel = deriveSolutionLabel(repoPath, '.', manifest);
   if (isCliLikeManifest(manifest, files)) return 'app';
-  return inferPackageKind(solutionLabel, '.', manifest);
+  return inferPackageKind(solutionLabel, '.', manifest, files);
 }
 
 function inferRootPackagePurpose(
@@ -728,21 +2227,76 @@ function collectManifestDependencies(manifest: Record<string, unknown> | undefin
   return names;
 }
 
-function inferPackageKind(name: string, dirPath: string, manifest?: Record<string, unknown>): ServiceKind {
+function inferPackageKind(
+  name: string,
+  dirPath: string,
+  manifest?: Record<string, unknown>,
+  files: RepoFile[] = [],
+): ServiceKind {
   const dependencies = JSON.stringify(manifest?.dependencies || {});
   const devDependencies = JSON.stringify(manifest?.devDependencies || {});
   const haystack = `${name} ${dirPath} ${dependencies} ${devDependencies}`;
+
+  if (isFrontendPackage(manifest, files, dirPath)) return 'app';
   if (/\"next\"/.test(haystack)) return 'app';
+  if (/(^|[.\s/_-])worker(?=$|[.\s/_-])/.test(`${name} ${dirPath}`.toLowerCase())) return 'worker';
   return inferServiceKind(name, haystack);
 }
 
-function inferPackagePurpose(name: string, dirPath: string, manifest?: Record<string, unknown>): string | undefined {
-  const manifestName = typeof manifest?.name === 'string' ? manifest.name : name;
-  const kind = inferPackageKind(name, dirPath, manifest);
+function inferPackagePurpose(
+  name: string,
+  dirPath: string,
+  manifest?: Record<string, unknown>,
+  files: RepoFile[] = [],
+): string | undefined {
+  const manifestName = resolvePackageDisplayName(name, manifest);
+  const kind = inferPackageKind(name, dirPath, manifest, files);
   if (kind === 'app') return `${manifestName} is an application package.`;
   if (kind === 'library') return `${manifestName} provides shared library capabilities.`;
   if (kind === 'worker') return `${manifestName} provides background processing or job execution.`;
   return undefined;
+}
+
+function resolvePackageDisplayName(name: string, manifest?: Record<string, unknown>): string {
+  if (typeof manifest?.name !== 'string') return name;
+  const manifestName = manifest.name.replace(/^@[^/]+\//, '');
+  const normalized = manifestName.toLowerCase();
+  if (
+    GENERIC_APP_NAMES.has(normalized)
+    || /(template|starter|boilerplate)/.test(normalized)
+  ) {
+    return name;
+  }
+  return manifestName;
+}
+
+function isFrontendPackage(
+  manifest: Record<string, unknown> | undefined,
+  files: RepoFile[],
+  dirPath: string,
+): boolean {
+  const dependencies = collectManifestDependencies(manifest);
+  if (
+    dependencies.has('react')
+    || dependencies.has('react-dom')
+    || dependencies.has('@angular/core')
+    || dependencies.has('@angular/common')
+    || dependencies.has('vue')
+    || dependencies.has('svelte')
+    || dependencies.has('next')
+  ) {
+    return true;
+  }
+
+  return files.some(file => {
+    const relative = stripUnitPrefix(file.relativePath, dirPath).toLowerCase();
+    return /(^|\/)(src\/)?index\.tsx?$/.test(relative)
+      || /(^|\/)(src\/)?app\.tsx?$/.test(relative)
+      || /(^|\/)public\/index\.html$/.test(relative)
+      || /(^|\/)angular\.json$/.test(relative)
+      || /(^|\/)src\/main\.ts$/.test(relative)
+      || /(^|\/)src\/app\/app\.module\.ts$/.test(relative);
+  });
 }
 
 function deriveSolutionLabel(repoPath: string, dirPath: string, manifest?: Record<string, unknown>): string {
@@ -889,7 +2443,8 @@ function stripUnitPrefix(relativePath: string, dirPath: string): string {
 function isArchitectureRelevantFile(file: RepoFile): boolean {
   const relativePath = normalizePath(file.relativePath);
   return !/(^|\/)(test|tests|spec|specs|__tests__|fixtures?|e2e)(\/|$)/.test(relativePath)
-    && !/^\.(codeowl|claude)(\/|$)/.test(relativePath);
+    && !/^\.(codeowl|claude)(\/|$)/.test(relativePath)
+    && !/(^|\/)(mock-runtime(?:-log)?\.json|report\.json)$/.test(relativePath);
 }
 
 function enrichArchitecturalUnits(index: RepoIndex, units: ArchitecturalUnit[]): ArchitecturalUnit[] {
@@ -1451,6 +3006,7 @@ function scoreFileForAnalysis(file: RepoFile, unit: ArchitecturalUnit): number {
   let score = 1;
 
   if (/package\.json$/.test(relative)) score += 20;
+  if (/(^|\/)(index|main|app|server|client)\.(ts|tsx|js|jsx|py|go|rb|rs|java|kt|cs)$/.test(relative)) score += 10;
   if (/(next\.config|middleware|instrumentation|turbo\.json|docker-compose|compose)/.test(relative)) score += 16;
   if (/(app\/api|pages\/api|server|route\.(ts|js)|controller|service|repository|handler|worker|job|queue)/.test(relative)) score += 14;
   if (/(schema|model|entity|table|db|data|record|patient|medicine)/.test(relative)) score += 12;
@@ -1514,7 +3070,7 @@ function detectComposeUnits(repoPath: string, index: RepoIndex): ArchitecturalUn
         }
       }
 
-      const kindHint = inferServiceKind(service.name, `${service.image || ''} ${buildContext || ''}`);
+      const kindHint = inferComposeServiceKind(service.name, service.image, buildContext);
       const analysisHints: string[] = [
         `Detected from compose file: ${composeFile.relativePath}`,
       ];
@@ -1543,6 +3099,14 @@ function detectComposeUnits(repoPath: string, index: RepoIndex): ArchitecturalUn
   return units;
 }
 
+function inferComposeServiceKind(name: string, image?: string, buildContext?: string): ServiceKind {
+  const haystack = `${name} ${image || ''} ${buildContext || ''}`.toLowerCase();
+  if (!buildContext && /(mongo|mongo-express|seq|redis|postgres|postgresql|mysql|mariadb|rabbitmq|kafka|elasticsearch|opensearch|azurite|blob|storage)/.test(haystack)) {
+    return 'resource';
+  }
+  return inferServiceKind(name, haystack);
+}
+
 function isComposeFile(relativePath: string): boolean {
   const normalized = normalizePath(relativePath).toLowerCase();
   return /(^|\/)(docker-)?compose(\.[\w-]+)?\.ya?ml$/.test(normalized)
@@ -1553,28 +3117,15 @@ function resolveComposeBuildContext(repoPath: string, composeRelativePath: strin
   if (!buildContext) return undefined;
   const composeDir = path.dirname(path.join(repoPath, composeRelativePath));
   const resolved = path.resolve(composeDir, buildContext);
-
-  if (!resolved.startsWith(path.resolve(repoPath))) {
-    return undefined;
-  }
-
+  if (!resolved.startsWith(path.resolve(repoPath))) return undefined;
   const relative = normalizePath(path.relative(repoPath, resolved));
   return relative || '.';
 }
 
 function findFilesForServiceName(index: RepoIndex, serviceName: string): RepoFile[] {
-  const normalizedName = serviceName.toLowerCase();
-  const exactPrefixes = COMMON_SERVICE_PREFIXES.map(prefix => normalizePath(`${prefix}/${normalizedName}`));
-
-  for (const prefix of exactPrefixes) {
-    const files = index.files.filter(file => file.relativePath.startsWith(prefix + '/'));
-    if (files.length > 0) return files;
-  }
-
-  const directFiles = index.files.filter(file => file.relativePath.startsWith(normalizedName + '/'));
-  if (directFiles.length > 0) return directFiles;
-
-  return [];
+  const normalized = normalizeToken(serviceName);
+  const matches = index.files.filter(file => normalizeToken(file.relativePath).includes(normalized));
+  return matches.length > 0 ? matches : [];
 }
 
 type ParsedComposeService = {
@@ -1585,27 +3136,22 @@ type ParsedComposeService = {
 };
 
 function parseComposeServices(filePath: string): ParsedComposeService[] {
-  const content = fs.readFileSync(filePath, 'utf-8');
-  const lines = content.split(/\r?\n/);
+  const lines = fs.readFileSync(filePath, 'utf-8').split(/\r?\n/);
   const services: ParsedComposeService[] = [];
-
   let inServices = false;
   let servicesIndent = -1;
   let current: ParsedComposeService | null = null;
   let currentIndent = -1;
   let inDependsOn = false;
   let dependsOnIndent = -1;
-  let inBuildBlock = false;
-  let buildBlockIndent = -1;
 
-  const flushCurrent = () => {
+  const flush = () => {
     if (!current) return;
-    current.dependsOn = [...new Set(current.dependsOn)];
+    current.dependsOn = uniqueStrings(current.dependsOn);
     services.push(current);
     current = null;
     currentIndent = -1;
     inDependsOn = false;
-    inBuildBlock = false;
   };
 
   for (const rawLine of lines) {
@@ -1613,7 +3159,6 @@ function parseComposeServices(filePath: string): ParsedComposeService[] {
     const line = rawLine.replace(/\s+#.*$/, '');
     const trimmed = line.trim();
     if (!trimmed) continue;
-
     if (!inServices) {
       if (/^services:\s*$/.test(trimmed)) {
         inServices = true;
@@ -1621,99 +3166,51 @@ function parseComposeServices(filePath: string): ParsedComposeService[] {
       }
       continue;
     }
-
     if (indent <= servicesIndent && !/^services:\s*$/.test(trimmed)) {
-      flushCurrent();
+      flush();
       inServices = false;
       continue;
     }
-
     const serviceMatch = trimmed.match(/^([A-Za-z0-9_.-]+):\s*$/);
     if (serviceMatch && indent === servicesIndent + 2) {
-      flushCurrent();
+      flush();
       current = { name: serviceMatch[1], dependsOn: [] };
       currentIndent = indent;
       continue;
     }
-
     if (!current) continue;
-
     if (indent <= currentIndent) {
-      flushCurrent();
+      flush();
       continue;
     }
-
     const imageMatch = trimmed.match(/^image:\s*(.+)$/);
     if (imageMatch) {
       current.image = stripWrappingQuotes(imageMatch[1]);
-      inBuildBlock = false;
       continue;
     }
-
-    const buildObjectMatch = trimmed.match(/^build:\s*\{.*context:\s*([^,}]+).*}$/);
-    if (buildObjectMatch) {
-      current.buildContext = stripWrappingQuotes(buildObjectMatch[1]);
+    const buildMatch = trimmed.match(/^build:\s*(.+)$/);
+    if (buildMatch) {
+      current.buildContext = stripWrappingQuotes(buildMatch[1]);
       continue;
     }
-
-    const buildInlineMatch = trimmed.match(/^build:\s*(.+)$/);
-    if (buildInlineMatch) {
-      const buildValue = stripWrappingQuotes(buildInlineMatch[1]);
-      if (buildValue && buildValue !== '{}') {
-        current.buildContext = buildValue;
-      } else {
-        inBuildBlock = true;
-        buildBlockIndent = indent;
-      }
-      continue;
-    }
-
-    if (inBuildBlock) {
-      if (indent <= buildBlockIndent) {
-        inBuildBlock = false;
-      } else {
-        const contextMatch = trimmed.match(/^context:\s*(.+)$/);
-        if (contextMatch) {
-          current.buildContext = stripWrappingQuotes(contextMatch[1]);
-          continue;
-        }
-      }
-    }
-
-    const dependsOnInlineMatch = trimmed.match(/^depends_on:\s*\[([^\]]+)\]\s*$/);
-    if (dependsOnInlineMatch) {
-      current.dependsOn.push(...dependsOnInlineMatch[1]
-        .split(',')
-        .map(value => stripWrappingQuotes(value.trim()))
-        .filter(Boolean));
-      continue;
-    }
-
     if (/^depends_on:\s*$/.test(trimmed)) {
       inDependsOn = true;
       dependsOnIndent = indent;
       continue;
     }
-
     if (inDependsOn) {
       if (indent <= dependsOnIndent) {
         inDependsOn = false;
       } else {
         const listMatch = trimmed.match(/^-\s*([A-Za-z0-9_.-]+)/);
         const mapMatch = trimmed.match(/^([A-Za-z0-9_.-]+):\s*$/);
-        const inlineListMatch = trimmed.match(/^\[([^\]]+)\]$/);
-        if (listMatch) {
-          current.dependsOn.push(listMatch[1]);
-        } else if (mapMatch) {
-          current.dependsOn.push(mapMatch[1]);
-        } else if (inlineListMatch) {
-          current.dependsOn.push(...inlineListMatch[1].split(',').map(value => stripWrappingQuotes(value.trim())).filter(Boolean));
-        }
+        if (listMatch) current.dependsOn.push(listMatch[1]);
+        if (mapMatch) current.dependsOn.push(mapMatch[1]);
       }
     }
   }
 
-  flushCurrent();
+  flush();
   return services;
 }
 
@@ -1723,11 +3220,8 @@ function stripWrappingQuotes(value: string): string {
 
 export function resolveSystemDesignTemplatePath(): string {
   for (const candidate of SYSTEM_DESIGN_TEMPLATE_CANDIDATES) {
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
+    if (fs.existsSync(candidate)) return candidate;
   }
-
   throw new Error(`System design template not found. Checked: ${SYSTEM_DESIGN_TEMPLATE_CANDIDATES.join(', ')}`);
 }
 
