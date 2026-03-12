@@ -1,10 +1,39 @@
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
+import * as fs from 'fs';
+import * as path from 'path';
 import { z } from 'zod';
 import { IRuntime, RunOptions, RunResult, normalizeTransport, resolveModelTarget } from '../interface';
 
 const MAX_RETRIES = 3;
 const VERCEL_AI_GATEWAY_BASE_URL = 'https://ai-gateway.vercel.sh/v1';
+
+/**
+ * Reads VERCEL_OIDC_TOKEN from the nearest .env file when it is not set as a
+ * process environment variable. This lets `vercel env pull` (which writes the
+ * token to .env) work transparently without requiring users to export an extra
+ * system-level environment variable.
+ */
+function resolveVercelOidcToken(): string | undefined {
+  const fromEnv = process.env['VERCEL_OIDC_TOKEN'];
+  if (fromEnv) return fromEnv;
+
+  // Walk up from cwd looking for a .env file that contains VERCEL_OIDC_TOKEN
+  let dir = process.cwd();
+  for (let i = 0; i < 5; i++) {
+    const envFile = path.join(dir, '.env');
+    if (fs.existsSync(envFile)) {
+      const line = fs.readFileSync(envFile, 'utf-8')
+        .split('\n')
+        .find(l => l.startsWith('VERCEL_OIDC_TOKEN='));
+      if (line) return line.slice('VERCEL_OIDC_TOKEN='.length).trim().replace(/^["']|["']$/g, '');
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return undefined;
+}
 
 function extractJson(text: string): string {
   // Try to extract JSON from markdown code blocks
@@ -154,6 +183,13 @@ export class DirectAIRuntime implements IRuntime {
   async run<T>(options: RunOptions, schema: z.ZodSchema<T>): Promise<RunResult<T>> {
     const { transport, modelId } = resolveModelTarget(options.model, options.transport);
     const baseURL = resolveOpenAICompatibleBaseUrl(transport, options.apiBaseUrl);
+
+    // Vercel AI Gateway: use OIDC token if available (process env or .env file from
+    // `vercel env pull`), otherwise fall back to the configured API key.
+    if (transport === 'vercel') {
+      const apiKey = resolveVercelOidcToken() || options.apiKey;
+      return runWithOpenAI({ ...options, apiKey }, schema, modelId, baseURL);
+    }
 
     switch (transport) {
       case 'anthropic':
