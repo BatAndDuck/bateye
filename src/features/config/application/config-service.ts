@@ -26,7 +26,13 @@ export function saveConfig(repoPath: string, config: Config): void {
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
 }
 
-export function resolveConfig(repoPath: string): Required<Omit<Config, '$schema' | 'fallbackModel'>> & { $schema?: string; fallbackModel?: string } {
+export function resolveConfig(
+  repoPath: string,
+): Required<Omit<Config, '$schema' | 'fallbackModel' | 'prReview'>> & {
+  $schema?: string;
+  fallbackModel?: string;
+  prReview?: Config['prReview'];
+} {
   const config = loadConfig(repoPath);
   return {
     $schema: config.$schema,
@@ -34,15 +40,14 @@ export function resolveConfig(repoPath: string): Required<Omit<Config, '$schema'
     fallbackModel: config.fallbackModel,
     apiKeyEnvVariable: config.apiKeyEnvVariable || DEFAULT_API_KEY_ENV,
     exclude: config.exclude || [],
+    prReview: config.prReview,
   };
 }
 
 export function resolveApiKey(config: { apiKeyEnvVariable: string }): string {
   const key = process.env[config.apiKeyEnvVariable];
   if (!key) {
-    throw new Error(
-      `API key not found. Set the ${config.apiKeyEnvVariable} environment variable.`
-    );
+    throw new Error(`API key not found. Set the ${config.apiKeyEnvVariable} environment variable.`);
   }
 
   return key;

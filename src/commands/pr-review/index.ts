@@ -53,6 +53,9 @@ function printPRReviewSummary(result: PRReviewResult): void {
   console.log();
   console.log(chalk.gray('  Reviewers run:'), result.selectedReviewers.map(r => r.reviewerId).join(', '));
   console.log(chalk.gray('  Total findings:'), result.findings.length);
+  if (result.rejectedFindings && result.rejectedFindings > 0) {
+    console.log(chalk.gray('  Rejected (unverified):'), result.rejectedFindings);
+  }
   console.log();
 
   if (counts.critical > 0) console.log(chalk.red(`  🔴 Critical: ${counts.critical}`));
@@ -60,6 +63,11 @@ function printPRReviewSummary(result: PRReviewResult): void {
   if (counts.medium > 0) console.log(chalk.white(`  🟡 Medium:   ${counts.medium}`));
   if (counts.low > 0) console.log(chalk.gray(`  🟢 Low:      ${counts.low}`));
   if (counts.info > 0) console.log(chalk.gray(`  ℹ️  Info:     ${counts.info}`));
+
+  if (result.autoApproved) {
+    console.log();
+    console.log(chalk.green('  ✅ PR auto-approved (no findings above threshold)'));
+  }
 
   console.log();
   const critical = result.findings.filter(f => f.priority === 'critical' || f.priority === 'high').slice(0, 5);

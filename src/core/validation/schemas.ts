@@ -116,7 +116,6 @@ export const systemSynthesisSchema = z.object({
   globalSummary: z.string(),
 });
 
-// Partial schema for AI to return reviewer analysis (without execution metadata)
 export const reviewerAnalysisSchema = z.object({
   score: z.number().min(0).max(100),
   summary: z.string(),
@@ -137,7 +136,29 @@ export const reviewerAnalysisSchema = z.object({
   })),
 });
 
+export const prReviewerAnalysisSchema = z.object({
+  score: z.number().min(0).max(100),
+  summary: z.string(),
+  findings: z.array(z.object({
+    id: z.string(),
+    title: z.string(),
+    description: z.string(),
+    priority: prioritySchema,
+    confidence: z.number().min(0).max(1),
+    filePath: z.string(),
+    startLine: z.number().int().min(1),
+    endLine: z.number().int().min(1),
+    startColumn: z.number().int().min(1).optional(),
+    endColumn: z.number().int().min(1).optional(),
+    codeQuote: z.string().min(1),
+    evidence: z.array(z.string()),
+    recommendation: z.string(),
+    tags: z.array(z.string()).optional(),
+  })),
+});
+
 export type ReviewerAnalysis = z.infer<typeof reviewerAnalysisSchema>;
+export type PRReviewerAnalysis = z.infer<typeof prReviewerAnalysisSchema>;
 export type OrchestratorAnalysis = z.infer<typeof orchestratorResultSchema>;
 export type SystemSynthesis = z.infer<typeof systemSynthesisSchema>;
 export type ServiceDoc = z.infer<typeof serviceDesignDocSchema>;

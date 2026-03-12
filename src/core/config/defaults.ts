@@ -27,3 +27,7 @@ export const DEFAULT_API_KEY_ENV = 'CODE_OWL_LLM_MODEL_API_KEY';
 export const MAX_FILE_SIZE_BYTES = 500 * 1024; // 500 KB
 export const MAX_CONTEXT_FILES = 50;
 export const MAX_TOKENS_PER_FILE = 8000;
+
+export const CODEOWL_SUMMARY_MARKER = '<!-- codeowl-summary -->';
+export const CODEOWL_STATUS_MARKER = '<!-- codeowl-status -->';
+export const CODEOWL_COMMENT_MARKER = '[CodeOwl';

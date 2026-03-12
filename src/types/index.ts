@@ -20,6 +20,10 @@ export type Finding = {
   tags?: string[];
 };
 
+export type PRFinding = Finding & {
+  codeQuote: string;
+};
+
 export type ReviewerResult = {
   reviewerId: string;
   reviewerName: string;
@@ -55,8 +59,10 @@ export type PRReviewResult = {
     reason: string;
   }[];
   summary: string;
-  findings: Finding[];
+  findings: PRFinding[];
+  rejectedFindings?: number;
   generatedAt: string;
+  autoApproved?: boolean;
 };
 
 export type ServiceInterfaceType = "http" | "graphql" | "event" | "queue" | "cron" | "db";
@@ -189,13 +195,20 @@ export type SystemDesignInventory = {
   conflicts: string[];
 };
 
+export type PRReviewConfig = {
+  autoApprove?: {
+    enabled: boolean;
+    maxSeverity?: "info" | "low" | "medium";
+  };
+};
+
 export type Config = {
   $schema?: string;
   model?: string;
-  /** Fallback model used when the primary model is rate-limited. API key read from CODE_OWL_LLM_MODEL_API_KEY_FALLBACK. */
   fallbackModel?: string;
   apiKeyEnvVariable?: string;
   exclude?: string[];
+  prReview?: PRReviewConfig;
 };
 
 export type ReviewerMetadata = {
