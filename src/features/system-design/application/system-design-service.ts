@@ -211,7 +211,7 @@ export async function runSystemDesign(
   const config = resolveConfig(repoPath);
   let apiKey: string | null = null;
   try {
-    apiKey = resolveApiKey();
+    apiKey = resolveApiKey(config);
   } catch (err) {
     log(`API key unavailable, continuing with static architecture analysis: ${(err as Error).message}`);
   }

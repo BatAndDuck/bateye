@@ -38,8 +38,11 @@ npm run build
 # Link for local development
 npm link
 
-# Set your API key
-export ANTHROPIC_API_KEY=your-key   # or OPENAI_API_KEY etc.
+# Set your credential
+export CODE_OWL_LLM_MODEL_API_KEY=your-provider-key
+
+# For Vercel AI Gateway models, use OIDC instead
+export VERCEL_OIDC_TOKEN=your-vercel-oidc-token
 
 # Initialize in your target repo
 cd /path/to/your/project
@@ -56,9 +59,17 @@ codeowl audit
 {
   "$schema": "./node_modules/codeowl/schemas/codeowl-config.schema.json",
   "model": "anthropic/claude-sonnet-4-5",
-  "lightModel": "anthropic/claude-haiku-4-5-20251001",
-  "apiKey": "your-api-key-here",
-  "apiKeyEnvVariable": "ANTHROPIC_API_KEY",
+  "transport": "auto",
+  "exclude": ["generated", "vendor"]
+}
+```
+
+For Vercel AI Gateway, configure a Vercel-routed model and provide `VERCEL_OIDC_TOKEN`:
+
+```json
+{
+  "$schema": "./node_modules/codeowl/schemas/codeowl-config.schema.json",
+  "model": "vercel/minimax/minimax-m2.5",
   "exclude": ["generated", "vendor"]
 }
 ```
@@ -135,8 +146,6 @@ Commit a `.codeowl/config.json` to your repo root and the workflow will use it a
 ```json
 {
   "model": "anthropic/claude-sonnet-4-5",
-  "lightModel": "anthropic/claude-haiku-4-5-20251001",
-  "apiKeyEnvVariable": "ANTHROPIC_API_KEY",
   "exclude": ["generated", "vendor"]
 }
 ```
@@ -159,10 +168,11 @@ permissions:
 
 | Provider | Model format | API key env |
 |----------|-------------|-------------|
-| Anthropic | `anthropic/claude-*` | `ANTHROPIC_API_KEY` |
-| OpenAI | `openai/gpt-*` | `OPENAI_API_KEY` |
-| OpenRouter | `openrouter/...` | `OPENROUTER_API_KEY` |
-| Google | `google/gemini-*` | `GOOGLE_API_KEY` |
+| Anthropic | `anthropic/claude-*` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| OpenAI | `openai/gpt-*` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| OpenRouter | `openrouter/...` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| Google | `google/gemini-*` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| Vercel AI Gateway | `vercel/<provider>/<model>` | `VERCEL_OIDC_TOKEN` |
 
 ## Local Development
 

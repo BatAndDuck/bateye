@@ -12,6 +12,8 @@ export type ResolvedConfig = {
   prReview?: Config['prReview'];
 };
 
+const VERCEL_OIDC_ENV = 'VERCEL_OIDC_TOKEN';
+
 export function loadConfig(repoPath: string): Config {
   const configPath = path.join(repoPath, CONFIG_FILE);
   if (!fs.existsSync(configPath)) {
@@ -49,10 +51,22 @@ export function resolveConfig(
   };
 }
 
-export function resolveApiKey(): string {
-  const key = process.env[DEFAULT_API_KEY_ENV];
+export function usesVercelGateway(config: Pick<ResolvedConfig, 'model' | 'transport'>): boolean {
+  return config.transport === 'vercel' || config.model.startsWith('vercel/');
+}
+
+export function resolveAuthEnvName(config: Pick<ResolvedConfig, 'model' | 'transport'>): string {
+  return usesVercelGateway(config) ? VERCEL_OIDC_ENV : DEFAULT_API_KEY_ENV;
+}
+
+export function resolveApiKey(config: Pick<ResolvedConfig, 'model' | 'transport'> = {
+  model: DEFAULT_MODEL,
+  transport: 'auto',
+}): string {
+  const envName = resolveAuthEnvName(config);
+  const key = process.env[envName];
   if (!key) {
-    throw new Error(`API key not found. Set the ${DEFAULT_API_KEY_ENV} environment variable.`);
+    throw new Error(`API key not found. Set the ${envName} environment variable.`);
   }
 
   return key;
