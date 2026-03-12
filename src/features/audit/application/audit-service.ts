@@ -32,7 +32,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
 
   log('Loading configuration...');
   const config = resolveConfig(repoPath);
-  const apiKey = resolveApiKey();
+  const apiKey = resolveApiKey(config);
 
   log('Loading reviewers...');
   const { reviewers, warnings } = loadReviewers(repoPath);
@@ -97,7 +97,6 @@ async function runSingleReviewer(
   const userMessage = buildAuditUserMessage(filesContext, index.totalFiles, scopedFiles.length);
 
   let analysis: ReviewerAnalysis;
-  let warnings: string[] = [];
 
   try {
     const result = await runtime.run<ReviewerAnalysis>(
@@ -114,8 +113,7 @@ async function runSingleReviewer(
     );
     analysis = result.data;
   } catch (err) {
-    warnings.push(`Reviewer ${reviewer.id} failed: ${(err as Error).message}`);
-    analysis = { score: 50, summary: 'Reviewer failed to produce output.', findings: [] };
+    throw new Error(`Reviewer ${reviewer.id} failed: ${(err as Error).message}`);
   }
 
   const findings: Finding[] = analysis.findings.map(finding => ({
@@ -137,7 +135,7 @@ async function runSingleReviewer(
       durationMs: Date.now() - start,
       scopedFiles: scopedFiles.length,
       totalRepoFilesSeen: index.totalFiles,
-      warnings,
+      warnings: [],
     },
   };
 }

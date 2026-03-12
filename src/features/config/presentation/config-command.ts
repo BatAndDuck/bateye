@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { Config } from '../../../types/index';
-import { resolveConfig, setConfigField } from '../application/config-service';
+import { resolveAuthEnvName, resolveConfig, setConfigField } from '../application/config-service';
 
 const ALLOWED_FIELDS: (keyof Config)[] = ['model', 'transport', 'apiBaseUrl', 'exclude'];
 
@@ -10,7 +10,7 @@ export async function runConfigShow(repoPath: string): Promise<void> {
 
   const rows: [string, string][] = [
     ['model', config.model],
-    ['apiKeyEnv', 'CODE_OWL_LLM_MODEL_API_KEY'],
+    ['apiKeyEnv', resolveAuthEnvName(config)],
     ['transport', config.transport],
     ['apiBaseUrl', config.apiBaseUrl || '(default)'],
     ['exclude', JSON.stringify(config.exclude)],

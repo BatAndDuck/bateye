@@ -8,31 +8,39 @@ import { IRuntime, RunOptions, RunResult, normalizeTransport, resolveModelTarget
 const MAX_RETRIES = 3;
 const VERCEL_AI_GATEWAY_BASE_URL = 'https://ai-gateway.vercel.sh/v1';
 
-/**
- * Reads VERCEL_OIDC_TOKEN from the nearest .env file when it is not set as a
- * process environment variable. This lets `vercel env pull` (which writes the
- * token to .env) work transparently without requiring users to export an extra
- * system-level environment variable.
- */
-function resolveVercelOidcToken(): string | undefined {
-  const fromEnv = process.env['VERCEL_OIDC_TOKEN'];
+function resolveDotEnvValue(name: string): string | undefined {
+  const fromEnv = process.env[name]?.trim();
   if (fromEnv) return fromEnv;
 
-  // Walk up from cwd looking for a .env file that contains VERCEL_OIDC_TOKEN
+  // Walk up from cwd looking for a .env file that contains the requested key.
   let dir = process.cwd();
   for (let i = 0; i < 5; i++) {
     const envFile = path.join(dir, '.env');
     if (fs.existsSync(envFile)) {
       const line = fs.readFileSync(envFile, 'utf-8')
         .split('\n')
-        .find(l => l.startsWith('VERCEL_OIDC_TOKEN='));
-      if (line) return line.slice('VERCEL_OIDC_TOKEN='.length).trim().replace(/^["']|["']$/g, '');
+        .find(l => l.startsWith(`${name}=`));
+      if (line) return line.slice(`${name}=`.length).trim().replace(/^["']|["']$/g, '');
     }
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
   return undefined;
+}
+
+function resolveVercelOidcToken(): string | undefined {
+  return resolveDotEnvValue('VERCEL_OIDC_TOKEN');
+}
+
+function resolveVercelGatewayApiKey(): string | undefined {
+  return resolveDotEnvValue('AI_GATEWAY_API_KEY');
+}
+
+export function resolveVercelGatewayCredential(configuredApiKey?: string): string | undefined {
+  // Prefer the explicitly configured key so a stale pulled OIDC token cannot
+  // override a working local gateway API key.
+  return configuredApiKey?.trim() || resolveVercelGatewayApiKey() || resolveVercelOidcToken();
 }
 
 function extractJson(text: string): string {
@@ -60,6 +68,26 @@ function shouldRetryWithoutResponseFormat(err: unknown): boolean {
     || /response_format/i.test(candidate?.message || '')
     || /response_format/i.test(candidate?.error?.message || '')
   );
+}
+
+function normalizeRuntimeError(err: unknown, baseURL?: string): Error {
+  const candidate = err as {
+    message?: string;
+    error?: {
+      message?: string;
+    };
+  };
+
+  const message = candidate?.error?.message || candidate?.message || String(err);
+  if (baseURL === VERCEL_AI_GATEWAY_BASE_URL && /Error verifying OIDC token/i.test(message)) {
+    return new Error(
+      'Vercel AI Gateway rejected the configured bearer token for inference. '
+      + 'Use an AI Gateway API key created in Vercel AI Gateway, or provide VERCEL_OIDC_TOKEN. '
+      + `Original error: ${message}`
+    );
+  }
+
+  return err instanceof Error ? err : new Error(message);
 }
 
 async function runWithAnthropic<T>(
@@ -138,7 +166,7 @@ async function runWithOpenAI<T>(
         attempt -= 1;
         continue;
       }
-      throw err;
+      throw normalizeRuntimeError(err, baseURL);
     }
 
     const rawText = response.choices[0]?.message?.content || '';
@@ -184,10 +212,14 @@ export class DirectAIRuntime implements IRuntime {
     const { transport, modelId } = resolveModelTarget(options.model, options.transport);
     const baseURL = resolveOpenAICompatibleBaseUrl(transport, options.apiBaseUrl);
 
-    // Vercel AI Gateway: use OIDC token if available (process env or .env file from
-    // `vercel env pull`), otherwise fall back to the configured API key.
+    // Prefer the configured gateway key before falling back to .env-provided auth.
     if (transport === 'vercel') {
-      const apiKey = resolveVercelOidcToken() || options.apiKey;
+      const apiKey = resolveVercelGatewayCredential(options.apiKey);
+      if (!apiKey) {
+        throw new Error(
+          'Vercel AI Gateway requires a credential. Set CODE_OWL_LLM_MODEL_API_KEY, AI_GATEWAY_API_KEY, or VERCEL_OIDC_TOKEN.'
+        );
+      }
       return runWithOpenAI({ ...options, apiKey }, schema, modelId, baseURL);
     }
 
