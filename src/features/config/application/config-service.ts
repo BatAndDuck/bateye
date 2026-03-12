@@ -6,7 +6,6 @@ import { CONFIG_FILE, DEFAULT_MODEL, DEFAULT_API_KEY_ENV } from '../../../core/c
 export type ResolvedConfig = {
   $schema?: string;
   model: string;
-  fallbackModel?: string;
   transport: string;
   apiBaseUrl?: string;
   exclude: string[];
@@ -43,7 +42,6 @@ export function resolveConfig(
   return {
     $schema: config.$schema,
     model: config.model || DEFAULT_MODEL,
-    fallbackModel: config.fallbackModel,
     transport: config.transport || 'auto',
     apiBaseUrl: config.apiBaseUrl,
     exclude: config.exclude || [],
