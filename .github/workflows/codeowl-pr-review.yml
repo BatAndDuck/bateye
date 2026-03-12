@@ -87,15 +87,15 @@ jobs:
             cat > .codeowl/config.json << 'EOF'
           {
             "model": "anthropic/claude-sonnet-4-5",
-            "lightModel": "anthropic/claude-haiku-4-5-20251001",
-            "apiKeyEnvVariable": "ANTHROPIC_API_KEY"
+            "lightModel": "anthropic/claude-haiku-4-5-20251001"
           }
           EOF
           fi
 
       - name: Run CodeOwl PR Review
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.CODE_OWL_LLM_MODEL_API_KEY }}
+          CODE_OWL_LLM_MODEL_API_KEY: ${{ secrets.CODE_OWL_LLM_MODEL_API_KEY }}
+          CODE_OWL_LLM_MODEL_API_KEY_FALLBACK: ${{ secrets.CODE_OWL_LLM_MODEL_API_KEY_FALLBACK }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # PR_NUMBER lets CodeOwl detect the PR in issue_comment events
           # (for pull_request events it is read from GITHUB_REF automatically)
