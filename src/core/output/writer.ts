@@ -49,6 +49,15 @@ export function writeSystemDesignResult(outputDir: string, result: SystemDesignR
 }
 
 function generateServiceMarkdown(service: import('../../types/index').ServiceDesignDoc): string {
+  const responsibilities = service.responsibilities ?? [];
+  const capabilities = service.capabilities ?? [];
+  const submodules = service.submodules ?? [];
+  const publicInterfaces = service.publicInterfaces ?? [];
+  const integrations = service.integrations ?? [];
+  const dependencies = service.dependencies ?? [];
+  const entities = service.entities ?? [];
+  const gaps = service.gaps ?? [];
+  const evidenceFilePaths = service.evidence?.filePaths ?? [];
   return `# ${service.name}
 
 **Kind:** ${service.kind}
@@ -59,30 +68,30 @@ ${service.kind === 'resource' ? '' : `**Complexity:** ${service.complexityScore}
 ${service.purpose}
 
 ## Responsibilities
-${service.responsibilities.map(r => `- ${r}`).join('\n')}
+${responsibilities.map(r => `- ${r}`).join('\n')}
 
 ## Capabilities
-${service.capabilities.length === 0 ? '_None detected_' : service.capabilities.map(capability => `- ${capability}`).join('\n')}
+${capabilities.length === 0 ? '_None detected_' : capabilities.map(capability => `- ${capability}`).join('\n')}
 
 ## Submodules
-${service.submodules.length === 0 ? '_None detected_' : service.submodules.map(module => `- ${module}`).join('\n')}
+${submodules.length === 0 ? '_None detected_' : submodules.map(module => `- ${module}`).join('\n')}
 
 ## Public Interfaces
-${service.publicInterfaces.length === 0 ? '_None_' : service.publicInterfaces.map(i => `- **${i.type}** \`${i.name}\`${i.description ? ': ' + i.description : ''}`).join('\n')}
+${publicInterfaces.length === 0 ? '_None_' : publicInterfaces.map(i => `- **${i.type}** \`${i.name}\`${i.description ? ': ' + i.description : ''}`).join('\n')}
 
 ## Integrations
-${service.integrations.length === 0 ? '_None_' : service.integrations.map(i => `- ${i.name}${i.instanceKey ? ` (${i.instanceKey})` : ''}${i.category ? ` [${i.category}]` : ''}: ${i.description}`).join('\n')}
+${integrations.length === 0 ? '_None_' : integrations.map(i => `- ${i.name}${i.instanceKey ? ` (${i.instanceKey})` : ''}${i.category ? ` [${i.category}]` : ''}: ${i.description}`).join('\n')}
 
 ## Dependencies
-${service.dependencies.length === 0 ? '_None_' : service.dependencies.map(d => `- ${d}`).join('\n')}
+${dependencies.length === 0 ? '_None_' : dependencies.map(d => `- ${d}`).join('\n')}
 
 ## Entities / Data
-${service.entities.length === 0 ? '_None_' : service.entities.map(e => `### ${e.name}${e.description ? '\n' + e.description : ''}${e.fields ? '\n\nFields: ' + e.fields.join(', ') : ''}`).join('\n\n')}
+${entities.length === 0 ? '_None_' : entities.map(e => `### ${e.name}${e.description ? '\n' + e.description : ''}${e.fields ? '\n\nFields: ' + e.fields.join(', ') : ''}`).join('\n\n')}
 
 ## Evidence
-${service.evidence.filePaths.length === 0 ? '_None_' : service.evidence.filePaths.map(file => `- ${file}`).join('\n')}
+${evidenceFilePaths.length === 0 ? '_None_' : evidenceFilePaths.map(file => `- ${file}`).join('\n')}
 
 ## Gaps
-${service.gaps.length === 0 ? '_None_' : service.gaps.map(gap => `- ${gap}`).join('\n')}
+${gaps.length === 0 ? '_None_' : gaps.map(gap => `- ${gap}`).join('\n')}
 `;
 }
