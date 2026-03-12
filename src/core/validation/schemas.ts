@@ -41,12 +41,39 @@ export const serviceDesignDocSchema = z.object({
   serviceId: z.string(),
   name: z.string(),
   kind: z.enum(['service', 'module', 'library', 'app', 'worker', 'gateway', 'resource']),
+  resourceCategory: z.enum([
+    'database',
+    'cache',
+    'queue',
+    'storage',
+    'vector-search',
+    'external-saas',
+    'external-api',
+    'internal-platform',
+  ]).optional(),
   purpose: z.string(),
   responsibilities: z.array(z.string()),
+  capabilities: z.array(z.string()),
   publicInterfaces: z.array(z.object({
     type: z.enum(['http', 'graphql', 'event', 'queue', 'cron', 'db']),
     name: z.string(),
     description: z.string().optional(),
+  })),
+  integrations: z.array(z.object({
+    name: z.string(),
+    description: z.string().max(200),
+    internal: z.boolean(),
+    instanceKey: z.string().optional(),
+    category: z.enum([
+      'database',
+      'cache',
+      'queue',
+      'storage',
+      'vector-search',
+      'external-saas',
+      'external-api',
+      'internal-platform',
+    ]).optional(),
   })),
   dependencies: z.array(z.string()),
   entities: z.array(z.object({
@@ -57,6 +84,14 @@ export const serviceDesignDocSchema = z.object({
   submodules: z.array(z.string()),
   complexityScore: z.number().min(1).max(10),
   risks: z.array(z.string()),
+  confidence: z.number().min(0).max(1).default(0.5),
+  evidence: z.object({
+    filePaths: z.array(z.string()),
+    reasons: z.array(z.string()),
+  }).default({ filePaths: [], reasons: [] }),
+  discoverySources: z.array(z.string()).default([]),
+  gaps: z.array(z.string()).default([]),
+  conflicts: z.array(z.string()).default([]),
 });
 
 export const orchestratorResultSchema = z.object({
@@ -81,7 +116,6 @@ export const systemSynthesisSchema = z.object({
   globalSummary: z.string(),
 });
 
-// Partial schema for AI to return reviewer analysis (without execution metadata)
 export const reviewerAnalysisSchema = z.object({
   score: z.number().min(0).max(100),
   summary: z.string(),
@@ -102,7 +136,6 @@ export const reviewerAnalysisSchema = z.object({
   })),
 });
 
-// PR-specific schema: requires codeQuote for evidence verification
 export const prReviewerAnalysisSchema = z.object({
   score: z.number().min(0).max(100),
   summary: z.string(),

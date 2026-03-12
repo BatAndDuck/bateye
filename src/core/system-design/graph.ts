@@ -28,6 +28,23 @@ export function buildGraph(result: SystemDesignResult): ArchitectureGraph {
         }
       }
     }
+
+    for (const integration of service.integrations || []) {
+      const targetService = findMatchingIntegrationService(result.services, integration);
+      if (targetService && targetService.serviceId !== service.serviceId) {
+        const edgeId = `${service.serviceId}=>${targetService.serviceId}`;
+        if (!edgeIds.has(edgeId)) {
+          edgeIds.add(edgeId);
+          edges.push({
+            id: edgeId,
+            source: service.serviceId,
+            target: targetService.serviceId,
+            label: integration.category || 'integration',
+            type: inferEdgeType(targetService),
+          });
+        }
+      }
+    }
   }
 
   return {
@@ -40,8 +57,22 @@ export function buildGraph(result: SystemDesignResult): ArchitectureGraph {
       weaknesses: result.weaknesses,
       globalSummary: result.globalSummary,
       generatedAt: result.generatedAt,
+      coverage: result.coverage,
     },
   };
+}
+
+function findMatchingIntegrationService(
+  services: ServiceDesignDoc[],
+  integration: ServiceDesignDoc['integrations'][number],
+): ServiceDesignDoc | undefined {
+  const integrationInstanceAlias = normalizeToken(`${integration.name} ${integration.instanceKey || ''}`);
+  if (integration.instanceKey) {
+    const exact = services.find(service => buildAliases(service).has(integrationInstanceAlias));
+    if (exact) return exact;
+  }
+
+  return findMatchingService(services, integration.name);
 }
 
 function findMatchingService(services: ServiceDesignDoc[], dependency: string): ServiceDesignDoc | undefined {
@@ -70,6 +101,10 @@ function buildAliases(service: ServiceDesignDoc): Set<string> {
   }
   if (/(redis|cache)/.test(name)) ['redis', 'cache'].forEach(alias => aliases.add(alias));
   if (/(kafka|rabbitmq|nats|queue|broker)/.test(name)) ['kafka', 'rabbitmq', 'nats', 'broker'].forEach(alias => aliases.add(alias));
+  for (const integration of service.integrations || []) {
+    const normalized = normalizeToken(integration.name);
+    if (normalized) aliases.add(normalized);
+  }
 
   return aliases;
 }
@@ -81,7 +116,7 @@ function normalizeToken(value: string): string {
 function inferEdgeType(target: ServiceDesignDoc): GraphEdge['type'] {
   const haystack = `${target.name} ${target.serviceId}`.toLowerCase();
 
-  if (target.kind === 'resource' && /(database|db|postgres|mysql|mongo|redis|cache)/.test(haystack)) {
+  if (target.kind === 'resource' && (target.resourceCategory === 'database' || /(database|db|postgres|mysql|mongo|redis|cache)/.test(haystack))) {
     return 'db';
   }
   if (target.kind === 'gateway' || /(api|http|gateway|proxy)/.test(haystack)) {
@@ -95,6 +130,19 @@ function inferEdgeType(target: ServiceDesignDoc): GraphEdge['type'] {
 }
 
 function buildEdgeLabel(target: ServiceDesignDoc): string {
+  if (target.kind === 'resource') {
+    switch (target.resourceCategory) {
+      case 'database': return 'reads/writes';
+      case 'cache': return 'uses cache';
+      case 'queue': return 'publishes/consumes';
+      case 'storage': return 'stores files';
+      case 'vector-search': return 'semantic search';
+      case 'external-saas': return 'integrates';
+      case 'external-api': return 'calls API';
+      case 'internal-platform': return 'uses platform';
+      default: break;
+    }
+  }
   const edgeType = inferEdgeType(target);
   if (edgeType === 'db') return 'reads/writes';
   if (edgeType === 'http') return 'calls';
