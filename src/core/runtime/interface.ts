@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+/** Configuration for a single LLM call, including model routing and prompt content */
 export interface RunOptions {
   systemPrompt: string;
   userMessage: string;
@@ -11,6 +12,7 @@ export interface RunOptions {
   temperature?: number;
 }
 
+/** Result wrapper returned by IRuntime.run, including parsed data and execution metadata */
 export interface RunResult<T> {
   data: T;
   model: string;
@@ -19,6 +21,10 @@ export interface RunResult<T> {
   rawResponse: string;
 }
 
+/**
+ * Abstract runtime for executing structured LLM calls.
+ * Implementations include DirectAIRuntime (SDK) and any future CLI-based runtimes.
+ */
 export interface IRuntime {
   run<T>(options: RunOptions, schema: z.ZodSchema<T>): Promise<RunResult<T>>;
   listModels(provider: string, apiKey: string, apiBaseUrl?: string): Promise<string[]>;
@@ -44,6 +50,16 @@ export function normalizeTransport(transport?: string): string {
   return transport?.trim().toLowerCase() || 'auto';
 }
 
+/**
+ * Resolves the effective transport and model ID from a model string and optional transport override.
+ *
+ * When transport is 'auto' (or omitted), the provider segment of the model string is used as the
+ * transport (e.g. "anthropic/claude-sonnet-4-5" → transport="anthropic", modelId="claude-sonnet-4-5").
+ *
+ * When an explicit transport is provided and it differs from the model string's provider prefix,
+ * the full model string (including provider prefix) is passed as the modelId so the gateway can
+ * route it correctly (e.g. transport="vercel", model="anthropic/claude-sonnet-4-5" → modelId="anthropic/claude-sonnet-4-5").
+ */
 export function resolveModelTarget(
   modelString: string,
   transport?: string,

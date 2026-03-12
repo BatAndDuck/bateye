@@ -282,6 +282,25 @@ export async function runSystemDesign(
   };
 
   log('Writing output files...');
+  const graph = writeSystemDesignOutputs(outputDir, result, unitAnalyses, units);
+  log(`✓ HTML report: ${path.join(outputDir, 'index.html')}`);
+
+  return result;
+}
+
+/**
+ * Writes all system design output files to disk and returns the architecture graph.
+ * Produces per-unit JSON docs, graph data, inventory, coverage, architecture summary, and the HTML report.
+ */
+function writeSystemDesignOutputs(
+  outputDir: string,
+  result: SystemDesignResult,
+  unitAnalyses: UnitAnalysisResult[],
+  detectedUnits: ArchitecturalUnit[],
+): ReturnType<typeof buildGraph> {
+  const { coverage, services } = result;
+  const generatedAt = result.generatedAt;
+
   ensureDir(outputDir);
   writeSystemDesignResult(outputDir, result);
   ensureDir(result.artifacts.unitsDir);
@@ -326,7 +345,7 @@ export async function runSystemDesign(
       unitId: analysis.service.serviceId,
       name: analysis.service.name,
       kindHint: analysis.service.kind,
-      dirPath: units.find(unit => unit.name === analysis.service.name)?.dirPath || analysis.service.serviceId,
+      dirPath: detectedUnits.find(unit => unit.name === analysis.service.name)?.dirPath || analysis.service.serviceId,
       seedFiles: analysis.seedFiles,
       candidateFiles: analysis.candidateFiles,
       selectedFiles: analysis.selectedFiles,
@@ -362,11 +381,10 @@ export async function runSystemDesign(
   });
 
   generateHTMLReport(outputDir, graph);
-  log(`✓ HTML report: ${path.join(outputDir, 'index.html')}`);
-
-  return result;
+  return graph;
 }
 
+/** A detected architectural unit (service, module, or app) with its directory path and enriched analysis hints */
 interface ArchitecturalUnit {
   name: string;
   dirPath: string;
@@ -551,8 +569,23 @@ async function analyzeUnit(
   log: (msg: string) => void,
 ): Promise<UnitAnalysisResult> {
   const selection = await selectRelevantFilesForUnit(unit, index, model, aiContext, log);
-  const fileSummaries = await summarizeSelectedFiles(unit, selection.selectedFiles, model, aiContext, log);
-  const synthesized = await synthesizeServiceFromFileSummaries(unit, fileSummaries, model, aiContext, log);
+
+  let fileSummaries: FileSummary[];
+  try {
+    fileSummaries = await summarizeSelectedFiles(unit, selection.selectedFiles, model, aiContext, log);
+  } catch (err) {
+    log(`  Warning: file summarization failed for ${unit.name}, using static analysis: ${(err as Error).message}`);
+    fileSummaries = [];
+  }
+
+  let synthesized: ServiceDesignDoc;
+  try {
+    synthesized = await synthesizeServiceFromFileSummaries(unit, fileSummaries, model, aiContext, log);
+  } catch (err) {
+    log(`  Warning: service synthesis failed for ${unit.name}, falling back to static doc: ${(err as Error).message}`);
+    synthesized = buildStaticServiceDoc(unit, selection.selectedFiles.map(f => f.relativePath));
+  }
+
   const service = enrichServiceDocFromFileSummaries(unit, synthesized, selection, fileSummaries);
 
   return {
