@@ -62,6 +62,6 @@ export function resolveApiKey(): string {
 
 export function setConfigField(repoPath: string, field: keyof Config, value: string | string[]): void {
   const config = loadConfig(repoPath);
-  Object.assign(config, { [field]: value });
+  (config as Record<string, unknown>)[field] = value;
   saveConfig(repoPath, config);
 }
