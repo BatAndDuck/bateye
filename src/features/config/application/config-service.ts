@@ -3,6 +3,16 @@ import * as path from 'path';
 import { Config } from '../../../types/index';
 import { CONFIG_FILE, DEFAULT_MODEL, DEFAULT_API_KEY_ENV } from '../../../core/config/defaults';
 
+export type ResolvedConfig = {
+  $schema?: string;
+  model: string;
+  fallbackModel?: string;
+  transport: string;
+  apiBaseUrl?: string;
+  exclude: string[];
+  prReview?: Config['prReview'];
+};
+
 export function loadConfig(repoPath: string): Config {
   const configPath = path.join(repoPath, CONFIG_FILE);
   if (!fs.existsSync(configPath)) {
@@ -28,26 +38,23 @@ export function saveConfig(repoPath: string, config: Config): void {
 
 export function resolveConfig(
   repoPath: string,
-): Required<Omit<Config, '$schema' | 'fallbackModel' | 'prReview'>> & {
-  $schema?: string;
-  fallbackModel?: string;
-  prReview?: Config['prReview'];
-} {
+): ResolvedConfig {
   const config = loadConfig(repoPath);
   return {
     $schema: config.$schema,
     model: config.model || DEFAULT_MODEL,
     fallbackModel: config.fallbackModel,
-    apiKeyEnvVariable: config.apiKeyEnvVariable || DEFAULT_API_KEY_ENV,
+    transport: config.transport || 'auto',
+    apiBaseUrl: config.apiBaseUrl,
     exclude: config.exclude || [],
     prReview: config.prReview,
   };
 }
 
-export function resolveApiKey(config: { apiKeyEnvVariable: string }): string {
-  const key = process.env[config.apiKeyEnvVariable];
+export function resolveApiKey(): string {
+  const key = process.env[DEFAULT_API_KEY_ENV];
   if (!key) {
-    throw new Error(`API key not found. Set the ${config.apiKeyEnvVariable} environment variable.`);
+    throw new Error(`API key not found. Set the ${DEFAULT_API_KEY_ENV} environment variable.`);
   }
 
   return key;

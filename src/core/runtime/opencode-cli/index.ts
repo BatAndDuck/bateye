@@ -49,7 +49,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
     }
   }
 
-  async listModels(_provider: string, _apiKey: string): Promise<string[]> {
+  async listModels(_provider: string, _apiKey: string, _apiBaseUrl?: string): Promise<string[]> {
     try {
       const result = await execa('opencode', ['models', '--json']);
       const models = JSON.parse(result.stdout);

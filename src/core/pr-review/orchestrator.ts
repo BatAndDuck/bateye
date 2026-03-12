@@ -8,7 +8,9 @@ export async function selectReviewers(
   diff: string,
   availableReviewers: Reviewer[],
   model: string,
-  apiKey: string
+  apiKey: string,
+  transport?: string,
+  apiBaseUrl?: string,
 ): Promise<OrchestratorResult> {
   const runtime = await getRuntime();
 
@@ -24,7 +26,7 @@ export async function selectReviewers(
 
   try {
     const result = await runtime.run<OrchestratorResult>(
-      { systemPrompt, userMessage, model, apiKey, maxTokens: 2048, temperature: 0 },
+      { systemPrompt, userMessage, model, apiKey, transport, apiBaseUrl, maxTokens: 2048, temperature: 0 },
       orchestratorResultSchema
     );
     return result.data;

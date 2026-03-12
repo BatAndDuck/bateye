@@ -5,6 +5,8 @@ export interface RunOptions {
   userMessage: string;
   model: string;       // e.g. "anthropic/claude-sonnet-4-5"
   apiKey: string;
+  transport?: string;  // e.g. "vercel" when routing anthropic/openai models through a gateway
+  apiBaseUrl?: string; // Override for OpenAI-compatible gateways
   maxTokens?: number;
   temperature?: number;
 }
@@ -19,7 +21,7 @@ export interface RunResult<T> {
 
 export interface IRuntime {
   run<T>(options: RunOptions, schema: z.ZodSchema<T>): Promise<RunResult<T>>;
-  listModels(provider: string, apiKey: string): Promise<string[]>;
+  listModels(provider: string, apiKey: string, apiBaseUrl?: string): Promise<string[]>;
   isAvailable(): Promise<boolean>;
 }
 
@@ -35,5 +37,31 @@ export function parseProviderAndModel(modelString: string): { provider: string; 
   return {
     provider: modelString.slice(0, slashIdx).toLowerCase(),
     modelId: modelString.slice(slashIdx + 1),
+  };
+}
+
+export function normalizeTransport(transport?: string): string {
+  return transport?.trim().toLowerCase() || 'auto';
+}
+
+export function resolveModelTarget(
+  modelString: string,
+  transport?: string,
+): { transport: string; modelId: string } {
+  const parsed = parseProviderAndModel(modelString);
+  const normalizedTransport = normalizeTransport(transport);
+
+  if (normalizedTransport === 'auto') {
+    return {
+      transport: parsed.provider,
+      modelId: parsed.modelId,
+    };
+  }
+
+  return {
+    transport: normalizedTransport,
+    modelId: normalizedTransport === parsed.provider || !modelString.includes('/')
+      ? parsed.modelId
+      : modelString,
   };
 }

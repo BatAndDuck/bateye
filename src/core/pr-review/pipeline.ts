@@ -63,7 +63,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   // ─── Stage 1: Load config ───
   log('Loading configuration...');
   const config = resolveConfig(repoPath);
-  const apiKey = resolveApiKey(config);
+  const apiKey = resolveApiKey();
   const baseRef = options.baseRef || 'origin/main';
   const headRef = options.headRef || 'HEAD';
 
@@ -133,7 +133,9 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     rawDiff,
     reviewers,
     config.model,
-    apiKey
+    apiKey,
+    config.transport,
+    config.apiBaseUrl,
   );
 
   const selectedReviewerIds = new Set(orchestratorResult.selectedReviewers.map(r => r.reviewerId));
@@ -145,7 +147,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   log('Running reviewers in parallel...');
 
   const reviewerPromises = selectedReviewers.map(reviewer =>
-    runPRReviewer(reviewer, structuredDiff, changedFiles, config.model, apiKey, runtime, log)
+    runPRReviewer(reviewer, structuredDiff, changedFiles, config.model, apiKey, config.transport, config.apiBaseUrl, runtime, log)
   );
   const reviewerResults = await Promise.all(reviewerPromises);
   const allFindings = reviewerResults.flat();
@@ -244,6 +246,8 @@ async function runPRReviewer(
   changedFiles: string[],
   model: string,
   apiKey: string,
+  transport: string,
+  apiBaseUrl: string | undefined,
   runtime: IRuntime,
   log: (msg: string) => void
 ): Promise<PRFinding[]> {
@@ -258,6 +262,8 @@ async function runPRReviewer(
         userMessage,
         model: reviewer.model || model,
         apiKey,
+        transport,
+        apiBaseUrl,
         maxTokens: 8096,
         temperature: 0,
       },

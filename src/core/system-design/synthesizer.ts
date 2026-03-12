@@ -9,6 +9,8 @@ export async function synthesizeArchitecture(
   model: string,
   apiKey: string,
   coverage?: import('../../types/index').SystemDesignResult['coverage'],
+  transport?: string,
+  apiBaseUrl?: string,
 ): Promise<SystemSynthesis> {
   const runtime = await getRuntime();
   const systemPrompt = buildSystemSynthesisSystemPrompt();
@@ -16,7 +18,7 @@ export async function synthesizeArchitecture(
 
   try {
     const result = await runtime.run<SystemSynthesis>(
-      { systemPrompt, userMessage, model, apiKey, maxTokens: 4096 },
+      { systemPrompt, userMessage, model, apiKey, transport, apiBaseUrl, maxTokens: 4096 },
       systemSynthesisSchema
     );
     return result.data;

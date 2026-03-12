@@ -3,7 +3,7 @@ import * as path from 'path';
 import chalk from 'chalk';
 import execa from 'execa';
 import { loadConfig, resolveConfig } from '../../core/config/loader';
-import { CONFIG_FILE } from '../../core/config/defaults';
+import { CONFIG_FILE, DEFAULT_API_KEY_ENV } from '../../core/config/defaults';
 import { loadReviewers } from '../../core/reviewers/loader';
 import { isGitRepo } from '../../core/git/index';
 
@@ -37,14 +37,18 @@ export async function runDoctor(repoPath: string): Promise<void> {
   }
 
   const config = resolveConfig(repoPath);
-  const apiKey = process.env[config.apiKeyEnvVariable];
+  const apiKey = process.env[DEFAULT_API_KEY_ENV];
   if (apiKey) {
-    checks.push({ label: `API key (${config.apiKeyEnvVariable})`, status: 'ok', detail: '***' + apiKey.slice(-4) });
+    checks.push({
+      label: `API key (${DEFAULT_API_KEY_ENV})`,
+      status: 'ok',
+      detail: '***' + apiKey.slice(-4),
+    });
   } else {
     checks.push({
-      label: `API key (${config.apiKeyEnvVariable})`,
+      label: `API key (${DEFAULT_API_KEY_ENV})`,
       status: 'error',
-      detail: `${config.apiKeyEnvVariable} environment variable is not set`,
+      detail: `${DEFAULT_API_KEY_ENV} environment variable is not set`,
     });
   }
 
@@ -53,6 +57,20 @@ export async function runDoctor(repoPath: string): Promise<void> {
     status: 'ok',
     detail: config.model,
   });
+
+  checks.push({
+    label: 'Transport',
+    status: 'ok',
+    detail: config.transport,
+  });
+
+  if (config.apiBaseUrl) {
+    checks.push({
+      label: 'API base URL',
+      status: 'ok',
+      detail: config.apiBaseUrl,
+    });
+  }
 
   const { reviewers, warnings } = loadReviewers(repoPath);
   checks.push({

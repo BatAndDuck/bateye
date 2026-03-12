@@ -78,7 +78,7 @@ export function createCLI(): Command {
 
   configCmd
     .command('set <field> <value>')
-    .description('Set a configuration field (model, apiKeyEnvVariable, exclude)')
+    .description('Set a configuration field (model, transport, apiBaseUrl, exclude)')
     .action(async (field: string, value: string, _, cmd) => {
       await runConfigSet(getRepoPath(cmd.parent!.parent!), field, value);
     });

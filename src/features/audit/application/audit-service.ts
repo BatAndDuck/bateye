@@ -32,7 +32,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
 
   log('Loading configuration...');
   const config = resolveConfig(repoPath);
-  const apiKey = resolveApiKey(config);
+  const apiKey = resolveApiKey();
 
   log('Loading reviewers...');
   const { reviewers, warnings } = loadReviewers(repoPath);
@@ -101,7 +101,15 @@ async function runSingleReviewer(
 
   try {
     const result = await runtime.run<ReviewerAnalysis>(
-      { systemPrompt, userMessage, model, apiKey, maxTokens: 8096 },
+      {
+        systemPrompt,
+        userMessage,
+        model,
+        apiKey,
+        transport: config.transport,
+        apiBaseUrl: config.apiBaseUrl,
+        maxTokens: 8096,
+      },
       reviewerAnalysisSchema,
     );
     analysis = result.data;

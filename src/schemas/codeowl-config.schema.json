@@ -16,13 +16,18 @@
     },
     "fallbackModel": {
       "type": "string",
-      "description": "Fallback model used when the primary model is rate-limited (429). API key must be set in CODE_OWL_LLM_MODEL_API_KEY_FALLBACK.",
+      "description": "Fallback model used when the primary model is rate-limited (429).",
       "examples": ["anthropic/claude-haiku-4-5-20251001", "openai/gpt-4o-mini"]
     },
-    "apiKeyEnvVariable": {
+    "transport": {
       "type": "string",
-      "description": "Name of the environment variable containing the API key",
-      "examples": ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]
+      "description": "Optional transport used to send requests. Use this when the model name represents the routed provider/model but the HTTP transport should be a gateway such as Vercel AI Gateway.",
+      "examples": ["auto", "vercel", "openrouter", "openai"]
+    },
+    "apiBaseUrl": {
+      "type": "string",
+      "description": "Optional OpenAI-compatible base URL for custom gateways or proxies.",
+      "examples": ["https://ai-gateway.vercel.sh/v1", "https://my-gateway.example.com/v1"]
     },
     "exclude": {
       "type": "array",

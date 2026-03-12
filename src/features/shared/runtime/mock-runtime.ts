@@ -63,7 +63,7 @@ export class MockRuntime implements IRuntime {
     };
   }
 
-  async listModels(provider: string): Promise<string[]> {
+  async listModels(provider: string, _apiKey?: string, _apiBaseUrl?: string): Promise<string[]> {
     const fixtures = readFixtures();
     appendLog({ type: 'listModels', provider });
     return fixtures.models?.[provider] || [];

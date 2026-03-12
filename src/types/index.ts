@@ -206,7 +206,8 @@ export type Config = {
   $schema?: string;
   model?: string;
   fallbackModel?: string;
-  apiKeyEnvVariable?: string;
+  transport?: string;
+  apiBaseUrl?: string;
   exclude?: string[];
   prReview?: PRReviewConfig;
 };

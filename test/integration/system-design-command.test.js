@@ -73,7 +73,6 @@ test('system-design command reaches the mocked runtime and writes artifacts', ()
 
   writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
     model: 'anthropic/mock-model',
-    apiKeyEnvVariable: 'CODE_OWL_LLM_MODEL_API_KEY',
     exclude: [],
   });
 
@@ -146,7 +145,6 @@ test('system-design expands analysis beyond seed files and preserves late contro
 
   writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
     model: 'anthropic/mock-model',
-    apiKeyEnvVariable: 'CODE_OWL_LLM_MODEL_API_KEY',
     exclude: [],
   });
 
@@ -238,7 +236,6 @@ test('system-design deduplicates shared integrations and keeps distinct instance
 
   writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
     model: 'anthropic/mock-model',
-    apiKeyEnvVariable: 'CODE_OWL_LLM_MODEL_API_KEY',
     exclude: [],
   });
 

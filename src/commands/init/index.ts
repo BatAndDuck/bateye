@@ -25,7 +25,6 @@ export async function runInit(repoPath: string): Promise<void> {
     saveConfig(repoPath, {
       $schema: './node_modules/codeowl/schemas/codeowl-config.schema.json',
       model: DEFAULT_MODEL,
-      apiKeyEnvVariable: DEFAULT_API_KEY_ENV,
       exclude: [],
     });
     console.log(chalk.green('  created'), CONFIG_FILE);
@@ -45,6 +44,7 @@ export async function runInit(repoPath: string): Promise<void> {
 
   console.log(chalk.cyan('\nNext steps:'));
   console.log(`  1. Set your API key:   export ${DEFAULT_API_KEY_ENV}=your_key`);
+  console.log(`     Gateway example:   codeowl config set transport vercel`);
   console.log(`  2. Run a check:        ${chalk.white('codeowl doctor')}`);
   console.log(`  3. Run an audit:       ${chalk.white('codeowl audit')}`);
   console.log();

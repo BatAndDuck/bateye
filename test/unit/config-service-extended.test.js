@@ -81,11 +81,10 @@ test('resolveConfig uses default model when model is absent', () => {
   assert.ok(config.model.startsWith('anthropic/'));
 });
 
-test('resolveConfig uses default apiKeyEnvVariable when absent', () => {
+test('resolveConfig uses default transport when absent', () => {
   const tmpDir = makeTmpDir();
   const config = resolveConfig(tmpDir);
-  assert.ok(typeof config.apiKeyEnvVariable === 'string');
-  assert.ok(config.apiKeyEnvVariable.length > 0);
+  assert.equal(config.transport, 'auto');
 });
 
 test('resolveConfig uses config model when specified', () => {
@@ -95,11 +94,15 @@ test('resolveConfig uses config model when specified', () => {
   assert.equal(config.model, 'anthropic/claude-opus-4');
 });
 
-test('resolveConfig uses config apiKeyEnvVariable when specified', () => {
+test('resolveConfig uses config transport and apiBaseUrl when specified', () => {
   const tmpDir = makeTmpDir();
-  writeConfig(tmpDir, { apiKeyEnvVariable: 'MY_CUSTOM_API_KEY' });
+  writeConfig(tmpDir, {
+    transport: 'vercel',
+    apiBaseUrl: 'https://ai-gateway.vercel.sh/v1',
+  });
   const config = resolveConfig(tmpDir);
-  assert.equal(config.apiKeyEnvVariable, 'MY_CUSTOM_API_KEY');
+  assert.equal(config.transport, 'vercel');
+  assert.equal(config.apiBaseUrl, 'https://ai-gateway.vercel.sh/v1');
 });
 
 test('resolveConfig returns empty exclude array when absent', () => {
@@ -110,22 +113,20 @@ test('resolveConfig returns empty exclude array when absent', () => {
 
 // resolveApiKey
 test('resolveApiKey returns API key from environment variable', () => {
-  const envVarName = `CODEOWL_TEST_KEY_${Date.now()}`;
-  process.env[envVarName] = 'my-test-api-key-12345';
+  process.env.CODE_OWL_LLM_MODEL_API_KEY = 'my-test-api-key-12345';
   try {
-    const key = resolveApiKey({ apiKeyEnvVariable: envVarName });
+    const key = resolveApiKey();
     assert.equal(key, 'my-test-api-key-12345');
   } finally {
-    delete process.env[envVarName];
+    delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
   }
 });
 
 test('resolveApiKey throws when environment variable is not set', () => {
-  const envVarName = `CODEOWL_MISSING_KEY_${Date.now()}`;
-  delete process.env[envVarName];
+  delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
   assert.throws(
-    () => resolveApiKey({ apiKeyEnvVariable: envVarName }),
-    new RegExp(envVarName),
+    () => resolveApiKey(),
+    /CODE_OWL_LLM_MODEL_API_KEY/,
   );
 });
 
@@ -153,6 +154,19 @@ test('setConfigField adds a new field to existing config', () => {
   );
   assert.deepEqual(content.exclude, ['dist', 'generated']);
   assert.equal(content.model, 'anthropic/model');
+});
+
+test('setConfigField supports transport fields', () => {
+  const tmpDir = makeTmpDir();
+  writeConfig(tmpDir, { model: 'anthropic/model' });
+  setConfigField(tmpDir, 'transport', 'vercel');
+  setConfigField(tmpDir, 'apiBaseUrl', 'https://ai-gateway.vercel.sh/v1');
+
+  const content = JSON.parse(
+    fs.readFileSync(path.join(tmpDir, '.codeowl', 'config.json'), 'utf-8'),
+  );
+  assert.equal(content.transport, 'vercel');
+  assert.equal(content.apiBaseUrl, 'https://ai-gateway.vercel.sh/v1');
 });
 
 test('setConfigField works when no config file exists yet', () => {

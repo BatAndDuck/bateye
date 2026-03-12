@@ -18,7 +18,6 @@ test('audit command uses built-in reviewers and reaches the mocked runtime', () 
 
   writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
     model: 'anthropic/mock-model',
-    apiKeyEnvVariable: 'CODEOWL_TEST_AUDIT_API_KEY',
     exclude: [],
   });
 
@@ -37,7 +36,7 @@ test('audit command uses built-in reviewers and reaches the mocked runtime', () 
     cwd: process.cwd(),
     env: {
       ...process.env,
-      CODEOWL_TEST_AUDIT_API_KEY: 'direct-test-key',
+      CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
       CODEOWL_RUNTIME: 'mock',
       CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
       CODEOWL_MOCK_RUNTIME_LOG: logPath,

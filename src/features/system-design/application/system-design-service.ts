@@ -211,7 +211,7 @@ export async function runSystemDesign(
   const config = resolveConfig(repoPath);
   let apiKey: string | null = null;
   try {
-    apiKey = resolveApiKey(config);
+    apiKey = resolveApiKey();
   } catch (err) {
     log(`API key unavailable, continuing with static architecture analysis: ${(err as Error).message}`);
   }
@@ -255,7 +255,7 @@ export async function runSystemDesign(
 
   log('Synthesizing architecture...');
   const synthesis = aiContext.enabled && aiContext.apiKey
-    ? await synthesizeArchitecture(services, repoStructure, config.model, aiContext.apiKey, coverage)
+    ? await synthesizeArchitecture(services, repoStructure, config.model, aiContext.apiKey, coverage, config.transport, config.apiBaseUrl)
     : synthesizeStaticArchitecture(services, repoStructure);
   const generatedAt = new Date().toISOString();
 
