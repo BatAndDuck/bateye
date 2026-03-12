@@ -1,7 +1,10 @@
+/** Severity level for a code review finding */
 export type Priority = "critical" | "high" | "medium" | "low" | "info";
 
+/** Which runtime implementation was used to execute an AI review */
 export type RuntimeType = "sdk" | "cli";
 
+/** Represents a single finding from a code reviewer */
 export type Finding = {
   id: string;
   reviewerId: string;
@@ -20,10 +23,12 @@ export type Finding = {
   tags?: string[];
 };
 
+/** A PR review finding that extends Finding with a mandatory verbatim code quote for inline commenting */
 export type PRFinding = Finding & {
   codeQuote: string;
 };
 
+/** The full output from a single reviewer, including score, summary, and all findings */
 export type ReviewerResult = {
   reviewerId: string;
   reviewerName: string;
@@ -41,6 +46,7 @@ export type ReviewerResult = {
   };
 };
 
+/** Full codebase audit output, aggregating all reviewer results into an overall score */
 export type AuditResult = {
   command: "audit";
   repoPath: string;
@@ -50,6 +56,7 @@ export type AuditResult = {
   generatedAt: string;
 };
 
+/** PR review output containing all inline findings and an overall summary */
 export type PRReviewResult = {
   command: "pr-review";
   baseRef: string;
@@ -93,6 +100,7 @@ export type IntegrationRef = {
   instanceKey?: string;
 };
 
+/** Architecture analysis document for a single service or module */
 export type ServiceDesignDoc = {
   serviceId: string;
   name: string;
@@ -134,6 +142,7 @@ export type ArchitectureType =
   | "hybrid-service-oriented"
   | "event-driven-hybrid";
 
+/** Complete system architecture analysis, containing all service docs, graph data, and coverage metrics */
 export type SystemDesignResult = {
   command: "system-design";
   repoPath: string;
@@ -256,6 +265,7 @@ export type GraphEdge = {
   type: "dependency" | "event" | "http" | "db";
 };
 
+/** Graph data structure for the interactive architecture visualisation report */
 export type ArchitectureGraph = {
   nodes: GraphNode[];
   edges: GraphEdge[];

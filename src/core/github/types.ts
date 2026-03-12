@@ -26,12 +26,24 @@ export interface ExistingComment {
   createdAt: string;
 }
 
+/**
+ * Interface for publishing review comments to a VCS pull request platform.
+ * Implement this to add support for platforms beyond the default GitHub implementation.
+ *
+ * Each method is called by the PR review pipeline at well-defined stages:
+ * - `publishStartComment` / `updateStatusComment` — bookend the review run
+ * - `publishInlineComment` — posts a finding as a line-level comment on the diff
+ * - `updateOrCreateSummary` — upserts the overall summary comment
+ * - `approvePR` — submits a formal approval when all findings are below the configured threshold
+ */
 export interface ReviewPlatform {
   getPullRequestContext(): Promise<PullRequestContext>;
+  /** Post a finding as a line-level comment on the diff */
   publishInlineComment(comment: InlineComment): Promise<void>;
   publishSummaryComment(body: string): Promise<void>;
   addReaction(commentId: number, reaction: string): Promise<void>;
   publishStartComment(): Promise<void>;
+  /** Update the summary comment if it already exists, otherwise create it */
   updateOrCreateSummary(body: string): Promise<void>;
   approvePR(body: string): Promise<void>;
   listExistingComments(): Promise<ExistingComment[]>;

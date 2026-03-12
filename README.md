@@ -26,6 +26,8 @@ codeowl system-design --output ./out
 
 ## Setup
 
+**Prerequisites:** Node.js 18.x or later
+
 ```bash
 # Install dependencies
 npm install

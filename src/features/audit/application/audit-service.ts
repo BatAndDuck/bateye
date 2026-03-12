@@ -4,7 +4,7 @@ import { buildRepoIndex, formatFilesForContext, scopeFilesForReviewer } from '..
 import { reviewerAnalysisSchema, ReviewerAnalysis } from '../../../core/validation/schemas';
 import { buildAuditSystemPrompt, buildAuditUserMessage } from '../../../core/prompts/audit';
 import { computeOverallScore } from '../../../core/scoring/normalizer';
-import { AUDIT_OUTPUT_FILE, OUTPUT_DIR } from '../../../core/config/defaults';
+import { AUDIT_OUTPUT_FILE, OUTPUT_DIR, MAX_FILES_FOR_REVIEWER_CONTEXT, MAX_CHARS_PER_REVIEWER_FILE } from '../../../core/config/defaults';
 import { ensureDir, writeAuditResult } from '../../../core/output/writer';
 import { IRuntime } from '../../../core/runtime/interface';
 import { getRuntime } from '../../../core/runtime/factory';
@@ -90,7 +90,7 @@ async function runSingleReviewer(
 ): Promise<ReviewerResult> {
   const start = Date.now();
   const scopedFiles = scopeFilesForReviewer(index, reviewer.scopeHints, reviewer.recommendedGlobs);
-  const filesContext = formatFilesForContext(scopedFiles, 40, 6000);
+  const filesContext = formatFilesForContext(scopedFiles, MAX_FILES_FOR_REVIEWER_CONTEXT, MAX_CHARS_PER_REVIEWER_FILE);
   const model = reviewer.model || config.model;
 
   const systemPrompt = buildAuditSystemPrompt(reviewer.instructions, reviewer.id, reviewer.name);
