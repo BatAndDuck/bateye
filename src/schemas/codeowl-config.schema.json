@@ -14,11 +14,6 @@
       "description": "Primary analysis model in provider/model format (e.g. anthropic/claude-sonnet-4-5)",
       "examples": ["anthropic/claude-sonnet-4-5", "openai/gpt-4o"]
     },
-    "fallbackModel": {
-      "type": "string",
-      "description": "Fallback model used when the primary model is rate-limited (429).",
-      "examples": ["anthropic/claude-haiku-4-5-20251001", "openai/gpt-4o-mini"]
-    },
     "transport": {
       "type": "string",
       "description": "Optional transport used to send requests. Use this when the model name represents the routed provider/model but the HTTP transport should be a gateway such as Vercel AI Gateway.",

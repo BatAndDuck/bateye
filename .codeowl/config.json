@@ -1,6 +1,5 @@
 {
   "$schema": "./node_modules/codeowl/schemas/codeowl-config.schema.json",
   "model": "vercel/minimax/minimax-m2.5",
-  "fallbackModel": "anthropic/claude-haiku-4-5-20251001",
   "exclude": ["generated", "vendor"]
 }

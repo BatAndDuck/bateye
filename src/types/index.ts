@@ -205,7 +205,6 @@ export type PRReviewConfig = {
 export type Config = {
   $schema?: string;
   model?: string;
-  fallbackModel?: string;
   transport?: string;
   apiBaseUrl?: string;
   exclude?: string[];
