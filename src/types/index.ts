@@ -20,6 +20,10 @@ export type Finding = {
   tags?: string[];
 };
 
+export type PRFinding = Finding & {
+  codeQuote: string;
+};
+
 export type ReviewerResult = {
   reviewerId: string;
   reviewerName: string;
@@ -55,8 +59,10 @@ export type PRReviewResult = {
     reason: string;
   }[];
   summary: string;
-  findings: Finding[];
+  findings: PRFinding[];
+  rejectedFindings?: number;
   generatedAt: string;
+  autoApproved?: boolean;
 };
 
 export type ServiceInterfaceType = "http" | "graphql" | "event" | "queue" | "cron" | "db";
@@ -110,11 +116,19 @@ export type SystemDesignResult = {
   generatedAt: string;
 };
 
+export type PRReviewConfig = {
+  autoApprove?: {
+    enabled: boolean;
+    maxSeverity?: "info" | "low" | "medium";
+  };
+};
+
 export type Config = {
   $schema?: string;
   model?: string;
   apiKeyEnvVariable?: string;
   exclude?: string[];
+  prReview?: PRReviewConfig;
 };
 
 export type ReviewerMetadata = {

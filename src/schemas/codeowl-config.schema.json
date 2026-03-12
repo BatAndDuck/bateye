@@ -24,6 +24,32 @@
       "items": { "type": "string" },
       "description": "Additional paths/patterns to exclude from analysis",
       "examples": [["generated", "vendor", "proto"]]
+    },
+    "prReview": {
+      "type": "object",
+      "description": "PR review specific settings",
+      "properties": {
+        "autoApprove": {
+          "type": "object",
+          "description": "Automatically approve PRs when no findings exceed maxSeverity",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enable auto-approve feature",
+              "default": false
+            },
+            "maxSeverity": {
+              "type": "string",
+              "enum": ["info", "low", "medium"],
+              "description": "Maximum severity that still allows auto-approve",
+              "default": "low"
+            }
+          },
+          "required": ["enabled"],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

@@ -41,7 +41,11 @@ Focus your review on:
 - Missing runbook or operational documentation for services
 
 Requirements:
+- ONLY flag documentation issues for code that is directly visible in the diff
+- Every finding must reference the specific code from the diff that lacks documentation
+- Do not suggest adding documentation for code you cannot see in the diff
 - Be practical — not every function needs a comment
 - Focus on public APIs and complex logic that lacks explanation
 - Prioritize: public exports > complex internal logic > simple utilities
 - Include specific suggestions for what documentation should say
+- If documentation is adequate, report zero findings — do not pad the review

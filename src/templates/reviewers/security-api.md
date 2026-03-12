@@ -43,7 +43,10 @@ Focus your review on:
 - Debug endpoints or features left enabled in production code
 
 Requirements:
-- Only report issues that are supported by evidence in the provided code
-- Prefer exact line ranges from the actual source
+- ONLY report security issues with concrete evidence visible in the diff — never speculate about unseen code
+- Every finding must quote the exact vulnerable code from the diff
+- Do not assume vulnerabilities exist without seeing the actual code (e.g., do not guess that "API keys might be hardcoded" without seeing them)
+- Prefer exact line ranges from the actual diff
 - Return structured findings only
 - Include short, actionable remediation advice for each finding
+- If no security issues are found, report zero findings — do not pad the review

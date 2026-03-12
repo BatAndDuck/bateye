@@ -44,6 +44,9 @@ Focus your review on:
 - Incorrect use of type narrowing
 
 Requirements:
-- Only flag real issues visible in the provided code
+- ONLY flag issues that are directly visible in the provided diff — never speculate about unseen code
+- Every finding must cite the exact code from the diff that demonstrates the issue
+- Do not assume what code looks like outside the diff context
 - Prioritize issues by actual impact on maintainability
-- Include specific suggestions for refactoring
+- Include specific, actionable suggestions for refactoring
+- If the code quality is good, report zero findings — do not pad the review

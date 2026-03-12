@@ -31,6 +31,7 @@ jobs:
         with:
           script: |
             let prNumber, baseBranch, headSha;
+            let commentId = '';
 
             if (context.eventName === 'pull_request') {
               prNumber = context.payload.pull_request.number;
@@ -39,6 +40,7 @@ jobs:
             } else {
               // issue_comment: look up the PR to get head SHA and base branch
               prNumber = context.payload.issue.number;
+              commentId = String(context.payload.comment.id);
               const { data: pr } = await github.rest.pulls.get({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -51,6 +53,7 @@ jobs:
             core.setOutput('pr-number', String(prNumber));
             core.setOutput('base-branch', baseBranch);
             core.setOutput('head-sha', headSha);
+            core.setOutput('comment-id', commentId);
 
       - name: Checkout PR code
         uses: actions/checkout@v4
@@ -97,6 +100,8 @@ jobs:
           # PR_NUMBER lets CodeOwl detect the PR in issue_comment events
           # (for pull_request events it is read from GITHUB_REF automatically)
           PR_NUMBER: ${{ steps.pr.outputs.pr-number }}
+          # COMMENT_ID lets CodeOwl add eyes reaction to /review trigger comments
+          COMMENT_ID: ${{ steps.pr.outputs.comment-id }}
         run: |
           codeowl pr-review \
             --base origin/${{ steps.pr.outputs.base-branch }} \
