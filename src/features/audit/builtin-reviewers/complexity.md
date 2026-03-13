@@ -42,3 +42,8 @@ Focus your review on:
 - Repository or service interfaces with exactly one implementation and no realistic prospect of a second — the interface adds a layer of indirection with no benefit in this context
 - Heavily parameterized or generic classes designed to handle hypothetical future variation that doesn't exist — simplify to the concrete case
 - Unnecessary intermediate transformation or mapping steps that convert data between nearly identical shapes without meaningful semantic change
+
+Requirements:
+- Function or file length by itself is usually **medium** at most. Reserve **high** or **critical** for complexity that creates a concrete bug risk, unsafe branching, or materially blocks safe modification.
+- Prefer findings with specific branch, nesting, or abstraction evidence over broad statements that a module is "too large."
+- If the code is long but already decomposed into named helper functions with clear phases, reduce severity or return no finding unless a concrete comprehension hazard remains.

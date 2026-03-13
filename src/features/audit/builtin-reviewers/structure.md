@@ -42,3 +42,8 @@ Focus your review on:
 - Inconsistent use of types and interfaces across similar structures — some DTOs use `interface`, others use `type`, others use `class` with the same shape, without a consistent rationale
 - Inconsistent export patterns — some modules use named exports exclusively, others use default exports, others mix both for similar types of symbols
 - Inconsistent test naming and structure — some tests use `describe`/`it`, others use `test` at the top level, others use custom frameworks, without a standard across the project
+
+Requirements:
+- File size alone is usually **medium** at most. Reserve **high** or **critical** for structural issues with a concrete failure mode, severe navigability break, or repeated coupling evidence.
+- Do not report missing imports or unresolved symbols unless the analyzed file directly shows an undefined reference that is not defined locally, imported, or provided by obvious language/runtime mechanisms.
+- Prefer findings about structural consequences over stylistic preferences. If a pattern is consistent and functional, return no finding unless it creates a real maintenance problem.

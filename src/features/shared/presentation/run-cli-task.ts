@@ -12,18 +12,39 @@ export interface CliTaskOptions<TResult> {
 
 export async function runCliTask<TResult>(options: CliTaskOptions<TResult>): Promise<void> {
   console.log(chalk.cyan(`\n${options.title}\n`));
+  const interactive = Boolean(process.stdout.isTTY && !process.env.CI);
+  let lastMessage = options.startText;
 
-  const spinner = ora({ text: options.startText, color: 'cyan' }).start();
+  if (!interactive) {
+    console.log(chalk.gray(`- ${options.startText}`));
+  }
+
+  const spinner = interactive
+    ? ora({ text: options.startText, color: 'cyan' }).start()
+    : null;
 
   try {
     const result = await options.task(message => {
-      spinner.text = message;
+      lastMessage = message;
+      if (spinner) {
+        spinner.text = message;
+      }
     });
 
-    spinner.succeed(chalk.green(options.successText));
+    if (spinner) {
+      spinner.succeed(chalk.green(options.successText));
+    }
     options.render(result);
+    if (!interactive) {
+      console.log(chalk.gray(`- ${lastMessage}`));
+      console.log(chalk.green(`√ ${options.successText}`));
+    }
   } catch (err) {
-    spinner.fail(chalk.red(`${options.errorPrefix}: ${(err as Error).message}`));
+    if (spinner) {
+      spinner.fail(chalk.red(`${options.errorPrefix}: ${(err as Error).message}`));
+    } else {
+      console.error(chalk.red(`${options.errorPrefix}: ${(err as Error).message}`));
+    }
     process.exit(1);
   }
 }

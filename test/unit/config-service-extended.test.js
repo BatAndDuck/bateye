@@ -114,22 +114,46 @@ test('resolveConfig returns empty exclude array when absent', () => {
 
 // resolveApiKey
 test('resolveApiKey returns API key from default environment variable', () => {
+  const originalKey = process.env.CODE_OWL_LLM_MODEL_API_KEY;
   process.env.CODE_OWL_LLM_MODEL_API_KEY = 'my-test-api-key-12345';
   try {
     const key = resolveApiKey();
     assert.equal(key, 'my-test-api-key-12345');
   } finally {
-    delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
+    if (originalKey === undefined) {
+      delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
+    } else {
+      process.env.CODE_OWL_LLM_MODEL_API_KEY = originalKey;
+    }
   }
 });
 
 test('resolveApiKey uses VERCEL_OIDC_TOKEN for Vercel models', () => {
+  const originalDefaultKey = process.env.CODE_OWL_LLM_MODEL_API_KEY;
+  const originalGatewayKey = process.env.AI_GATEWAY_API_KEY;
+  const originalToken = process.env.VERCEL_OIDC_TOKEN;
+  delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
+  delete process.env.AI_GATEWAY_API_KEY;
   process.env.VERCEL_OIDC_TOKEN = 'vercel-oidc-token';
   try {
     const key = resolveApiKey({ model: 'vercel/minimax/minimax-m2.5', transport: 'auto' });
     assert.equal(key, 'vercel-oidc-token');
   } finally {
-    delete process.env.VERCEL_OIDC_TOKEN;
+    if (originalDefaultKey === undefined) {
+      delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
+    } else {
+      process.env.CODE_OWL_LLM_MODEL_API_KEY = originalDefaultKey;
+    }
+    if (originalGatewayKey === undefined) {
+      delete process.env.AI_GATEWAY_API_KEY;
+    } else {
+      process.env.AI_GATEWAY_API_KEY = originalGatewayKey;
+    }
+    if (originalToken === undefined) {
+      delete process.env.VERCEL_OIDC_TOKEN;
+    } else {
+      process.env.VERCEL_OIDC_TOKEN = originalToken;
+    }
   }
 });
 
@@ -194,4 +218,30 @@ test('setConfigField works when no config file exists yet', () => {
     fs.readFileSync(path.join(tmpDir, '.codeowl', 'config.json'), 'utf-8'),
   );
   assert.equal(content.model, 'anthropic/new-model');
+});
+
+test('setConfigField rejects non-array values for exclude', () => {
+  const tmpDir = makeTmpDir();
+  assert.throws(
+    () => setConfigField(tmpDir, 'exclude', 'dist'),
+    /must be an array of non-empty strings/,
+  );
+});
+
+test('setConfigField rejects blank exclude entries', () => {
+  const tmpDir = makeTmpDir();
+  assert.throws(
+    () => setConfigField(tmpDir, 'exclude', ['dist', '']),
+    /must contain only non-empty strings/,
+  );
+});
+
+test('setConfigField supports disabledReviewers arrays', () => {
+  const tmpDir = makeTmpDir();
+  setConfigField(tmpDir, 'disabledReviewers', ['inline-docs', 'i18n']);
+
+  const content = JSON.parse(
+    fs.readFileSync(path.join(tmpDir, '.codeowl', 'config.json'), 'utf-8'),
+  );
+  assert.deepEqual(content.disabledReviewers, ['inline-docs', 'i18n']);
 });

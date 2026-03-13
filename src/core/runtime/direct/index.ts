@@ -8,12 +8,12 @@ import { IRuntime, RunOptions, RunResult, normalizeTransport, resolveModelTarget
 const MAX_RETRIES = 3;
 const VERCEL_AI_GATEWAY_BASE_URL = 'https://ai-gateway.vercel.sh/v1';
 
-function resolveDotEnvValue(name: string): string | undefined {
+function resolveDotEnvValue(name: string, cwd = process.cwd()): string | undefined {
   const fromEnv = process.env[name]?.trim();
   if (fromEnv) return fromEnv;
 
   // Walk up from cwd looking for a .env file that contains the requested key.
-  let dir = process.cwd();
+  let dir = cwd;
   for (let i = 0; i < 5; i++) {
     const envFile = path.join(dir, '.env');
     if (fs.existsSync(envFile)) {
@@ -29,18 +29,18 @@ function resolveDotEnvValue(name: string): string | undefined {
   return undefined;
 }
 
-function resolveVercelOidcToken(): string | undefined {
-  return resolveDotEnvValue('VERCEL_OIDC_TOKEN');
+function resolveVercelOidcToken(cwd?: string): string | undefined {
+  return resolveDotEnvValue('VERCEL_OIDC_TOKEN', cwd);
 }
 
-function resolveVercelGatewayApiKey(): string | undefined {
-  return resolveDotEnvValue('AI_GATEWAY_API_KEY');
+function resolveVercelGatewayApiKey(cwd?: string): string | undefined {
+  return resolveDotEnvValue('AI_GATEWAY_API_KEY', cwd);
 }
 
-export function resolveVercelGatewayCredential(configuredApiKey?: string): string | undefined {
+export function resolveVercelGatewayCredential(configuredApiKey?: string, cwd?: string): string | undefined {
   // Prefer the explicitly configured key so a stale pulled OIDC token cannot
   // override a working local gateway API key.
-  return configuredApiKey?.trim() || resolveVercelGatewayApiKey() || resolveVercelOidcToken();
+  return configuredApiKey?.trim() || resolveVercelGatewayApiKey(cwd) || resolveVercelOidcToken(cwd);
 }
 
 function extractJson(text: string): string {

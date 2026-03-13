@@ -58,3 +58,8 @@ Focus your review on:
 - Module-level or file-level documentation comment missing on files that export a public API surface — a reader should be able to understand the module's purpose from the top of the file
 - Class-level JSDoc missing on exported classes, especially those with non-trivial construction requirements or lifecycle constraints
 - Missing documentation on constructor parameters for classes where the constructor accepts complex options objects
+
+Requirements:
+- Be selective. Do not report every exported function by default; focus on public APIs, non-obvious behavior, and complex logic.
+- Missing JSDoc on an otherwise obvious exported function is usually **medium** at most, and often **low** if the signature is self-explanatory.
+- Reserve **high** or **critical** only for documentation gaps that create a realistic risk of misuse, incorrect integration, or unsafe behavior.

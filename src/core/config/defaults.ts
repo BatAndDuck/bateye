@@ -32,6 +32,10 @@ export const MAX_TOKENS_PER_FILE = 8000;
 export const MAX_FILES_FOR_REVIEWER_CONTEXT = 40;
 /** Maximum characters to include per file when formatting context for a reviewer */
 export const MAX_CHARS_PER_REVIEWER_FILE = 6000;
+/** Maximum number of audit reviewers to execute concurrently */
+export const MAX_CONCURRENT_AUDIT_REVIEWERS = 10;
+/** Maximum token budget for a single audit reviewer response. */
+export const MAX_AUDIT_REVIEWER_TOKENS = 8096;
 
 export const CODEOWL_SUMMARY_MARKER = '<!-- codeowl-summary -->';
 export const CODEOWL_STATUS_MARKER = '<!-- codeowl-status -->';

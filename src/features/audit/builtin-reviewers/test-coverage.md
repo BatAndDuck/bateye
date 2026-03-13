@@ -36,3 +36,9 @@ Focus your review on:
 - Complex conditional logic branches not all covered
 - Data transformation functions lacking tests for various input shapes
 - Configuration validation logic not tested
+
+Requirements:
+- Only report missing-test findings when you can name the concrete production module or code path that lacks coverage.
+- Do not infer product features such as payments, signup, or browser journeys unless the repository clearly contains those flows.
+- Missing tests for a module is usually **medium**; reserve **high** only for concrete critical paths with a credible failure impact visible in code.
+- For prompt, configuration, or template files, only report coverage gaps when they drive structured runtime behavior and the missing tests could plausibly cause production failures or broken parsing.

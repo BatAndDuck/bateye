@@ -298,3 +298,25 @@ test('reviewerAnalysisSchema rejects finding with confidence out of [0,1]', () =
   });
   assert.ok(!result.success);
 });
+
+test('reviewerAnalysisSchema rejects findings where endLine is before startLine', () => {
+  const result = reviewerAnalysisSchema.safeParse({
+    score: 80,
+    summary: 'Summary',
+    findings: [
+      {
+        id: 'f1',
+        title: 'Issue',
+        description: 'Desc',
+        priority: 'medium',
+        confidence: 0.8,
+        filePath: 'src/foo.ts',
+        startLine: 10,
+        endLine: 5,
+        evidence: [],
+        recommendation: 'Fix it',
+      },
+    ],
+  });
+  assert.ok(!result.success);
+});

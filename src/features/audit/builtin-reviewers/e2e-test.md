@@ -36,3 +36,8 @@ Focus your review on:
 - E2E tests that mirror unit tests (same coverage, higher cost)
 - Missing page object model or similar abstraction (test logic mixed with selectors)
 - Tests not cleaned up after running (leaving test data in the database)
+
+Requirements:
+- Only apply this reviewer when the repository clearly exposes end-user journeys or end-to-end system flows that can realistically be tested from the outside.
+- For CLI tools, libraries, infrastructure repos, or backend-only services without browser/user-journey signals, prefer no findings.
+- Do not invent domain flows like signup, checkout, or payments unless the repository contains clear evidence of those workflows.

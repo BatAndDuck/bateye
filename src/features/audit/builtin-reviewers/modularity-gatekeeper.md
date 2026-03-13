@@ -48,3 +48,7 @@ Focus your review on:
 - Continuously growing index files that accumulate new exports each sprint without corresponding removal of obsolete ones
 - Modules where every new feature requires touching the same central file — a sign of a missing extension point or that the module needs splitting
 - Increasing average import count per file over time — each new file importing from more and more places signals emerging spaghetti dependencies
+
+Severity guidance:
+- Large-file and cohesion findings are usually **medium**. Use **high** only when you can show a concrete coupling or change-risk problem in the current code.
+- Do not report duplicated logic across layers when one module is only a thin re-export or facade over the other.

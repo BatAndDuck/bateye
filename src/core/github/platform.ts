@@ -18,6 +18,19 @@ export class GitHubReviewPlatform implements ReviewPlatform {
     prNumber: number;
     repoPath: string;
   }) {
+    if (!options.owner.trim()) {
+      throw new Error('GitHub owner is required.');
+    }
+    if (!options.repo.trim()) {
+      throw new Error('GitHub repo is required.');
+    }
+    if (!Number.isInteger(options.prNumber) || options.prNumber <= 0) {
+      throw new Error('GitHub PR number must be a positive integer.');
+    }
+    if (!options.repoPath.trim()) {
+      throw new Error('Repository path is required.');
+    }
+
     this.octokit = new Octokit({ auth: options.token });
     this.owner = options.owner;
     this.repo = options.repo;
@@ -237,9 +250,12 @@ export function getGitHubEnvContext(): { owner: string; repo: string; prNumber: 
 
   if (!repository || !prNumberStr) return null;
 
-  const [owner, repo] = repository.split('/');
+  const repositoryParts = repository.split('/');
+  if (repositoryParts.length !== 2 || !repositoryParts[0] || !repositoryParts[1]) return null;
+
+  const [owner, repo] = repositoryParts;
   const prNumber = parseInt(prNumberStr, 10);
-  if (!owner || !repo || isNaN(prNumber)) return null;
+  if (!owner || !repo || !Number.isInteger(prNumber) || prNumber <= 0) return null;
 
   return { owner, repo, prNumber };
 }
