@@ -219,18 +219,26 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     const statusBody = `<!-- codeowl-status -->\n🦉 **CodeOwl** review complete — ${finalFindings.length} findings posted.`;
     await platform.updateStatusComment(statusBody);
 
-    // Auto-approve if configured and threshold met
+    // Auto-approve if configured and threshold met.
+    // Use `deduped` (all findings from this run) not `finalFindings` (new-only) so that
+    // already-posted HIGH/CRITICAL findings from a prior run cannot sneak past the gate.
     if (config.prReview?.autoApprove?.enabled) {
       const maxSev = config.prReview.autoApprove.maxSeverity || 'low';
       const threshold = SEVERITY_ORDER[maxSev] ?? 1;
-      const hasBlocker = finalFindings.some(f => SEVERITY_ORDER[f.priority] > threshold);
+      const hasBlocker = deduped.some(f => SEVERITY_ORDER[f.priority] > threshold);
 
       if (!hasBlocker) {
         log('Auto-approving PR (no findings exceed threshold)...');
-        await platform.approvePR(
+        const approved = await platform.approvePR(
           `🦉 **CodeOwl Auto-Approve**: No findings above "${maxSev}" severity. ✅`
         );
-        result.autoApproved = true;
+        if (approved) {
+          result.autoApproved = true;
+        } else {
+          log('⚠️  Auto-approve failed — check that the workflow token has pull-requests: write permission.');
+        }
+      } else {
+        log(`Auto-approve skipped — findings exceed "${maxSev}" threshold.`);
       }
     }
 

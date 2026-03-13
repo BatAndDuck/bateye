@@ -154,6 +154,6 @@ const SCORE_THRESHOLDS: Array<{ min: number; message: (t: number, c: number, r: 
 ];
 
 export function buildAuditSummary(score: number, totalFindings: number, criticalCount: number, reviewerCount: number): string {
-  const threshold = SCORE_THRESHOLDS.find(t => score >= t.min)!;
+  const threshold = SCORE_THRESHOLDS.find(t => score >= t.min) ?? SCORE_THRESHOLDS[SCORE_THRESHOLDS.length - 1];
   return threshold.message(totalFindings, criticalCount, reviewerCount);
 }
