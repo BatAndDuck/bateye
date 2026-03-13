@@ -40,8 +40,19 @@ Focus your review on:
 - Undocumented external dependencies and their purpose
 - Missing runbook or operational documentation for services
 
+## Severity Guidelines
+
+Use these definitions when assigning `priority` to findings:
+
+- **critical** — Completely absent or dangerously wrong documentation that could cause misuse leading to security, data-loss, or production incidents (e.g. an exported function that deletes data with no docs and a misleading name).
+- **high** — Severe omissions that are likely to cause developer mistakes or significant wasted effort: e.g. a complex multi-step public API with no docs, an undocumented breaking change, or a README so incomplete that onboarding is blocked.
+- **medium** — Missing JSDoc on exported functions/types, undocumented configuration options, missing README sections (troubleshooting, env vars). The code works but developers will struggle.
+- **low** — Nice-to-have improvements: inline comments on non-obvious internals, minor README polish, missing examples on simple utilities.
+- **info** — Stylistic suggestions with no practical impact.
+
 Requirements:
 - Be practical — not every function needs a comment
 - Focus on public APIs and complex logic that lacks explanation
 - Prioritize: public exports > complex internal logic > simple utilities
 - Include specific suggestions for what documentation should say
+- Missing JSDoc on an exported function is **medium** at most — never high or critical

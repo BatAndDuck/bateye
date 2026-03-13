@@ -89,6 +89,13 @@ export function resolveApiKey(config: Pick<ResolvedConfig, 'model' | 'transport'
 
 const ALLOWED_CONFIG_KEYS: ReadonlySet<keyof Config> = new Set(['$schema', 'model', 'transport', 'apiBaseUrl', 'exclude', 'prReview']);
 
+/**
+ * Sets a single field in the repository's CodeOwl config file.
+ * @param repoPath - Path to the repository root
+ * @param field - Configuration field name (must be one of ALLOWED_CONFIG_KEYS)
+ * @param value - New value to assign to the field
+ * @throws Error if field is not in ALLOWED_CONFIG_KEYS
+ */
 export function setConfigField(repoPath: string, field: keyof Config, value: string | string[]): void {
   if (!ALLOWED_CONFIG_KEYS.has(field)) {
     throw new Error(`Unknown config field: ${field}`);

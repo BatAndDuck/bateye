@@ -140,6 +140,12 @@ async function runSingleReviewer(
   };
 }
 
+/**
+ * Score thresholds for generating audit summary messages.
+ * Each entry has a minimum score and a message factory given
+ * (totalFindings, criticalCount, reviewerCount). Evaluated top-to-bottom;
+ * the first threshold whose min is ≤ the score wins.
+ */
 const SCORE_THRESHOLDS: Array<{ min: number; message: (t: number, c: number, r: number) => string }> = [
   { min: 90, message: (t, _c, r) => `Excellent code health. ${t} minor findings across ${r} reviewers.` },
   { min: 75, message: (t, c, r) => `Good code health with ${t} findings across ${r} reviewers. ${c > 0 ? `${c} critical issues require attention.` : 'No critical issues.'}` },
