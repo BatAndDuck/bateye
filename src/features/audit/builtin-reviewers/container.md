@@ -14,12 +14,6 @@ scopeHints:
   - k8s
   - helm
   - compose
-recommendedGlobs:
-  - "**/Dockerfile*"
-  - "**/*.dockerfile"
-  - "**/docker-compose*.yml"
-  - "**/*.yaml"
-  - "**/k8s/**"
 ---
 
 Focus your review on:

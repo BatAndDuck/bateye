@@ -13,13 +13,6 @@ scopeHints:
   - version
   - breaking
   - feature
-recommendedGlobs:
-  - "**/*.md"
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "CHANGELOG*"
-  - "README*"
 ---
 
 Focus your review on:

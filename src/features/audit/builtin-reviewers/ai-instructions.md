@@ -16,14 +16,6 @@ scopeHints:
   - prompt
   - rules
   - coding
-recommendedGlobs:
-  - "**/.claude/**"
-  - "**/CLAUDE.md"
-  - "**/AGENTS.md"
-  - "**/CURSOR_RULES*"
-  - "**/.cursorrules"
-  - "**/copilot-instructions.md"
-  - "**/.github/copilot*"
 ---
 
 Focus your review on:

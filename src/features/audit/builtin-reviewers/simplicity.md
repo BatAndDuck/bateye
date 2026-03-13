@@ -15,12 +15,6 @@ scopeHints:
   - provider
   - manager
   - abstraction
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
 ---
 
 Focus your review on:

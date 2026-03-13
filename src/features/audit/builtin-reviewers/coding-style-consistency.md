@@ -13,13 +13,6 @@ scopeHints:
   - lint
   - pattern
   - standard
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
-  - "**/*.rb"
 ---
 
 Focus your review on:

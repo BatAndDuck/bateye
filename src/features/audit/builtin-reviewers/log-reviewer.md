@@ -19,12 +19,6 @@ scopeHints:
   - error
   - warning
   - info
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
 ---
 
 Focus your review on:

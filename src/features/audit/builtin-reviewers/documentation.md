@@ -11,10 +11,6 @@ scopeHints:
   - api
   - interface
   - types
-recommendedGlobs:
-  - "**/*.md"
-  - "src/**/*.ts"
-  - "docs/**"
 ---
 
 Focus your review on:

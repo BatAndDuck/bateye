@@ -18,12 +18,6 @@ scopeHints:
   - flyway
   - prisma
   - knex
-recommendedGlobs:
-  - "**/migrations/**"
-  - "**/*.migration.ts"
-  - "**/*.migration.sql"
-  - "**/schema.prisma"
-  - "**/*.sql"
 ---
 
 Focus your review on:

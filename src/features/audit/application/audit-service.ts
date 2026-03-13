@@ -126,7 +126,7 @@ async function runSingleReviewer(
   runtime: IRuntime,
 ): Promise<ReviewerResult> {
   const start = Date.now();
-  const scopedFiles = scopeFilesForReviewer(index, reviewer.scopeHints, reviewer.recommendedGlobs);
+  const scopedFiles = scopeFilesForReviewer(index, reviewer.scopeHints);
   const filesContext = formatFilesForContext(scopedFiles, MAX_FILES_FOR_REVIEWER_CONTEXT, MAX_CHARS_PER_REVIEWER_FILE);
   const model = reviewer.model || config.model;
 

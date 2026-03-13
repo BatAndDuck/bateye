@@ -16,12 +16,6 @@ scopeHints:
   - store
   - fetch
   - compute
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
 ---
 
 Focus your review on:

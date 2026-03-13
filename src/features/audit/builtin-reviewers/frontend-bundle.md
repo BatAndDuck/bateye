@@ -16,13 +16,6 @@ scopeHints:
   - page
   - client
   - browser
-recommendedGlobs:
-  - "**/*.tsx"
-  - "**/*.jsx"
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.vue"
-  - "**/*.svelte"
 ---
 
 Focus your review on:

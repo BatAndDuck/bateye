@@ -13,14 +13,6 @@ scopeHints:
   - layout
   - style
   - css
-recommendedGlobs:
-  - "**/*.tsx"
-  - "**/*.jsx"
-  - "**/*.vue"
-  - "**/*.svelte"
-  - "**/*.css"
-  - "**/*.scss"
-  - "**/*.less"
 ---
 
 Focus your review on:

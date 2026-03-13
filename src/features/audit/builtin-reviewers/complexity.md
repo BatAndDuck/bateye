@@ -14,12 +14,6 @@ scopeHints:
   - component
   - function
   - class
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
 ---
 
 Focus your review on:

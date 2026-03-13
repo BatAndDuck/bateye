@@ -18,13 +18,6 @@ scopeHints:
   - mongoose
   - select
   - find
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
-  - "**/*.sql"
 ---
 
 Focus your review on:

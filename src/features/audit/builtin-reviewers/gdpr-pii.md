@@ -16,12 +16,6 @@ scopeHints:
   - audit
   - analytics
   - tracking
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
 ---
 
 Focus your review on:

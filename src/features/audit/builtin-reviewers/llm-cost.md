@@ -18,12 +18,6 @@ scopeHints:
   - model
   - chat
   - message
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
 ---
 
 Focus your review on:

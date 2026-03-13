@@ -16,14 +16,6 @@ scopeHints:
   - maven
   - gradle
   - module
-recommendedGlobs:
-  - "**/package.json"
-  - "**/requirements*.txt"
-  - "**/go.mod"
-  - "**/pom.xml"
-  - "**/build.gradle"
-  - "**/*.ts"
-  - "**/*.js"
 ---
 
 Focus your review on:

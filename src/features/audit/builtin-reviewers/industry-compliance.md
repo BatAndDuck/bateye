@@ -16,13 +16,6 @@ scopeHints:
   - billing
   - financial
   - credit
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
-  - "**/*.sql"
 ---
 
 Focus your review on:

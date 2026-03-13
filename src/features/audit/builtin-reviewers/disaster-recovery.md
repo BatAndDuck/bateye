@@ -16,13 +16,6 @@ scopeHints:
   - rpo
   - ha
   - redundancy
-recommendedGlobs:
-  - "**/*.tf"
-  - "**/*.yaml"
-  - "**/*.yml"
-  - "**/*.sh"
-  - "**/*.py"
-  - "**/*.ts"
 ---
 
 Focus your review on:

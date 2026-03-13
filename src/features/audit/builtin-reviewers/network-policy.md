@@ -15,15 +15,6 @@ scopeHints:
   - proxy
   - nginx
   - gateway
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.yaml"
-  - "**/*.yml"
-  - "**/*.conf"
-  - "**/*.nginx"
 ---
 
 Focus your review on:

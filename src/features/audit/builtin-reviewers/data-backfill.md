@@ -16,14 +16,6 @@ scopeHints:
   - data
   - job
   - task
-recommendedGlobs:
-  - "**/migrations/**"
-  - "**/scripts/**"
-  - "**/jobs/**"
-  - "**/tasks/**"
-  - "**/*.sql"
-  - "**/*.ts"
-  - "**/*.py"
 ---
 
 Focus your review on:

@@ -15,12 +15,6 @@ scopeHints:
   - barrel
   - import
   - dependency
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
 ---
 
 Focus your review on:

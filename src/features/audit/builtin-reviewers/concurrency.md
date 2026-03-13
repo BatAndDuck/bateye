@@ -17,13 +17,6 @@ scopeHints:
   - race
   - queue
   - pool
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
-  - "**/*.rs"
 ---
 
 Focus your review on:

@@ -18,12 +18,6 @@ scopeHints:
   - github
   - gitlab
   - jenkins
-recommendedGlobs:
-  - "**/.github/workflows/*.yml"
-  - "**/.gitlab-ci.yml"
-  - "**/Jenkinsfile"
-  - "**/azure-pipelines.yml"
-  - "**/.circleci/**"
 ---
 
 Focus your review on:

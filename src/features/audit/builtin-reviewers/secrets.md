@@ -15,16 +15,6 @@ scopeHints:
   - password
   - credential
   - api
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.yaml"
-  - "**/*.yml"
-  - "**/*.json"
-  - "**/*.env*"
-  - "**/*.sh"
 ---
 
 Focus your review on:

@@ -18,14 +18,6 @@ scopeHints:
   - async
   - load
   - scale
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
-  - "**/*.yaml"
-  - "**/*.tf"
 ---
 
 Focus your review on:

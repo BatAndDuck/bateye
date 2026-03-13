@@ -16,13 +16,6 @@ scopeHints:
   - infra
   - stack
   - resource
-recommendedGlobs:
-  - "**/*.tf"
-  - "**/*.tfvars"
-  - "**/*.hcl"
-  - "**/*.yaml"
-  - "**/*.yml"
-  - "**/*.ts"
 ---
 
 Focus your review on:

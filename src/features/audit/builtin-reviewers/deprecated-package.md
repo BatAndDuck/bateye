@@ -15,13 +15,6 @@ scopeHints:
   - module
   - version
   - upgrade
-recommendedGlobs:
-  - "**/package.json"
-  - "**/requirements*.txt"
-  - "**/go.mod"
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
 ---
 
 Focus your review on:

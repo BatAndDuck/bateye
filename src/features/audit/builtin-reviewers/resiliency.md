@@ -17,12 +17,6 @@ scopeHints:
   - service
   - downstream
   - upstream
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
 ---
 
 Focus your review on:

@@ -15,14 +15,6 @@ scopeHints:
   - openapi
   - swagger
   - graphql
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.yaml"
-  - "**/*.graphql"
-  - "**/*.gql"
 ---
 
 Focus your review on:

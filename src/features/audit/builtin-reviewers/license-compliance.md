@@ -16,13 +16,6 @@ scopeHints:
   - gpl
   - mit
   - apache
-recommendedGlobs:
-  - "**/package.json"
-  - "**/requirements*.txt"
-  - "**/go.mod"
-  - "**/pom.xml"
-  - "**/build.gradle"
-  - "**/LICENSE*"
 ---
 
 Focus your review on:

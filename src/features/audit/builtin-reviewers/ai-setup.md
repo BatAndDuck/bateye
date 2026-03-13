@@ -15,12 +15,6 @@ scopeHints:
   - review
   - automation
   - workflow
-recommendedGlobs:
-  - "**/.claude/**"
-  - "**/CLAUDE.md"
-  - "**/AGENTS.md"
-  - "**/.github/workflows/*.yml"
-  - "**/.cursorrules"
 ---
 
 Focus your review on:

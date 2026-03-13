@@ -16,12 +16,6 @@ scopeHints:
   - permission
   - payment
   - delete
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
 ---
 
 Focus your review on:

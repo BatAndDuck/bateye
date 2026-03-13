@@ -15,14 +15,6 @@ scopeHints:
   - pytest
   - vitest
   - mocha
-recommendedGlobs:
-  - "**/*.test.ts"
-  - "**/*.spec.ts"
-  - "**/*.test.js"
-  - "**/tests/**"
-  - "**/__tests__/**"
-  - "**/*.ts"
-  - "**/*.js"
 ---
 
 Focus your review on:

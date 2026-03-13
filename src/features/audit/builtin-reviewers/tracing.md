@@ -16,12 +16,6 @@ scopeHints:
   - apm
   - context
   - propagation
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
 ---
 
 Focus your review on:

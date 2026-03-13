@@ -16,12 +16,6 @@ scopeHints:
   - catch
   - error
   - exception
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
 ---
 
 Focus your review on:

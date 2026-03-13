@@ -17,14 +17,6 @@ scopeHints:
   - factory
   - mock
   - ci
-recommendedGlobs:
-  - "**/*.test.ts"
-  - "**/*.spec.ts"
-  - "**/tests/**"
-  - "**/cypress/**"
-  - "**/playwright/**"
-  - "**/jest.config*"
-  - "**/vitest.config*"
 ---
 
 Focus your review on:

@@ -16,13 +16,6 @@ scopeHints:
   - script
   - dev
   - start
-recommendedGlobs:
-  - "**/README*"
-  - "**/.env*"
-  - "**/docker-compose*"
-  - "**/Makefile"
-  - "**/package.json"
-  - "**/pyproject.toml"
 ---
 
 Focus your review on:

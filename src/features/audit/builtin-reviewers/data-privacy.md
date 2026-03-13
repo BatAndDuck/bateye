@@ -18,14 +18,6 @@ scopeHints:
   - pii
   - store
   - persist
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.sql"
-  - "**/*.prisma"
-  - "**/migrations/**"
 ---
 
 Focus your review on:

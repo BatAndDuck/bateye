@@ -16,12 +16,6 @@ scopeHints:
   - token
   - jwt
   - config
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
 ---
 
 Focus your review on:

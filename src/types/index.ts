@@ -254,7 +254,6 @@ export type ReviewerMetadata = {
   description?: string;
   enabled?: boolean;
   scopeHints?: string[];
-  recommendedGlobs?: string[];
   model?: string;
   /** Which modes this reviewer participates in. Defaults to 'both'. */
   mode?: ReviewerMode;

@@ -13,11 +13,6 @@ scopeHints:
   - doc
   - guide
   - wiki
-recommendedGlobs:
-  - "**/*.md"
-  - "**/*.mdx"
-  - "**/*.txt"
-  - "**/*.rst"
 ---
 
 Focus your review on:

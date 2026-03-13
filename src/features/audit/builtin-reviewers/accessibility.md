@@ -16,12 +16,6 @@ scopeHints:
   - nav
   - header
   - dialog
-recommendedGlobs:
-  - "**/*.tsx"
-  - "**/*.jsx"
-  - "**/*.vue"
-  - "**/*.svelte"
-  - "**/*.html"
 ---
 
 Focus your review on:

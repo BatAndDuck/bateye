@@ -14,13 +14,6 @@ scopeHints:
   - contract
   - export
   - public
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.graphql"
-  - "**/*.yaml"
 ---
 
 Focus your review on:

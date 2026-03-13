@@ -18,13 +18,6 @@ scopeHints:
   - assert
   - mock
   - stub
-recommendedGlobs:
-  - "**/*.test.ts"
-  - "**/*.spec.ts"
-  - "**/*.test.js"
-  - "**/*.spec.js"
-  - "**/tests/**"
-  - "**/__tests__/**"
 ---
 
 Focus your review on:

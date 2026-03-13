@@ -15,12 +15,6 @@ scopeHints:
   - feature
   - domain
   - layer
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
 ---
 
 Focus your review on:

@@ -44,7 +44,6 @@ function parseReviewerFile(filePath: string, isBuiltIn: boolean): Reviewer | nul
       description: data.description ? String(data.description) : undefined,
       enabled: data.enabled !== false,
       scopeHints: Array.isArray(data.scopeHints) ? data.scopeHints.map(String) : undefined,
-      recommendedGlobs: Array.isArray(data.recommendedGlobs) ? data.recommendedGlobs.map(String) : undefined,
       model: data.model ? String(data.model) : undefined,
       mode,
       category: data.category ? String(data.category) as Reviewer['category'] : undefined,

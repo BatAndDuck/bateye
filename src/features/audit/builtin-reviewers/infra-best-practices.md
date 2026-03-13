@@ -17,13 +17,6 @@ scopeHints:
   - dns
   - ssl
   - cert
-recommendedGlobs:
-  - "**/*.tf"
-  - "**/*.yaml"
-  - "**/*.yml"
-  - "**/*.sh"
-  - "**/*.env*"
-  - "**/Makefile"
 ---
 
 Focus your review on:

@@ -16,14 +16,6 @@ scopeHints:
   - html
   - sql
   - db
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
-  - "**/*.php"
-  - "**/*.rb"
 ---
 
 Focus your review on:

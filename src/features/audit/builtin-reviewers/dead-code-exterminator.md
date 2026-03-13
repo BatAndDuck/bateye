@@ -15,12 +15,6 @@ scopeHints:
   - module
   - feature
   - flag
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
 ---
 
 Focus your review on:

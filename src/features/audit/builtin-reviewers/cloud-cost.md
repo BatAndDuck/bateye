@@ -20,13 +20,6 @@ scopeHints:
   - resource
   - iac
   - terraform
-recommendedGlobs:
-  - "**/*.tf"
-  - "**/*.hcl"
-  - "**/*.yaml"
-  - "**/*.yml"
-  - "**/*.ts"
-  - "**/*.py"
 ---
 
 Focus your review on:

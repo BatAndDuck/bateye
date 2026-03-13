@@ -14,13 +14,6 @@ scopeHints:
   - model
   - class
   - function
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.java"
-  - "**/*.rb"
 ---
 
 Focus your review on:

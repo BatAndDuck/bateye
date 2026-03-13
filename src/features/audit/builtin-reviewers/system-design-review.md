@@ -17,14 +17,6 @@ scopeHints:
   - worker
   - scheduler
   - config
-recommendedGlobs:
-  - "**/*.ts"
-  - "**/*.js"
-  - "**/*.py"
-  - "**/*.go"
-  - "**/*.yaml"
-  - "**/*.tf"
-  - "**/*.md"
 ---
 
 Focus your review on:

@@ -11,10 +11,6 @@ scopeHints:
   - helper
   - lib
   - module
-recommendedGlobs:
-  - "src/**/*.ts"
-  - "lib/**/*.ts"
-  - "**/*.js"
 ---
 
 Focus your review on:

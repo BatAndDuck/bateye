@@ -14,14 +14,6 @@ scopeHints:
   - button
   - modal
   - form
-recommendedGlobs:
-  - "**/*.tsx"
-  - "**/*.jsx"
-  - "**/*.vue"
-  - "**/*.svelte"
-  - "**/*.html"
-  - "**/*.css"
-  - "**/*.scss"
 ---
 
 Focus your review on:

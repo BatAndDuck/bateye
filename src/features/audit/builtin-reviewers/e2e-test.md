@@ -16,12 +16,6 @@ scopeHints:
   - flow
   - user
   - scenario
-recommendedGlobs:
-  - "**/*.e2e.*"
-  - "**/e2e/**"
-  - "**/cypress/**"
-  - "**/playwright/**"
-  - "**/*.spec.ts"
 ---
 
 Focus your review on:

@@ -12,10 +12,6 @@ scopeHints:
   - auth
   - middleware
   - handler
-recommendedGlobs:
-  - "src/**/*.ts"
-  - "apps/**/api/**"
-  - "routes/**"
 ---
 
 Focus your review on:
