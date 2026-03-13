@@ -55,5 +55,11 @@ Analyze the Stylelint findings and report actual bugs, browser compatibility iss
 - Group findings by file
 - For browser compatibility issues, specify which browsers are affected
 - For accessibility findings, reference WCAG guidelines where applicable
-- For PR mode: Only report issues in stylesheet files that appear in the diff
 - If Stylelint found zero significant issues, return an empty findings array
+
+## PR Review Mode (when you receive a diff with [Line N] markers)
+
+1. **Diff-only**: Only report issues on CSS/SCSS lines that are added/changed in the diff.
+2. **Consolidate per file**: ALL Stylelint issues within a changed file → ONE finding that describes the most critical problem and lists others in the description.
+3. **Hard cap**: At most **3 findings total**. Report only bugs and accessibility concerns — skip informational style preferences entirely.
+4. **codeQuote**: The exact changed CSS line that introduced the issue.

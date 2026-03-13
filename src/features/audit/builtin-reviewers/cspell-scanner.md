@@ -52,5 +52,11 @@ Analyze the CSpell findings and report genuine typos while filtering out technic
 
 - Group related typos by file rather than reporting each word individually
 - For each finding, include the misspelled word and the likely correct spelling
-- For PR review mode: Only report typos in files that appear in the diff
 - If CSpell found zero genuine typos, return an empty findings array
+
+## PR Review Mode (when you receive a diff with [Line N] markers)
+
+1. **Diff-only**: Only report typos on lines that are added/changed in the diff.
+2. **Consolidate per file**: ALL typos in a single file → ONE finding. List each misspelling in the description (e.g., "`recieve` → `receive`, `occured` → `occurred`") and point to the first affected line.
+3. **Hard cap**: At most **3 findings total** (one per changed file at most). Only report if the typo is in user-facing text or a public API name — skip internal comments.
+4. **codeQuote**: The exact changed line containing the first typo in that file.

@@ -66,4 +66,10 @@ Analyze the html-validate findings and report accessibility and correctness issu
 - Group findings by file, then by category (accessibility vs. correctness)
 - For accessibility findings, reference the specific WCAG criterion (e.g., WCAG 2.1 Level A: 1.1.1 Non-text Content)
 - Provide specific fix recommendations (add `alt="description"`, wrap in `<label>`, etc.)
-- For PR mode: Only report issues in HTML files that appear in the diff
+
+## PR Review Mode (when you receive a diff with [Line N] markers)
+
+1. **Diff-only**: Only report issues on lines that are added/changed in the diff.
+2. **Consolidate by category per file**: All accessibility issues in a file → ONE finding. All HTML validity issues → ONE finding. That gives at most 2 findings per changed HTML file.
+3. **Hard cap**: At most **4 findings total**. Prioritise high-severity accessibility issues over low-severity validity issues.
+4. **codeQuote**: The exact changed HTML line that introduced the issue.

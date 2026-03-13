@@ -68,5 +68,13 @@ Analyze the Semgrep findings and report only those that represent real security 
 
 - For each finding, include the Semgrep rule ID (e.g., `javascript.lang.security.audit.eval.eval-detected`), the matched code, and why it is exploitable
 - Reference the exact file path and line number from Semgrep output
-- For PR review mode: Semgrep targets the changed files — report all findings in those files
 - If Semgrep found zero issues or all are false positives, return an empty findings array with a high score
+
+## PR Review Mode (when you receive a diff with [Line N] markers)
+
+Security findings from Semgrep deserve individual comments when they are distinct vulnerabilities. However:
+1. **Diff-only**: Only report findings on lines that are added/changed in the diff.
+2. **No consolidation for distinct vulnerabilities**: Unlike lint tools, each unique injection flaw or RCE vector gets its own comment — these are not noise.
+3. **Consolidate repeated rule matches**: If the same Semgrep rule fires on 3+ lines in the same function, report the most critical instance and mention the count (e.g., "eval() used in 3 places in this function").
+4. **Hard cap**: At most **6 findings total**. Drop INFO-level findings entirely. Prioritise by severity.
+5. **codeQuote**: The exact changed line that Semgrep flagged.

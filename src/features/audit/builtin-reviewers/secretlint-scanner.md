@@ -60,3 +60,10 @@ Analyze the Secretlint findings and determine which ones represent real exposed 
 - For each real finding, cite the exact pattern Secretlint matched and explain why it is a real secret
 - Provide specific remediation: move to environment variable, use secrets manager, rotate the exposed key
 - If Secretlint found nothing or all findings are false positives, return an empty findings array — that means the code is clean
+
+## PR Review Mode (when you receive a diff with [Line N] markers)
+
+Secrets deserve individual comments — do NOT consolidate them. However:
+1. **Diff-only**: Only flag secrets on lines that are added/changed in the diff. Do NOT flag pre-existing secrets on unchanged context lines.
+2. **Hard cap**: At most **5 findings total** — if there are more secrets, report the highest-severity ones and mention the count in the description.
+3. **codeQuote**: Must be the exact changed line containing the suspected secret (do not include the actual secret value in the title — describe the pattern instead).
