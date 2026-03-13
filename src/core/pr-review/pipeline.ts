@@ -237,7 +237,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
         if (approved) {
           result.autoApproved = true;
         } else {
-          log('⚠️  Auto-approve failed — check that the workflow token has pull-requests: write permission.');
+          log('⚠️  Auto-approve failed. To fix: go to GitHub repo Settings → General → "Allow GitHub Actions to create and approve pull requests" and enable it.');
         }
       } else {
         log(`Auto-approve skipped — findings exceed "${maxSev}" threshold.`);
