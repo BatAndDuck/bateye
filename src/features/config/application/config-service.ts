@@ -63,12 +63,24 @@ export function resolveApiKey(config: Pick<ResolvedConfig, 'model' | 'transport'
   model: DEFAULT_MODEL,
   transport: 'auto',
 }): string {
+  if (usesVercelGateway(config)) {
+    // Accept any of the three Vercel credential sources (same priority as the runtime).
+    const key = process.env[DEFAULT_API_KEY_ENV]
+      || process.env['AI_GATEWAY_API_KEY']
+      || process.env[VERCEL_OIDC_ENV];
+    if (!key) {
+      throw new Error(
+        `API key not found. Set ${DEFAULT_API_KEY_ENV}, AI_GATEWAY_API_KEY, or ${VERCEL_OIDC_ENV} environment variable.`
+      );
+    }
+    return key;
+  }
+
   const envName = resolveAuthEnvName(config);
   const key = process.env[envName];
   if (!key) {
     throw new Error(`API key not found. Set the ${envName} environment variable.`);
   }
-
   return key;
 }
 
