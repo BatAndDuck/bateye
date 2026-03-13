@@ -227,14 +227,13 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     await platform.updateStatusComment(statusBody);
 
     // Auto-approve if configured and threshold met.
-    // Use `deduped` (all findings from THIS run's AI analysis) not `finalFindings` (new-only).
-    // `deduped` only contains what the AI found right now — it does NOT carry over findings
-    // from previous runs. If a prior HIGH finding was fixed, the current run won't include it
-    // and approval proceeds. If it isn't fixed, the AI will find it again and block approval.
+    // Use `postedFindings` (what was actually reported in this run) for the threshold check.
+    // This ensures that already-posted findings from previous runs don't permanently block
+    // auto-approval on re-runs — what matters is whether THIS run's new findings exceed the threshold.
     if (config.prReview?.autoApprove?.enabled) {
       const maxSev = config.prReview.autoApprove.maxSeverity || 'low';
       const threshold = SEVERITY_ORDER[maxSev] ?? 1;
-      const hasBlocker = deduped.some(f => SEVERITY_ORDER[f.priority] > threshold);
+      const hasBlocker = postedFindings.some(f => SEVERITY_ORDER[f.priority] > threshold);
 
       if (!hasBlocker) {
         log('Auto-approving PR (no findings exceed threshold)...');

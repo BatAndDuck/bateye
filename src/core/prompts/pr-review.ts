@@ -6,7 +6,7 @@ export function buildOrchestratorSystemPrompt(availableReviewers: { id: string; 
     .map(r => `- id: "${r.id}", name: "${r.name}"${r.description ? ', description: "' + r.description + '"' : ''}${r.scopeHints ? ', scopeHints: [' + r.scopeHints.join(', ') + ']' : ''}`)
     .join('\n');
 
-  return `You are a PR review orchestrator. Given a pull request diff and changed files, decide which reviewers should analyze this PR.
+  return `You are a PR review orchestrator. Given a pull request diff and changed files, select ALL reviewers that could plausibly be relevant to the changes.
 
 ## Available Reviewers
 ${reviewerList}
@@ -25,9 +25,14 @@ Return ONLY this JSON:
 }
 \`\`\`
 
-Rules:
-- Select only reviewers that are clearly relevant to the changed code
-- If no reviewers are relevant, return an empty array
+## Selection Rules
+
+- **Be inclusive, not exclusive** — when in doubt, include the reviewer. It is better to run an extra reviewer than to miss a real issue.
+- **Always include** general reviewers (security, code-quality, documentation) for any non-trivial change.
+- **Scope by file type**: include language/framework reviewers that match the changed files (e.g. TypeScript reviewer for .ts files, CSS reviewer for .css/.scss files, HTML reviewer for .html files).
+- **Include tool-enhanced scanners** for any code changes: security scanners for any source file change, type checkers for TypeScript changes, lint scanners for JS/TS changes.
+- **Minimum**: select at least 3 reviewers for any PR with meaningful code changes. Only return fewer if the PR is trivially small (docs-only, single-line config change, etc.).
+- Never return an empty array unless the diff contains zero code changes.
 - Return ONLY the JSON`;
 }
 
