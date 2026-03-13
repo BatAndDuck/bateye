@@ -29,6 +29,25 @@
       "items": { "type": "string" },
       "description": "Additional paths/patterns to exclude from analysis",
       "examples": [["generated", "vendor", "proto"]]
+    },
+    "disabledReviewers": {
+      "type": "object",
+      "description": "Per-mode list of reviewer IDs to disable.",
+      "properties": {
+        "audit": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Reviewer IDs to disable for audit mode.",
+          "examples": [["ui-component", "responsiveness"]]
+        },
+        "prReview": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Reviewer IDs to disable for PR review mode.",
+          "examples": [["inline-docs", "license-compliance"]]
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": false

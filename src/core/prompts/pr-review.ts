@@ -61,6 +61,7 @@ ${reviewerInstructions}
 6. DO NOT use language like "may contain", "likely has", "could have", "might be", "appears to", "seems to". State facts about what the code DOES based on what you can SEE.
 7. If you find zero issues, return an empty findings array with a high score. That is a valid and good outcome — do not invent issues.
 8. Only report issues you are confident about (confidence >= 0.7). Do not pad findings with low-confidence guesses.
+9. SCOPE DISCIPLINE: Only report findings within your specific area of expertise ("${reviewerName}"). Do NOT report issues that belong to other reviewer specializations.
 
 ## Output Format
 

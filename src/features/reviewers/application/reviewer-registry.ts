@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import matter from 'gray-matter';
-import { Reviewer } from '../../../types/index';
+import { Reviewer, ReviewerMode, Config } from '../../../types/index';
 import { ReviewerLoadResult } from '../../../core/reviewers/types';
 import { REVIEWERS_DIR } from '../../../core/config/defaults';
 
@@ -32,6 +32,12 @@ function parseReviewerFile(filePath: string, isBuiltIn: boolean): Reviewer | nul
       return null;
     }
 
+    const validModes: ReviewerMode[] = ['audit', 'pr-review', 'both'];
+    const rawMode = data.mode ? String(data.mode) : 'both';
+    const mode: ReviewerMode = validModes.includes(rawMode as ReviewerMode)
+      ? (rawMode as ReviewerMode)
+      : 'both';
+
     return {
       id: String(data.id),
       name: String(data.name),
@@ -40,6 +46,8 @@ function parseReviewerFile(filePath: string, isBuiltIn: boolean): Reviewer | nul
       scopeHints: Array.isArray(data.scopeHints) ? data.scopeHints.map(String) : undefined,
       recommendedGlobs: Array.isArray(data.recommendedGlobs) ? data.recommendedGlobs.map(String) : undefined,
       model: data.model ? String(data.model) : undefined,
+      mode,
+      category: data.category ? String(data.category) as Reviewer['category'] : undefined,
       instructions: content.trim(),
       sourcePath: filePath,
       isBuiltIn,
@@ -70,7 +78,7 @@ function loadReviewersFromDir(dir: string, isBuiltIn: boolean): ReviewerLoadResu
   return { reviewers, warnings };
 }
 
-export function loadReviewers(repoPath: string): ReviewerLoadResult {
+function buildAllReviewers(repoPath: string): ReviewerLoadResult {
   const warnings: string[] = [];
   const reviewerMap = new Map<string, Reviewer>();
 
@@ -95,7 +103,38 @@ export function loadReviewers(repoPath: string): ReviewerLoadResult {
   }
 
   return {
-    reviewers: Array.from(reviewerMap.values()).filter(reviewer => reviewer.enabled !== false),
+    reviewers: Array.from(reviewerMap.values()).filter(r => r.enabled !== false),
     warnings,
   };
+}
+
+/** Load all enabled reviewers (both modes). Backwards-compatible. */
+export function loadReviewers(repoPath: string): ReviewerLoadResult {
+  return buildAllReviewers(repoPath);
+}
+
+/**
+ * Load reviewers filtered by mode and applying per-mode disabledReviewers from config.
+ * Reviewers with mode 'both' are always included in either mode.
+ */
+export function loadReviewersForMode(
+  repoPath: string,
+  mode: ReviewerMode,
+  config?: Pick<Config, 'disabledReviewers'>,
+): ReviewerLoadResult {
+  const { reviewers, warnings } = buildAllReviewers(repoPath);
+
+  const disabledIds = new Set<string>(
+    mode === 'audit'
+      ? (config?.disabledReviewers?.audit ?? [])
+      : (config?.disabledReviewers?.prReview ?? []),
+  );
+
+  const filtered = reviewers.filter(r => {
+    const reviewerMode = r.mode ?? 'both';
+    const modeMatch = reviewerMode === 'both' || reviewerMode === mode;
+    return modeMatch && !disabledIds.has(r.id);
+  });
+
+  return { reviewers: filtered, warnings };
 }

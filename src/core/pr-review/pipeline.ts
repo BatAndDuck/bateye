@@ -1,7 +1,7 @@
 import * as path from 'path';
 import { PRFinding, PRReviewResult, Reviewer } from '../../types/index';
 import { resolveConfig, resolveApiKey } from '../config/loader';
-import { loadReviewers } from '../reviewers/loader';
+import { loadReviewersForMode } from '../reviewers/loader';
 import { getRuntime } from '../runtime/factory';
 import { prReviewerAnalysisSchema, PRReviewerAnalysis } from '../validation/schemas';
 import {
@@ -125,7 +125,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
 
   // ─── Stage 4: Orchestrator - select reviewers ───
   log('Loading reviewers...');
-  const { reviewers } = loadReviewers(repoPath);
+  const { reviewers } = loadReviewersForMode(repoPath, 'pr-review', config);
 
   log('Selecting relevant reviewers...');
   const orchestratorResult = await selectReviewers(

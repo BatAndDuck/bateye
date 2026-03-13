@@ -3,6 +3,8 @@ id: documentation
 name: Documentation
 description: Reviews code documentation, README quality, and API docs completeness.
 enabled: true
+mode: audit
+category: documentation
 scopeHints:
   - readme
   - docs
