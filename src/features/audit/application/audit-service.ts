@@ -5,6 +5,8 @@ import { buildRepoIndex, formatFilesForContext, scopeFilesForReviewer } from '..
 import { reviewerAnalysisSchema, ReviewerAnalysis } from '../../../core/validation/schemas';
 import { buildAuditSystemPrompt, buildAuditUserMessage } from '../../../core/prompts/audit';
 import { computeOverallScore } from '../../../core/scoring/normalizer';
+import { runReviewerTool } from '../../../core/tools/runner';
+import { formatToolContext } from '../../../core/tools/format';
 import {
   AUDIT_OUTPUT_FILE,
   OUTPUT_DIR,
@@ -180,8 +182,29 @@ async function runSingleReviewer(
   const filesContext = formatFilesForContext(scopedFiles, MAX_FILES_FOR_REVIEWER_CONTEXT, MAX_CHARS_PER_REVIEWER_FILE);
   const model = reviewer.model || config.model;
 
+  // Run external tool if configured
+  let toolContext: string | undefined;
+  let toolRan = false;
+  let toolDurationMs: number | undefined;
+  let toolError: string | undefined;
+
+  if (reviewer.tool) {
+    const toolResult = await runReviewerTool(reviewer.tool, index.repoPath);
+    toolRan = true;
+    toolDurationMs = toolResult.durationMs;
+
+    if (toolResult.success || toolResult.stdout.length > 0) {
+      toolContext = formatToolContext(reviewer.name, toolResult);
+    } else {
+      toolError = toolResult.error;
+      if (!reviewer.tool.optional) {
+        throw new Error(`Required tool for ${reviewer.id} failed: ${toolResult.error}`);
+      }
+    }
+  }
+
   const systemPrompt = buildAuditSystemPrompt(reviewer.instructions, reviewer.id, reviewer.name);
-  const userMessage = buildAuditUserMessage(filesContext, index.totalFiles, scopedFiles.length);
+  const userMessage = buildAuditUserMessage(filesContext, index.totalFiles, scopedFiles.length, toolContext);
 
   let analysis: ReviewerAnalysis;
 
@@ -223,6 +246,9 @@ async function runSingleReviewer(
       scopedFiles: scopedFiles.length,
       totalRepoFilesSeen: index.totalFiles,
       warnings: [],
+      toolRan,
+      toolDurationMs,
+      toolError,
     },
   };
 }

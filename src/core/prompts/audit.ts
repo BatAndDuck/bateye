@@ -57,7 +57,8 @@ Rules:
 export function buildAuditUserMessage(
   filesContext: string,
   totalFiles: number,
-  scopedFiles: number
+  scopedFiles: number,
+  additionalContext?: string,
 ): string {
   return `## Repository Context
 Total files in repository: ${totalFiles}
@@ -66,7 +67,7 @@ Files provided for analysis: ${scopedFiles}
 ## Files to Analyze
 
 ${filesContext}
-
+${additionalContext ? '\n' + additionalContext + '\n' : ''}
 Analyze the code above according to your reviewer instructions. Return the JSON result.`;
 }
 

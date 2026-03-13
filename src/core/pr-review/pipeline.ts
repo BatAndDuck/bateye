@@ -19,6 +19,8 @@ import { verifyFindings } from './verifier';
 import { deduplicateFindings } from './deduplicator';
 import { buildConversation, filterAlreadyPosted, PRConversation } from './conversation';
 import { IRuntime } from '../runtime/interface';
+import { runReviewerTool } from '../tools/runner';
+import { formatToolContext } from '../tools/format';
 
 export interface PRReviewPipelineOptions {
   repoPath: string;
@@ -147,7 +149,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   log('Running reviewers in parallel...');
 
   const reviewerPromises = selectedReviewers.map(reviewer =>
-    runPRReviewer(reviewer, structuredDiff, changedFiles, config.model, apiKey, config.transport, config.apiBaseUrl, runtime, log)
+    runPRReviewer(reviewer, structuredDiff, changedFiles, repoPath, config.model, apiKey, config.transport, config.apiBaseUrl, runtime, log)
   );
   const reviewerResults = await Promise.all(reviewerPromises);
   const allFindings = reviewerResults.flat();
@@ -267,6 +269,7 @@ async function runPRReviewer(
   reviewer: Reviewer,
   structuredDiff: string,
   changedFiles: string[],
+  repoPath: string,
   model: string,
   apiKey: string,
   transport: string,
@@ -274,8 +277,29 @@ async function runPRReviewer(
   runtime: IRuntime,
   log: (msg: string) => void
 ): Promise<PRFinding[]> {
+  // Run external tool if configured
+  let toolContext: string | undefined;
+
+  if (reviewer.tool) {
+    const targetFiles =
+      reviewer.tool.targeting === 'file' && reviewer.tool.fileArgs
+        ? changedFiles
+        : undefined;
+
+    const toolResult = await runReviewerTool(reviewer.tool, repoPath, targetFiles);
+
+    if (toolResult.success || toolResult.stdout.length > 0) {
+      toolContext = formatToolContext(reviewer.name, toolResult);
+    } else if (!reviewer.tool.optional) {
+      log(`  ✗ Required tool for ${reviewer.name} failed: ${toolResult.error}`);
+      return [];
+    } else {
+      log(`  ⚠ Tool for ${reviewer.name} failed (continuing AI-only): ${toolResult.error}`);
+    }
+  }
+
   const systemPrompt = buildPRReviewSystemPrompt(reviewer.instructions, reviewer.id, reviewer.name);
-  const userMessage = buildPRReviewUserMessage(structuredDiff, changedFiles);
+  const userMessage = buildPRReviewUserMessage(structuredDiff, changedFiles, toolContext);
 
   try {
     log(`  Running reviewer: ${reviewer.name}...`);
