@@ -3,6 +3,8 @@ id: security-api
 name: API Security
 description: Reviews API handlers, auth, authz, validation and sensitive data exposure.
 enabled: true
+mode: both
+category: security
 scopeHints:
   - api
   - controller
@@ -10,10 +12,6 @@ scopeHints:
   - auth
   - middleware
   - handler
-recommendedGlobs:
-  - "src/**/*.ts"
-  - "apps/**/api/**"
-  - "routes/**"
 ---
 
 Focus your review on:

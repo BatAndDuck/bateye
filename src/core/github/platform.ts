@@ -67,7 +67,7 @@ export class GitHubReviewPlatform implements ReviewPlatform {
     };
   }
 
-  async publishInlineComment(comment: InlineComment): Promise<void> {
+  async publishInlineComment(comment: InlineComment): Promise<boolean> {
     try {
       const commitId = await this.getHeadSha();
 
@@ -81,8 +81,10 @@ export class GitHubReviewPlatform implements ReviewPlatform {
         side: comment.side || 'RIGHT',
         body: comment.body,
       });
+      return true;
     } catch (err) {
       console.warn(`Could not post inline comment for ${comment.path}:${comment.line}: ${(err as Error).message}`);
+      return false;
     }
   }
 

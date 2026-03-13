@@ -10,6 +10,7 @@ export type ResolvedConfig = {
   apiBaseUrl?: string;
   exclude: string[];
   prReview?: Config['prReview'];
+  disabledReviewers?: Config['disabledReviewers'];
 };
 
 const VERCEL_OIDC_ENV = 'VERCEL_OIDC_TOKEN';
@@ -51,6 +52,7 @@ export function resolveConfig(
     apiBaseUrl: config.apiBaseUrl,
     exclude: config.exclude || [],
     prReview: config.prReview,
+    disabledReviewers: config.disabledReviewers,
   };
 }
 
