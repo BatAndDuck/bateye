@@ -1,5 +1,4 @@
 import * as path from 'path';
-import * as fs from 'fs';
 import { Reviewer, OrchestratorResult } from '../../../types/index';
 import { RepoIndex } from '../../../types/index';
 import { getRuntime } from '../../../core/runtime/factory';
@@ -9,6 +8,18 @@ import {
   buildAuditOrchestratorUserMessage,
   RepoProfile,
 } from '../../../core/prompts/audit';
+
+const ORCHESTRATOR_MAX_TOKENS = 2048;
+const ORCHESTRATOR_TEMPERATURE = 0;
+
+/**
+ * Maximum number of reviewers to run when the orchestrator is unavailable.
+ * Limits blast radius instead of falling back to the full reviewer catalogue.
+ */
+const FALLBACK_MAX_REVIEWERS = 10;
+
+/** Reviewer IDs that are always included in the fallback set (highest signal/cost ratio). */
+const FALLBACK_CORE_IDS = ['security-api', 'code-quality', 'documentation'];
 
 function buildRepoProfile(index: RepoIndex): RepoProfile {
   const extensionCounts: Record<string, number> = {};
@@ -48,14 +59,35 @@ function buildRepoProfile(index: RepoIndex): RepoProfile {
   };
 }
 
-export async function selectAuditReviewers(
-  index: RepoIndex,
-  availableReviewers: Reviewer[],
-  model: string,
-  apiKey: string,
-  transport?: string,
-  apiBaseUrl?: string,
-): Promise<OrchestratorResult> {
+/**
+ * Build a conservative fallback reviewer list when the orchestrator is unavailable.
+ * Always includes core reviewers; pads up to FALLBACK_MAX_REVIEWERS from the rest.
+ */
+function buildFallbackReviewers(availableReviewers: Reviewer[]): OrchestratorResult {
+  const coreSet = new Set(FALLBACK_CORE_IDS);
+  const core = availableReviewers.filter(r => coreSet.has(r.id));
+  const rest = availableReviewers.filter(r => !coreSet.has(r.id));
+  const selected = [...core, ...rest].slice(0, FALLBACK_MAX_REVIEWERS);
+
+  return {
+    selectedReviewers: selected.map(r => ({
+      reviewerId: r.id,
+      reason: 'Selected by fallback (orchestrator unavailable)',
+    })),
+  };
+}
+
+export interface SelectAuditReviewersOptions {
+  index: RepoIndex;
+  availableReviewers: Reviewer[];
+  model: string;
+  apiKey: string;
+  transport?: string;
+  apiBaseUrl?: string;
+}
+
+export async function selectAuditReviewers(options: SelectAuditReviewersOptions): Promise<OrchestratorResult> {
+  const { index, availableReviewers, model, apiKey, transport, apiBaseUrl } = options;
   const runtime = await getRuntime();
 
   const profile = buildRepoProfile(index);
@@ -73,17 +105,13 @@ export async function selectAuditReviewers(
 
   try {
     const result = await runtime.run<OrchestratorResult>(
-      { systemPrompt, userMessage, model, apiKey, transport, apiBaseUrl, maxTokens: 2048, temperature: 0 },
+      { systemPrompt, userMessage, model, apiKey, transport, apiBaseUrl, maxTokens: ORCHESTRATOR_MAX_TOKENS, temperature: ORCHESTRATOR_TEMPERATURE },
       orchestratorResultSchema,
     );
     return result.data;
   } catch {
-    // Fall back to all reviewers if orchestrator fails
-    return {
-      selectedReviewers: availableReviewers.map(r => ({
-        reviewerId: r.id,
-        reason: 'Selected by fallback (orchestrator unavailable)',
-      })),
-    };
+    // Orchestrator unavailable — use a conservative core set rather than all reviewers
+    // to avoid cost explosion (60+ reviewers × full codebase = expensive).
+    return buildFallbackReviewers(availableReviewers);
   }
 }

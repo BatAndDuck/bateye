@@ -181,42 +181,47 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   }
 
   // ─── Stage 9: Build result ───
-  const summary = buildPRSummaryPrompt(finalFindings, rejected.length);
-
+  // Summary is finalised after posting so the counts reflect what GitHub actually accepted.
   const result: PRReviewResult = {
     command: 'pr-review',
     baseRef,
     headRef,
     selectedReviewers: orchestratorResult.selectedReviewers,
-    summary,
+    summary: '',        // filled in after stage 10
     findings: finalFindings,
     rejectedFindings: rejected.length,
     generatedAt: new Date().toISOString(),
   };
 
-  // Write local artifact
-  const outputPath = path.join(repoPath, PR_REVIEW_OUTPUT_FILE);
-  ensureDir(path.join(repoPath, OUTPUT_DIR));
-  writePRReviewResult(outputPath, result);
-
   // ─── Stage 10: Post to GitHub ───
   if (platform && !options.dryRun) {
     log(`Posting ${finalFindings.length} inline comments to GitHub...`);
 
+    const postedFindings: PRFinding[] = [];
     for (const finding of finalFindings) {
-      await platform.publishInlineComment({
+      const posted = await platform.publishInlineComment({
         body: formatFindingComment(finding),
         path: finding.filePath,
         line: finding.startLine,
       });
+      if (posted) postedFindings.push(finding);
     }
+
+    if (postedFindings.length < finalFindings.length) {
+      log(`Warning: ${finalFindings.length - postedFindings.length} comment(s) could not be posted (line not in diff or GitHub API error).`);
+    }
+
+    // Build summary from findings that were actually posted so counts are accurate
+    const summary = buildPRSummaryPrompt(postedFindings, rejected.length);
+    result.summary = summary;
+    result.findings = postedFindings;
 
     // Update or create summary comment
     log('Updating summary comment...');
     await platform.updateOrCreateSummary(summary);
 
     // Update status comment to show completion
-    const statusBody = `<!-- codeowl-status -->\n🦉 **CodeOwl** review complete — ${finalFindings.length} findings posted.`;
+    const statusBody = `<!-- codeowl-status -->\n🦉 **CodeOwl** review complete — ${postedFindings.length} findings posted.`;
     await platform.updateStatusComment(statusBody);
 
     // Auto-approve if configured and threshold met.
@@ -245,7 +250,15 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     }
 
     log(`✓ GitHub comments posted`);
+  } else {
+    // Dry-run or no platform — use all finalFindings for the summary
+    result.summary = buildPRSummaryPrompt(finalFindings, rejected.length);
   }
+
+  // Write local artifact after summary is finalised
+  const outputPath = path.join(repoPath, PR_REVIEW_OUTPUT_FILE);
+  ensureDir(path.join(repoPath, OUTPUT_DIR));
+  writePRReviewResult(outputPath, result);
 
   return result;
 }

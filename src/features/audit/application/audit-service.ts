@@ -53,19 +53,19 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     // AI orchestrator selects which reviewers are relevant to this repo
     log(`Selecting relevant reviewers via orchestrator (${allReviewers.length} candidates)...`);
     try {
-      const orchestratorResult = await selectAuditReviewers(
+      const orchestratorResult = await selectAuditReviewers({
         index,
-        allReviewers,
-        config.model,
+        availableReviewers: allReviewers,
+        model: config.model,
         apiKey,
-        config.transport,
-        config.apiBaseUrl,
-      );
+        transport: config.transport,
+        apiBaseUrl: config.apiBaseUrl,
+      });
       const selectedIds = new Set(orchestratorResult.selectedReviewers.map(r => r.reviewerId));
       activeReviewers = allReviewers.filter(r => selectedIds.has(r.id));
       log(`Orchestrator selected ${activeReviewers.length} reviewer(s): ${activeReviewers.map(r => r.name).join(', ')}`);
     } catch {
-      log('Orchestrator failed, falling back to all reviewers.');
+      log('Orchestrator failed, falling back to core reviewer set.');
       activeReviewers = allReviewers;
     }
   }
@@ -191,9 +191,22 @@ const SCORE_THRESHOLDS: Array<{ min: number; message: (t: number, c: number, r: 
 ];
 
 /**
+ * Two findings are considered duplicates when their title token overlap reaches
+ * this Jaccard similarity threshold (40%). Chosen empirically: low enough to catch
+ * paraphrases, high enough to avoid false positives between unrelated issues.
+ */
+const DUPLICATE_SIMILARITY_THRESHOLD = 0.4;
+
+/**
+ * Line numbers within this many lines of each other are treated as overlapping
+ * for the purpose of cross-reviewer deduplication.
+ */
+const LINE_OVERLAP_TOLERANCE = 3;
+
+/**
  * Cross-reviewer deduplication for audit findings.
  * If two findings from different reviewers target the same file + overlapping lines
- * with similar titles (Jaccard >= 0.4), drop the lower-priority one.
+ * with similar titles (Jaccard >= DUPLICATE_SIMILARITY_THRESHOLD), drop the lower-priority one.
  */
 function tokenize(text: string): Set<string> {
   return new Set(text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean));
@@ -206,7 +219,7 @@ function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
   return intersection.length / union.size;
 }
 
-function linesOverlap(s1: number, e1: number, s2: number, e2: number, tolerance = 3): boolean {
+function linesOverlap(s1: number, e1: number, s2: number, e2: number, tolerance = LINE_OVERLAP_TOLERANCE): boolean {
   return s1 <= e2 + tolerance && s2 <= e1 + tolerance;
 }
 
@@ -230,7 +243,7 @@ export function deduplicateAuditFindings(findings: Finding[]): Finding[] {
       ) continue;
 
       const similarity = jaccardSimilarity(tokenize(a.title), tokenize(b.title));
-      if (similarity >= 0.4) {
+      if (similarity >= DUPLICATE_SIMILARITY_THRESHOLD) {
         const aPri = PRIORITY_ORDER[a.priority] ?? 0;
         const bPri = PRIORITY_ORDER[b.priority] ?? 0;
         dropped.add(aPri >= bPri ? j : i);

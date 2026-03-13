@@ -26,6 +26,17 @@ test('audit command uses built-in reviewers and reaches the mocked runtime', () 
   const reportPath = path.join(repoPath, 'report.json');
   writeJson(fixturePath, {
     runs: [
+      // First call: orchestrator selects the 3 core built-in reviewers
+      {
+        data: {
+          selectedReviewers: [
+            { reviewerId: 'code-quality',  reason: 'General code quality' },
+            { reviewerId: 'documentation', reason: 'Documentation coverage' },
+            { reviewerId: 'security-api',  reason: 'API security' },
+          ],
+        },
+      },
+      // Subsequent calls: one per reviewer
       { data: { score: 90, summary: 'solid', findings: [] } },
       { data: { score: 80, summary: 'documented', findings: [] } },
       { data: { score: 70, summary: 'secure enough', findings: [] } },
@@ -52,5 +63,6 @@ test('audit command uses built-in reviewers and reaches the mocked runtime', () 
   assert.equal(report.reviewerResults.length, 3);
 
   const log = JSON.parse(fs.readFileSync(logPath, 'utf-8'));
-  assert.equal(log.filter(entry => entry.type === 'run').length, 3);
+  // 1 orchestrator call + 3 reviewer calls = 4 total run() invocations
+  assert.equal(log.filter(entry => entry.type === 'run').length, 4);
 });
