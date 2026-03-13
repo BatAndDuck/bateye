@@ -3,9 +3,10 @@ import * as path from 'path';
 import chalk from 'chalk';
 import execa from 'execa';
 import { loadConfig, resolveConfig } from '../../core/config/loader';
-import { CONFIG_FILE, DEFAULT_API_KEY_ENV } from '../../core/config/defaults';
+import { CONFIG_FILE } from '../../core/config/defaults';
 import { loadReviewers } from '../../core/reviewers/loader';
 import { isGitRepo } from '../../core/git/index';
+import { resolveAuthEnvName } from '../../features/config/application/config-service';
 
 interface CheckResult {
   label: string;
@@ -37,18 +38,19 @@ export async function runDoctor(repoPath: string): Promise<void> {
   }
 
   const config = resolveConfig(repoPath);
-  const apiKey = process.env[DEFAULT_API_KEY_ENV];
+  const authEnv = resolveAuthEnvName(config);
+  const apiKey = process.env[authEnv];
   if (apiKey) {
     checks.push({
-      label: `API key (${DEFAULT_API_KEY_ENV})`,
+      label: `API key (${authEnv})`,
       status: 'ok',
       detail: '***' + apiKey.slice(-4),
     });
   } else {
     checks.push({
-      label: `API key (${DEFAULT_API_KEY_ENV})`,
+      label: `API key (${authEnv})`,
       status: 'error',
-      detail: `${DEFAULT_API_KEY_ENV} environment variable is not set`,
+      detail: `${authEnv} environment variable is not set`,
     });
   }
 

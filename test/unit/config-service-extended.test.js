@@ -8,6 +8,7 @@ const {
   loadConfig,
   saveConfig,
   resolveConfig,
+  resolveAuthEnvName,
   resolveApiKey,
   setConfigField,
 } = require('../../dist/features/config/application/config-service');
@@ -112,7 +113,7 @@ test('resolveConfig returns empty exclude array when absent', () => {
 });
 
 // resolveApiKey
-test('resolveApiKey returns API key from environment variable', () => {
+test('resolveApiKey returns API key from default environment variable', () => {
   process.env.CODE_OWL_LLM_MODEL_API_KEY = 'my-test-api-key-12345';
   try {
     const key = resolveApiKey();
@@ -122,7 +123,24 @@ test('resolveApiKey returns API key from environment variable', () => {
   }
 });
 
-test('resolveApiKey throws when environment variable is not set', () => {
+test('resolveApiKey uses VERCEL_OIDC_TOKEN for Vercel models', () => {
+  process.env.VERCEL_OIDC_TOKEN = 'vercel-oidc-token';
+  try {
+    const key = resolveApiKey({ model: 'vercel/minimax/minimax-m2.5', transport: 'auto' });
+    assert.equal(key, 'vercel-oidc-token');
+  } finally {
+    delete process.env.VERCEL_OIDC_TOKEN;
+  }
+});
+
+test('resolveAuthEnvName returns VERCEL_OIDC_TOKEN for Vercel transport', () => {
+  assert.equal(
+    resolveAuthEnvName({ model: 'anthropic/claude-sonnet-4-5', transport: 'vercel' }),
+    'VERCEL_OIDC_TOKEN',
+  );
+});
+
+test('resolveApiKey throws when required environment variable is not set', () => {
   delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
   assert.throws(
     () => resolveApiKey(),

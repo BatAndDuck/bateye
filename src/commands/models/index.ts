@@ -23,7 +23,7 @@ export async function runModels(repoPath: string, provider?: string): Promise<vo
   const config = resolveConfig(repoPath);
   let apiKey: string;
   try {
-    apiKey = resolveApiKey();
+    apiKey = resolveApiKey(config);
   } catch {
     apiKey = '';
   }

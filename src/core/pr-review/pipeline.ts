@@ -63,7 +63,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   // ─── Stage 1: Load config ───
   log('Loading configuration...');
   const config = resolveConfig(repoPath);
-  const apiKey = resolveApiKey();
+  const apiKey = resolveApiKey(config);
   const baseRef = options.baseRef || 'origin/main';
   const headRef = options.headRef || 'HEAD';
 
