@@ -38,8 +38,8 @@ export interface ExistingComment {
  */
 export interface ReviewPlatform {
   getPullRequestContext(): Promise<PullRequestContext>;
-  /** Post a finding as a line-level comment on the diff */
-  publishInlineComment(comment: InlineComment): Promise<void>;
+  /** Post a finding as a line-level comment on the diff. Returns true if posted successfully. */
+  publishInlineComment(comment: InlineComment): Promise<boolean>;
   publishSummaryComment(body: string): Promise<void>;
   addReaction(commentId: number, reaction: string): Promise<void>;
   publishStartComment(): Promise<void>;

@@ -9,7 +9,8 @@ import { ensureDir, writeAuditResult } from '../../../core/output/writer';
 import { IRuntime } from '../../../core/runtime/interface';
 import { getRuntime } from '../../../core/runtime/factory';
 import { resolveApiKey, resolveConfig } from '../../config/application/config-service';
-import { loadReviewers } from '../../reviewers/application/reviewer-registry';
+import { loadReviewersForMode } from '../../reviewers/application/reviewer-registry';
+import { selectAuditReviewers } from './audit-orchestrator';
 
 export interface AuditOptions {
   repoPath: string;
@@ -35,20 +36,43 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   const apiKey = resolveApiKey(config);
 
   log('Loading reviewers...');
-  const { reviewers, warnings } = loadReviewers(repoPath);
+  const { reviewers: allReviewers, warnings } = loadReviewersForMode(repoPath, 'audit', config);
   warnings.forEach(warning => log(`Warning: ${warning}`));
-
-  const activeReviewers = options.reviewerIds
-    ? reviewers.filter(reviewer => options.reviewerIds!.includes(reviewer.id))
-    : reviewers;
-
-  if (activeReviewers.length === 0) {
-    throw new Error('No reviewers found. Built-in reviewers should load automatically; add custom reviewers to .codeowl/reviewers if needed.');
-  }
 
   log('Indexing repository...');
   const index = await buildRepoIndex(repoPath, config);
   log(`Found ${index.totalFiles} files to analyze.`);
+
+  let activeReviewers: Reviewer[];
+
+  if (options.reviewerIds && options.reviewerIds.length > 0) {
+    // Explicit selection — skip orchestrator
+    activeReviewers = allReviewers.filter(r => options.reviewerIds!.includes(r.id));
+    log(`Using ${activeReviewers.length} explicitly selected reviewer(s).`);
+  } else {
+    // AI orchestrator selects which reviewers are relevant to this repo
+    log(`Selecting relevant reviewers via orchestrator (${allReviewers.length} candidates)...`);
+    try {
+      const orchestratorResult = await selectAuditReviewers({
+        index,
+        availableReviewers: allReviewers,
+        model: config.model,
+        apiKey,
+        transport: config.transport,
+        apiBaseUrl: config.apiBaseUrl,
+      });
+      const selectedIds = new Set(orchestratorResult.selectedReviewers.map(r => r.reviewerId));
+      activeReviewers = allReviewers.filter(r => selectedIds.has(r.id));
+      log(`Orchestrator selected ${activeReviewers.length} reviewer(s): ${activeReviewers.map(r => r.name).join(', ')}`);
+    } catch {
+      log('Orchestrator failed, falling back to core reviewer set.');
+      activeReviewers = allReviewers;
+    }
+  }
+
+  if (activeReviewers.length === 0) {
+    throw new Error('No reviewers found. Built-in reviewers should load automatically; add custom reviewers to .codeowl/reviewers if needed.');
+  }
 
   const runtime = await dependencies.getRuntime();
   const reviewerResults: ReviewerResult[] = [];
@@ -60,16 +84,29 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     log(`  ✓ ${reviewer.name}: score=${result.score}, findings=${result.findings.length}`);
   }
 
-  const overallScore = computeOverallScore(reviewerResults);
-  const totalFindings = reviewerResults.flatMap(result => result.findings).length;
-  const criticalCount = reviewerResults.flatMap(result => result.findings).filter(finding => finding.priority === 'critical').length;
+  // Cross-reviewer deduplication
+  const allFindings = reviewerResults.flatMap(r => r.findings);
+  const deduped = deduplicateAuditFindings(allFindings);
+  const droppedCount = allFindings.length - deduped.length;
+  if (droppedCount > 0) log(`Deduplication removed ${droppedCount} cross-reviewer duplicate finding(s).`);
+
+  // Rebuild per-reviewer result arrays using deduped findings
+  const dedupedIdSet = new Set(deduped.map(f => f.id));
+  const finalReviewerResults = reviewerResults.map(rr => ({
+    ...rr,
+    findings: rr.findings.filter(f => dedupedIdSet.has(f.id)),
+  }));
+
+  const overallScore = computeOverallScore(finalReviewerResults);
+  const totalFindings = deduped.length;
+  const criticalCount = deduped.filter(f => f.priority === 'critical').length;
 
   const result: AuditResult = {
     command: 'audit',
     repoPath: path.resolve(repoPath),
     overallScore,
-    summary: buildAuditSummary(overallScore, totalFindings, criticalCount, reviewerResults.length),
-    reviewerResults,
+    summary: buildAuditSummary(overallScore, totalFindings, criticalCount, activeReviewers.length),
+    reviewerResults: finalReviewerResults,
     generatedAt: new Date().toISOString(),
   };
 
@@ -89,7 +126,7 @@ async function runSingleReviewer(
   runtime: IRuntime,
 ): Promise<ReviewerResult> {
   const start = Date.now();
-  const scopedFiles = scopeFilesForReviewer(index, reviewer.scopeHints, reviewer.recommendedGlobs);
+  const scopedFiles = scopeFilesForReviewer(index, reviewer.scopeHints);
   const filesContext = formatFilesForContext(scopedFiles, MAX_FILES_FOR_REVIEWER_CONTEXT, MAX_CHARS_PER_REVIEWER_FILE);
   const model = reviewer.model || config.model;
 
@@ -152,6 +189,70 @@ const SCORE_THRESHOLDS: Array<{ min: number; message: (t: number, c: number, r: 
   { min: 50, message: (t, c, r) => `Code quality needs improvement. ${t} findings across ${r} reviewers, including ${c} critical issues.` },
   { min: 0,  message: (t, c, r) => `Significant issues detected. ${t} findings across ${r} reviewers, with ${c} critical issues that should be addressed immediately.` },
 ];
+
+/**
+ * Two findings are considered duplicates when their title token overlap reaches
+ * this Jaccard similarity threshold (40%). Chosen empirically: low enough to catch
+ * paraphrases, high enough to avoid false positives between unrelated issues.
+ */
+const DUPLICATE_SIMILARITY_THRESHOLD = 0.4;
+
+/**
+ * Line numbers within this many lines of each other are treated as overlapping
+ * for the purpose of cross-reviewer deduplication.
+ */
+const LINE_OVERLAP_TOLERANCE = 3;
+
+/**
+ * Cross-reviewer deduplication for audit findings.
+ * If two findings from different reviewers target the same file + overlapping lines
+ * with similar titles (Jaccard >= DUPLICATE_SIMILARITY_THRESHOLD), drop the lower-priority one.
+ */
+function tokenize(text: string): Set<string> {
+  return new Set(text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean));
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 && b.size === 0) return 1;
+  const intersection = [...a].filter(x => b.has(x));
+  const union = new Set([...a, ...b]);
+  return intersection.length / union.size;
+}
+
+function linesOverlap(s1: number, e1: number, s2: number, e2: number, tolerance = LINE_OVERLAP_TOLERANCE): boolean {
+  return s1 <= e2 + tolerance && s2 <= e1 + tolerance;
+}
+
+const PRIORITY_ORDER: Record<string, number> = { info: 0, low: 1, medium: 2, high: 3, critical: 4 };
+
+export function deduplicateAuditFindings(findings: Finding[]): Finding[] {
+  const dropped = new Set<number>();
+
+  for (let i = 0; i < findings.length; i++) {
+    if (dropped.has(i)) continue;
+    const a = findings[i];
+
+    for (let j = i + 1; j < findings.length; j++) {
+      if (dropped.has(j)) continue;
+      const b = findings[j];
+
+      if (
+        a.filePath !== b.filePath ||
+        a.reviewerId === b.reviewerId ||
+        !linesOverlap(a.startLine, a.endLine, b.startLine, b.endLine)
+      ) continue;
+
+      const similarity = jaccardSimilarity(tokenize(a.title), tokenize(b.title));
+      if (similarity >= DUPLICATE_SIMILARITY_THRESHOLD) {
+        const aPri = PRIORITY_ORDER[a.priority] ?? 0;
+        const bPri = PRIORITY_ORDER[b.priority] ?? 0;
+        dropped.add(aPri >= bPri ? j : i);
+      }
+    }
+  }
+
+  return findings.filter((_, i) => !dropped.has(i));
+}
 
 export function buildAuditSummary(score: number, totalFindings: number, criticalCount: number, reviewerCount: number): string {
   const threshold = SCORE_THRESHOLDS.find(t => score >= t.min) ?? SCORE_THRESHOLDS[SCORE_THRESHOLDS.length - 1];

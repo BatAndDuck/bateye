@@ -41,7 +41,7 @@ test('runAudit throws when a reviewer runtime call fails', async () => {
           }),
         },
       ),
-      /Reviewer code-quality failed: 401 Error verifying OIDC token/,
+      /Reviewer \S+ failed: 401 Error verifying OIDC token/,
     );
   } finally {
     delete process.env.CODE_OWL_LLM_MODEL_API_KEY;

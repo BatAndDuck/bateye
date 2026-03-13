@@ -223,7 +223,30 @@ export type Config = {
   apiBaseUrl?: string;
   exclude?: string[];
   prReview?: PRReviewConfig;
+  /** Per-mode reviewer IDs to disable. */
+  disabledReviewers?: {
+    audit?: string[];
+    prReview?: string[];
+  };
 };
+
+export type ReviewerMode = 'audit' | 'pr-review' | 'both';
+
+export type ReviewerCategory =
+  | 'ux'
+  | 'security'
+  | 'compliance'
+  | 'documentation'
+  | 'architecture'
+  | 'infrastructure'
+  | 'code-quality'
+  | 'performance'
+  | 'devex'
+  | 'ai'
+  | 'sre'
+  | 'qa'
+  | 'database'
+  | 'dependency';
 
 export type ReviewerMetadata = {
   id: string;
@@ -231,8 +254,11 @@ export type ReviewerMetadata = {
   description?: string;
   enabled?: boolean;
   scopeHints?: string[];
-  recommendedGlobs?: string[];
   model?: string;
+  /** Which modes this reviewer participates in. Defaults to 'both'. */
+  mode?: ReviewerMode;
+  /** Logical category for grouping and display. */
+  category?: ReviewerCategory;
 };
 
 export type Reviewer = ReviewerMetadata & {

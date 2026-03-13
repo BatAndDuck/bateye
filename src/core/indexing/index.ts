@@ -106,29 +106,11 @@ export function readFileContent(filePath: string, maxTokens = 8000): string {
 export function scopeFilesForReviewer(
   index: RepoIndex,
   scopeHints: string[] | undefined,
-  recommendedGlobs: string[] | undefined
 ): RepoFile[] {
-  let candidates = index.files;
-
-  if (recommendedGlobs && recommendedGlobs.length > 0) {
-    // Filter to files matching at least one glob pattern
-    const matchedPaths = new Set<string>();
-    for (const pattern of recommendedGlobs) {
-      // Simple glob matching: check if file path contains the pattern base
-      const patternBase = pattern.replace(/\*\*/g, '').replace(/\*/g, '').replace(/^\//, '');
-      candidates.forEach(f => {
-        if (patternBase && f.relativePath.includes(patternBase.split('/')[0])) {
-          matchedPaths.add(f.relativePath);
-        }
-      });
-    }
-    if (matchedPaths.size > 0) {
-      candidates = candidates.filter(f => matchedPaths.has(f.relativePath));
-    }
-  }
+  const candidates = index.files;
 
   if (scopeHints && scopeHints.length > 0) {
-    // Prioritize files whose paths contain scope hints
+    // Prioritize files whose paths or names contain scope hints
     const prioritized = candidates.filter(f =>
       scopeHints.some(hint => f.relativePath.toLowerCase().includes(hint.toLowerCase()))
     );

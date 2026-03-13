@@ -3,16 +3,14 @@ id: code-quality
 name: Code Quality
 description: Reviews maintainability, complexity, error handling, and code smells.
 enabled: true
+mode: both
+category: code-quality
 scopeHints:
   - service
   - util
   - helper
   - lib
   - module
-recommendedGlobs:
-  - "src/**/*.ts"
-  - "lib/**/*.ts"
-  - "**/*.js"
 ---
 
 Focus your review on:
