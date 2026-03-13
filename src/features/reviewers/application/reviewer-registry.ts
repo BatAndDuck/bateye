@@ -24,12 +24,15 @@ export function getBuiltInReviewerDirs(): string[] {
   return dirs;
 }
 
-function parseReviewerFile(filePath: string, isBuiltIn: boolean): Reviewer | null {
+function parseReviewerFile(
+  filePath: string,
+  isBuiltIn: boolean,
+): { reviewer: Reviewer | null; error?: string } {
   try {
     const raw = fs.readFileSync(filePath, 'utf-8');
     const { data, content } = matter(raw);
     if (!data.id || !data.name) {
-      return null;
+      return { reviewer: null, error: 'missing required frontmatter fields "id" or "name"' };
     }
 
     const validModes: ReviewerMode[] = ['audit', 'pr-review', 'both'];
@@ -39,20 +42,22 @@ function parseReviewerFile(filePath: string, isBuiltIn: boolean): Reviewer | nul
       : 'both';
 
     return {
-      id: String(data.id),
-      name: String(data.name),
-      description: data.description ? String(data.description) : undefined,
-      enabled: data.enabled !== false,
-      scopeHints: Array.isArray(data.scopeHints) ? data.scopeHints.map(String) : undefined,
-      model: data.model ? String(data.model) : undefined,
-      mode,
-      category: data.category ? String(data.category) as Reviewer['category'] : undefined,
-      instructions: content.trim(),
-      sourcePath: filePath,
-      isBuiltIn,
+      reviewer: {
+        id: String(data.id),
+        name: String(data.name),
+        description: data.description ? String(data.description) : undefined,
+        enabled: data.enabled !== false,
+        scopeHints: Array.isArray(data.scopeHints) ? data.scopeHints.map(String) : undefined,
+        model: data.model ? String(data.model) : undefined,
+        mode,
+        category: data.category ? String(data.category) as Reviewer['category'] : undefined,
+        instructions: content.trim(),
+        sourcePath: filePath,
+        isBuiltIn,
+      },
     };
-  } catch {
-    return null;
+  } catch (err) {
+    return { reviewer: null, error: (err as Error).message };
   }
 }
 
@@ -66,11 +71,12 @@ function loadReviewersFromDir(dir: string, isBuiltIn: boolean): ReviewerLoadResu
 
   const files = fs.readdirSync(dir).filter(fileName => fileName.endsWith('.md'));
   for (const fileName of files) {
-    const reviewer = parseReviewerFile(path.join(dir, fileName), isBuiltIn);
+    const filePath = path.join(dir, fileName);
+    const { reviewer, error } = parseReviewerFile(filePath, isBuiltIn);
     if (reviewer) {
       reviewers.push(reviewer);
     } else {
-      warnings.push(`Skipping invalid reviewer: ${path.join(dir, fileName)} (missing id or name)`);
+      warnings.push(`Skipping reviewer ${filePath}: ${error || 'invalid reviewer file'}`);
     }
   }
 

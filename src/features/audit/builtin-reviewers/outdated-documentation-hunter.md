@@ -13,6 +13,10 @@ scopeHints:
   - doc
   - guide
   - wiki
+  - command
+  - package
+  - script
+  - config
 ---
 
 Focus your review on:
@@ -57,3 +61,9 @@ Focus your review on:
 - Links to external documentation, issue trackers, or websites that return 404 or have been redirected to unrelated content
 - References to third-party service features or APIs (by name and behavior) that the service has since changed or deprecated
 - Documentation of integration patterns with external services that conflict with the current version of those services' APIs
+
+Requirements:
+- Only report outdated docs when you can point to a concrete mismatch between a documentation claim and the current codebase.
+- Do not report "missing" documentation from this reviewer; that belongs to the Documentation reviewer.
+- If the doc text is merely incomplete or could be expanded, return no finding unless it is actually stale or misleading.
+- Do not infer that a command, script, or file is missing merely because it is absent from your scoped subset. Report it only when the repository snapshot or analyzed implementation directly contradicts the documentation.

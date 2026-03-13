@@ -38,3 +38,9 @@ Focus your review on:
 - Missing fallback data for failed external calls (default values, cached responses)
 - No degraded mode when non-critical dependencies are unavailable
 - Single point of failure in critical request path with no alternative
+
+Requirements:
+- Only report health, readiness, or liveness findings when the repository clearly exposes a long-running network service, worker, or API process that would reasonably be monitored by an orchestrator or load balancer.
+- Only report missing timeout or retry findings when the analyzed code performs direct external I/O itself, or when the surrounding abstraction clearly lacks that policy. If a shared runtime/client layer owns outbound calls, prefer reviewing that layer instead of every caller.
+- For CLI tools, libraries, build tooling, and one-shot scripts, prefer no findings unless there is concrete evidence of operational resiliency requirements in the repository.
+- Do not report retries for local file reads or similar local operations unless the code shows a recurring operational failure mode or an availability requirement that makes retries meaningfully actionable.

@@ -1,3 +1,4 @@
+import * as path from 'path';
 import chalk from 'chalk';
 import { AuditResult } from '../../../types/index';
 import { scoreToGrade, scoreToLabel } from '../../../core/scoring/normalizer';
@@ -28,6 +29,9 @@ export async function runAuditCommand(repoPath: string, options: AuditCommandOpt
 function printAuditSummary(result: AuditResult): void {
   const grade = scoreToGrade(result.overallScore);
   const label = scoreToLabel(result.overallScore);
+  const reportPath = result.repoPath
+    ? path.join(result.repoPath, '.codeowl', 'out', 'audit.json')
+    : path.join('.codeowl', 'out', 'audit.json');
 
   console.log('\n' + chalk.cyan('─'.repeat(50)));
   console.log(chalk.white('  Overall Score: ') + chalk.bold(`${result.overallScore}/100`) + ` (${grade} - ${label})`);
@@ -66,6 +70,7 @@ function printAuditSummary(result: AuditResult): void {
     (counts.low ? chalk.gray(` ${counts.low} low`) : ''));
 
   console.log();
-  console.log(chalk.gray('  Report: ') + chalk.white(result.reviewerResults[0]?.execution ? '  ✓ written' : ''));
+  console.log(chalk.gray('  Summary: ') + chalk.white(result.summary));
+  console.log(chalk.gray('  Report:  ') + chalk.white(reportPath));
   console.log();
 }

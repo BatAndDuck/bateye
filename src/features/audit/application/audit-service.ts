@@ -1,10 +1,18 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import { AuditResult, Finding, Reviewer, ReviewerResult } from '../../../types/index';
 import { buildRepoIndex, formatFilesForContext, scopeFilesForReviewer } from '../../../core/indexing/index';
 import { reviewerAnalysisSchema, ReviewerAnalysis } from '../../../core/validation/schemas';
 import { buildAuditSystemPrompt, buildAuditUserMessage } from '../../../core/prompts/audit';
 import { computeOverallScore } from '../../../core/scoring/normalizer';
-import { AUDIT_OUTPUT_FILE, OUTPUT_DIR, MAX_FILES_FOR_REVIEWER_CONTEXT, MAX_CHARS_PER_REVIEWER_FILE } from '../../../core/config/defaults';
+import {
+  AUDIT_OUTPUT_FILE,
+  OUTPUT_DIR,
+  MAX_FILES_FOR_REVIEWER_CONTEXT,
+  MAX_CHARS_PER_REVIEWER_FILE,
+  MAX_CONCURRENT_AUDIT_REVIEWERS,
+  MAX_AUDIT_REVIEWER_TOKENS,
+} from '../../../core/config/defaults';
 import { ensureDir, writeAuditResult } from '../../../core/output/writer';
 import { IRuntime } from '../../../core/runtime/interface';
 import { getRuntime } from '../../../core/runtime/factory';
@@ -27,6 +35,7 @@ const defaultDependencies: AuditDependencies = {
   getRuntime,
 };
 
+/** Run a full repository audit and write the resulting report to disk. */
 export async function runAudit(options: AuditOptions, dependencies: AuditDependencies = defaultDependencies): Promise<AuditResult> {
   const { repoPath, onProgress } = options;
   const log = (msg: string) => onProgress?.(msg);
@@ -35,7 +44,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   const config = resolveConfig(repoPath);
   const apiKey = resolveApiKey(config);
 
-  log('Loading reviewers...');
+  log('Loading reviewers into the owlery...');
   const { reviewers: allReviewers, warnings } = loadReviewersForMode(repoPath, 'audit', config);
   warnings.forEach(warning => log(`Warning: ${warning}`));
 
@@ -51,7 +60,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     log(`Using ${activeReviewers.length} explicitly selected reviewer(s).`);
   } else {
     // AI orchestrator selects which reviewers are relevant to this repo
-    log(`Selecting relevant reviewers via orchestrator (${allReviewers.length} candidates)...`);
+    log(`Asking the orchestrator to shortlist reviewers (${allReviewers.length} candidates)...`);
     try {
       const orchestratorResult = await selectAuditReviewers({
         index,
@@ -64,8 +73,8 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       const selectedIds = new Set(orchestratorResult.selectedReviewers.map(r => r.reviewerId));
       activeReviewers = allReviewers.filter(r => selectedIds.has(r.id));
       log(`Orchestrator selected ${activeReviewers.length} reviewer(s): ${activeReviewers.map(r => r.name).join(', ')}`);
-    } catch {
-      log('Orchestrator failed, falling back to core reviewer set.');
+    } catch (err) {
+      log(`Orchestrator stumbled (${(err as Error).message}); falling back to the full reviewer set.`);
       activeReviewers = allReviewers;
     }
   }
@@ -75,24 +84,37 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   }
 
   const runtime = await dependencies.getRuntime();
-  const reviewerResults: ReviewerResult[] = [];
+  log(`Running ${activeReviewers.length} reviewer(s) with concurrency ${Math.min(MAX_CONCURRENT_AUDIT_REVIEWERS, activeReviewers.length)}...`);
+  const reviewerResults = await runReviewersWithConcurrency(
+    activeReviewers,
+    MAX_CONCURRENT_AUDIT_REVIEWERS,
+    async reviewer => {
+      log(`Running reviewer: ${reviewer.name}...`);
+      try {
+        const result = await runSingleReviewer(reviewer, index, config, apiKey, runtime);
+        log(`  ✓ ${reviewer.name}: score=${result.score}, findings=${result.findings.length}`);
+        return result;
+      } catch (err) {
+        log(`  Warning: reviewer ${reviewer.name} failed and will be skipped: ${(err as Error).message}`);
+        return null;
+      }
+    },
+  );
+  const successfulReviewerResults = reviewerResults.filter((result): result is ReviewerResult => result !== null);
 
-  for (const reviewer of activeReviewers) {
-    log(`Running reviewer: ${reviewer.name}...`);
-    const result = await runSingleReviewer(reviewer, index, config, apiKey, runtime);
-    reviewerResults.push(result);
-    log(`  ✓ ${reviewer.name}: score=${result.score}, findings=${result.findings.length}`);
+  if (successfulReviewerResults.length === 0) {
+    throw new Error('All reviewers failed. Check model/provider configuration or reviewer output constraints.');
   }
 
   // Cross-reviewer deduplication
-  const allFindings = reviewerResults.flatMap(r => r.findings);
+  const allFindings = successfulReviewerResults.flatMap(r => r.findings);
   const deduped = deduplicateAuditFindings(allFindings);
   const droppedCount = allFindings.length - deduped.length;
   if (droppedCount > 0) log(`Deduplication removed ${droppedCount} cross-reviewer duplicate finding(s).`);
 
   // Rebuild per-reviewer result arrays using deduped findings
   const dedupedIdSet = new Set(deduped.map(f => f.id));
-  const finalReviewerResults = reviewerResults.map(rr => ({
+  const finalReviewerResults = successfulReviewerResults.map(rr => ({
     ...rr,
     findings: rr.findings.filter(f => dedupedIdSet.has(f.id)),
   }));
@@ -113,9 +135,37 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   const outputPath = options.outputPath || path.join(repoPath, AUDIT_OUTPUT_FILE);
   ensureDir(path.join(repoPath, OUTPUT_DIR));
   writeAuditResult(outputPath, result);
-  log(`Audit report written to: ${outputPath}`);
+  log(`Audit report written to ${outputPath}`);
 
   return result;
+}
+
+async function runReviewersWithConcurrency<TInput, TOutput>(
+  items: TInput[],
+  maxConcurrency: number,
+  worker: (item: TInput, index: number) => Promise<TOutput>,
+): Promise<TOutput[]> {
+  if (items.length === 0) return [];
+
+  const concurrency = Math.max(1, Math.min(maxConcurrency, items.length));
+  const results = new Array<TOutput>(items.length);
+  let nextIndex = 0;
+
+  async function runWorker(): Promise<void> {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+
+      if (currentIndex >= items.length) {
+        return;
+      }
+
+      results[currentIndex] = await worker(items[currentIndex], currentIndex);
+    }
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, () => runWorker()));
+  return results;
 }
 
 async function runSingleReviewer(
@@ -144,7 +194,7 @@ async function runSingleReviewer(
         apiKey,
         transport: config.transport,
         apiBaseUrl: config.apiBaseUrl,
-        maxTokens: 8096,
+        maxTokens: MAX_AUDIT_REVIEWER_TOKENS,
       },
       reviewerAnalysisSchema,
     );
@@ -157,7 +207,7 @@ async function runSingleReviewer(
     ...finding,
     reviewerId: reviewer.id,
     reviewerName: reviewer.name,
-  }));
+  })).filter(finding => isActionableAuditFinding(reviewer, finding, index));
 
   return {
     reviewerId: reviewer.id,
@@ -175,6 +225,117 @@ async function runSingleReviewer(
       warnings: [],
     },
   };
+}
+
+function isActionableAuditFinding(
+  reviewer: Reviewer,
+  finding: Finding,
+  index: import('../../../types/index').RepoIndex,
+): boolean {
+  const normalizedPath = normalizeRepoPath(finding.filePath);
+  const shouldDropGeneratedArtifact = isGeneratedArtifactPath(normalizedPath);
+  if (shouldDropGeneratedArtifact) {
+    return false;
+  }
+
+  const absolutePath = path.resolve(index.repoPath, normalizedPath);
+  const shouldDropMissingPath = !fs.existsSync(absolutePath) && !isKnownRepoMetadataPath(normalizedPath);
+  if (shouldDropMissingPath) {
+    return false;
+  }
+
+  const shouldDropDependencyPlacementNoise = shouldDropDependencyPlacementNoiseFinding(reviewer, finding, index.files);
+  if (shouldDropDependencyPlacementNoise) {
+    return false;
+  }
+
+  const shouldDropSpeculativeCoverageGap = reviewer.category === 'qa' && isSpeculativeCoverageGap(finding);
+  if (shouldDropSpeculativeCoverageGap) {
+    return false;
+  }
+
+  return true;
+}
+
+function shouldDropDependencyPlacementNoiseFinding(
+  reviewer: Reviewer,
+  finding: Finding,
+  files: import('../../../types/index').RepoFile[],
+): boolean {
+  if (reviewer.category !== 'dependency' || !looksLikeDependencyPlacementFinding(finding)) {
+    return false;
+  }
+
+  const packageNames = extractMentionedPackageNames(finding);
+  return packageNames.some(packageName => packageAppearsInSource(packageName, files));
+}
+
+function normalizeRepoPath(relativePath: string): string {
+  return relativePath.replace(/\\/g, '/').replace(/^\.\//, '');
+}
+
+function isGeneratedArtifactPath(relativePath: string): boolean {
+  return /^(dist|build|coverage|\.codeowl\/out)(\/|$)/.test(relativePath);
+}
+
+function isKnownRepoMetadataPath(relativePath: string): boolean {
+  return ['README.md', 'package.json', 'package-lock.json', '.env.example'].includes(relativePath);
+}
+
+function looksLikeDependencyPlacementFinding(finding: Finding): boolean {
+  const text = `${finding.title}\n${finding.description}\n${finding.recommendation}`.toLowerCase();
+  return text.includes('devdependencies') || text.includes('production dependencies') || text.includes('production dependency');
+}
+
+function extractMentionedPackageNames(finding: Finding): string[] {
+  const text = [finding.title, finding.description, finding.recommendation, ...finding.evidence].join('\n');
+  const matches = text.matchAll(/['"`](@?[\w./-]+)['"`]/g);
+  const names = new Set<string>();
+
+  for (const match of matches) {
+    const candidate = match[1];
+    if (candidate && (!candidate.includes('/') || candidate.startsWith('@'))) {
+      names.add(candidate);
+    }
+  }
+
+  const manifestMatch = text.match(/"(@?[\w./-]+)"\s*:/);
+  if (manifestMatch) {
+    names.add(manifestMatch[1]);
+  }
+
+  return [...names];
+}
+
+function packageAppearsInSource(packageName: string, files: import('../../../types/index').RepoFile[]): boolean {
+  const normalized = packageName.toLowerCase();
+  return files
+    .filter(file => file.relativePath.startsWith('src/') && /\.(ts|tsx|js|jsx|json|md)$/i.test(file.relativePath))
+    .some(file => readFileSafely(file.absolutePath).toLowerCase().includes(normalized));
+}
+
+function readFileSafely(filePath: string): string {
+  try {
+    return fs.readFileSync(filePath, 'utf-8');
+  } catch {
+    return '';
+  }
+}
+
+function isSpeculativeCoverageGap(finding: Finding): boolean {
+  const text = `${finding.title}\n${finding.description}\n${finding.recommendation}`.toLowerCase();
+  return (
+    finding.filePath.startsWith('test/')
+    && (
+      text.includes('no e2e tests')
+      || text.includes('not a substitute for e2e')
+      || text.includes('payment flows')
+      || text.includes('signup')
+      || text.includes('checkout')
+      || text.includes('authentication flows')
+      || text.includes('no tests found')
+    )
+  );
 }
 
 /**

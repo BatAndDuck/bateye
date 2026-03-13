@@ -43,3 +43,7 @@ Focus your review on:
 - Version-pinned dependencies not reflected in lock files
 - Database seed data not provided for meaningful local testing
 - Missing health check or "is it working?" verification step
+
+Requirements:
+- Prefer concrete onboarding breaks over wishlist items. Missing local-setup findings should point to a command, environment variable, prerequisite, or verification step that a new contributor would realistically need.
+- If the repository is a CLI or library rather than a web app, tailor setup expectations to install, build, smoke-test, and local usage workflows instead of browser or server runbooks.

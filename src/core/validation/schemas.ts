@@ -2,10 +2,8 @@ import { z } from 'zod';
 
 export const prioritySchema = z.enum(['critical', 'high', 'medium', 'low', 'info']);
 
-export const findingSchema = z.object({
+const findingRangeFields = {
   id: z.string(),
-  reviewerId: z.string(),
-  reviewerName: z.string(),
   title: z.string(),
   description: z.string(),
   priority: prioritySchema,
@@ -18,6 +16,29 @@ export const findingSchema = z.object({
   evidence: z.array(z.string()),
   recommendation: z.string(),
   tags: z.array(z.string()).optional(),
+};
+
+function withValidLineRange<T extends z.ZodRawShape>(shape: T) {
+  return z.object(shape).refine(
+    finding => finding.endLine >= finding.startLine,
+    {
+      message: 'endLine must be greater than or equal to startLine',
+      path: ['endLine'],
+    },
+  );
+}
+
+export const findingSchema = withValidLineRange({
+  ...findingRangeFields,
+  reviewerId: z.string(),
+  reviewerName: z.string(),
+});
+
+const reviewerFindingSchema = withValidLineRange(findingRangeFields);
+
+const prReviewerFindingSchema = withValidLineRange({
+  ...findingRangeFields,
+  codeQuote: z.string().min(1),
 });
 
 export const reviewerResultSchema = z.object({
@@ -119,42 +140,13 @@ export const systemSynthesisSchema = z.object({
 export const reviewerAnalysisSchema = z.object({
   score: z.number().min(0).max(100),
   summary: z.string(),
-  findings: z.array(z.object({
-    id: z.string(),
-    title: z.string(),
-    description: z.string(),
-    priority: prioritySchema,
-    confidence: z.number().min(0).max(1),
-    filePath: z.string(),
-    startLine: z.number().int().min(1),
-    endLine: z.number().int().min(1),
-    startColumn: z.number().int().min(1).optional(),
-    endColumn: z.number().int().min(1).optional(),
-    evidence: z.array(z.string()),
-    recommendation: z.string(),
-    tags: z.array(z.string()).optional(),
-  })),
+  findings: z.array(reviewerFindingSchema),
 });
 
 export const prReviewerAnalysisSchema = z.object({
   score: z.number().min(0).max(100),
   summary: z.string(),
-  findings: z.array(z.object({
-    id: z.string(),
-    title: z.string(),
-    description: z.string(),
-    priority: prioritySchema,
-    confidence: z.number().min(0).max(1),
-    filePath: z.string(),
-    startLine: z.number().int().min(1),
-    endLine: z.number().int().min(1),
-    startColumn: z.number().int().min(1).optional(),
-    endColumn: z.number().int().min(1).optional(),
-    codeQuote: z.string().min(1),
-    evidence: z.array(z.string()),
-    recommendation: z.string(),
-    tags: z.array(z.string()).optional(),
-  })),
+  findings: z.array(prReviewerFindingSchema),
 });
 
 export type ReviewerAnalysis = z.infer<typeof reviewerAnalysisSchema>;

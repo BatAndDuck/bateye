@@ -29,11 +29,18 @@ codeowl system-design --output ./out
 **Prerequisites:** Node.js 18.x or later
 
 ```bash
-# Install dependencies
-npm install
+# Install dependencies reproducibly
+npm ci
 
 # Build
 npm run build
+
+# Optional watch-style development loop
+npm run dev
+
+# Run the automated checks used in local development
+npm run test:unit
+npm run test:integration
 
 # Link for local development
 npm link
@@ -50,6 +57,16 @@ codeowl init
 codeowl doctor
 codeowl audit
 ```
+
+PowerShell:
+
+```powershell
+$env:CODE_OWL_LLM_MODEL_API_KEY='your-provider-key'
+$env:VERCEL_OIDC_TOKEN='your-vercel-oidc-token'
+```
+
+If you prefer file-based local setup, copy [`.env.example`](./.env.example) to `.env` and fill in the values you need.
+The repository commits `package-lock.json`; prefer `npm ci` for reproducible local installs.
 
 ## Configuration
 
@@ -76,7 +93,8 @@ For Vercel AI Gateway, configure a Vercel-routed model and provide `VERCEL_OIDC_
 
 ## Reviewers
 
-Built-in reviewers: `security-api`, `code-quality`, `documentation`
+CodeOwl ships with a large built-in reviewer catalog under `src/features/audit/builtin-reviewers/`.
+Examples include `security-api`, `code-quality`, `documentation`, `complexity`, `test-coverage`, and `input-validation`.
 
 Add custom reviewers to `.codeowl/reviewers/*.md`:
 
@@ -181,8 +199,29 @@ permissions:
 | `CODE_OWL_LLM_MODEL_API_KEY` | API key for Anthropic, OpenAI, OpenRouter, or Google |
 | `VERCEL_OIDC_TOKEN` | OIDC token for Vercel AI Gateway models |
 | `AI_GATEWAY_API_KEY` | Alternative API key for Vercel AI Gateway |
+| `GITHUB_TOKEN` | GitHub token for posting PR comments during local `pr-review --github` runs |
+| `GITHUB_REPOSITORY` | Repository slug in `owner/repo` format for local GitHub PR review |
+| `PR_NUMBER` | Pull request number for local GitHub PR review |
 
 The `apiBaseUrl` config field can point to any OpenAI-compatible gateway endpoint.
+
+## Local GitHub PR Review
+
+To run `codeowl pr-review --github` locally, set:
+
+- `GITHUB_TOKEN`
+- `GITHUB_REPOSITORY` in `owner/repo` format
+- `PR_NUMBER`
+
+Quick smoke check after install:
+
+```bash
+npm run build
+npm run test:unit
+node dist/index.js --version
+codeowl doctor
+codeowl audit --reviewers code-quality
+```
 
 ## Version & Upgrade
 
@@ -215,7 +254,10 @@ npm update -g codeowl   # Upgrade to latest
 
 ```bash
 npm run build       # Compile TypeScript + copy templates
+npm run dev         # Run the CLI from source with ts-node
 node dist/index.js  # Run directly
 npm link            # Install as global `codeowl` command
+npm run test:unit   # Fast verification for source changes
+npm run test        # Unit + integration tests
 ```
 
