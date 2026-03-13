@@ -134,7 +134,7 @@ export class GitHubReviewPlatform implements ReviewPlatform {
     }
   }
 
-  async approvePR(body: string): Promise<void> {
+  async approvePR(body: string): Promise<boolean> {
     try {
       await this.octokit.rest.pulls.createReview({
         owner: this.owner,
@@ -143,8 +143,10 @@ export class GitHubReviewPlatform implements ReviewPlatform {
         event: 'APPROVE',
         body,
       });
+      return true;
     } catch (err) {
       console.warn(`Could not approve PR: ${(err as Error).message}`);
+      return false;
     }
   }
 

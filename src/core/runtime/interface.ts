@@ -31,6 +31,10 @@ export interface IRuntime {
   isAvailable(): Promise<boolean>;
 }
 
+/**
+ * Parses a model string (e.g. "anthropic/claude-sonnet-4-5") into provider and model ID components.
+ * Infers provider from model name prefix if no slash is present (e.g. "claude-*" → anthropic).
+ */
 export function parseProviderAndModel(modelString: string): { provider: string; modelId: string } {
   const slashIdx = modelString.indexOf('/');
   if (slashIdx === -1) {
@@ -46,6 +50,7 @@ export function parseProviderAndModel(modelString: string): { provider: string; 
   };
 }
 
+/** Normalizes a transport string to lowercase, or returns "auto" if undefined or empty. */
 export function normalizeTransport(transport?: string): string {
   return transport?.trim().toLowerCase() || 'auto';
 }

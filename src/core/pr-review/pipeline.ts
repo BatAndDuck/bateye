@@ -219,18 +219,28 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     const statusBody = `<!-- codeowl-status -->\n🦉 **CodeOwl** review complete — ${finalFindings.length} findings posted.`;
     await platform.updateStatusComment(statusBody);
 
-    // Auto-approve if configured and threshold met
+    // Auto-approve if configured and threshold met.
+    // Use `deduped` (all findings from THIS run's AI analysis) not `finalFindings` (new-only).
+    // `deduped` only contains what the AI found right now — it does NOT carry over findings
+    // from previous runs. If a prior HIGH finding was fixed, the current run won't include it
+    // and approval proceeds. If it isn't fixed, the AI will find it again and block approval.
     if (config.prReview?.autoApprove?.enabled) {
       const maxSev = config.prReview.autoApprove.maxSeverity || 'low';
       const threshold = SEVERITY_ORDER[maxSev] ?? 1;
-      const hasBlocker = finalFindings.some(f => SEVERITY_ORDER[f.priority] > threshold);
+      const hasBlocker = deduped.some(f => SEVERITY_ORDER[f.priority] > threshold);
 
       if (!hasBlocker) {
         log('Auto-approving PR (no findings exceed threshold)...');
-        await platform.approvePR(
+        const approved = await platform.approvePR(
           `🦉 **CodeOwl Auto-Approve**: No findings above "${maxSev}" severity. ✅`
         );
-        result.autoApproved = true;
+        if (approved) {
+          result.autoApproved = true;
+        } else {
+          log('⚠️  Auto-approve failed. To fix: go to GitHub repo Settings → General → "Allow GitHub Actions to create and approve pull requests" and enable it.');
+        }
+      } else {
+        log(`Auto-approve skipped — findings exceed "${maxSev}" threshold.`);
       }
     }
 

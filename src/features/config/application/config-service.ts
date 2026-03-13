@@ -15,6 +15,9 @@ export type ResolvedConfig = {
 const VERCEL_OIDC_ENV = 'VERCEL_OIDC_TOKEN';
 
 export function loadConfig(repoPath: string): Config {
+  if (!repoPath || typeof repoPath !== 'string') {
+    throw new Error('repoPath is required');
+  }
   const configPath = path.join(repoPath, CONFIG_FILE);
   if (!fs.existsSync(configPath)) {
     return {};
@@ -84,8 +87,20 @@ export function resolveApiKey(config: Pick<ResolvedConfig, 'model' | 'transport'
   return key;
 }
 
+const ALLOWED_CONFIG_KEYS: ReadonlySet<keyof Config> = new Set(['$schema', 'model', 'transport', 'apiBaseUrl', 'exclude', 'prReview']);
+
+/**
+ * Sets a single field in the repository's CodeOwl config file.
+ * @param repoPath - Path to the repository root
+ * @param field - Configuration field name. Allowed values: '$schema', 'model', 'transport', 'apiBaseUrl', 'exclude', 'prReview'
+ * @param value - New value to assign to the field
+ * @throws Error if field is not one of the allowed config keys
+ */
 export function setConfigField(repoPath: string, field: keyof Config, value: string | string[]): void {
+  if (!ALLOWED_CONFIG_KEYS.has(field)) {
+    throw new Error(`Unknown config field: ${field}`);
+  }
   const config = loadConfig(repoPath);
-  (config as Record<string, unknown>)[field] = value;
+  Object.assign(config, { [field]: value });
   saveConfig(repoPath, config);
 }

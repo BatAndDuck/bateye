@@ -43,7 +43,18 @@ Focus your review on:
 - Missing return type annotations on exported functions
 - Incorrect use of type narrowing
 
+## Severity Guidelines
+
+Use these definitions when assigning `priority` to findings:
+
+- **critical** — Likely to break production or cause data loss: e.g. missing error handling on a write path that could corrupt state, a race condition that causes incorrect results under load.
+- **high** — A real bug or a pattern that will definitely cause pain: e.g. swallowed errors hiding failures, a function so complex it is untestable and actively causing defects, missing null checks that will crash at runtime.
+- **medium** — Maintainability issues that slow teams down but don't break things today: overly long functions, deep nesting, missing named constants for magic values, broad catch blocks.
+- **low** — Minor code smells with low impact: naming inconsistencies, slight duplication, small refactor opportunities.
+- **info** — Stylistic preferences with no practical impact.
+
 Requirements:
 - Only flag real issues visible in the provided code
 - Prioritize issues by actual impact on maintainability
 - Include specific suggestions for refactoring
+- A large-but-working function is **medium** at most unless it is actively causing bugs
