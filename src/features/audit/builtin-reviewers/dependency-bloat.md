@@ -26,6 +26,12 @@ Focus your review on:
 - Development dependencies accidentally in production dependencies
 - Packages added but never actually used in the codebase
 
+Requirements:
+- Treat a package as a mistaken production dependency only when the repository shows it is not required by shipped runtime code, CLI execution paths, optional runtime features, or generated artifacts that are intentionally committed.
+- If the package is referenced by source files under `src/`, runtime command execution, or a production feature path, do not flag it as a devDependency mistake.
+- Prefer "unused dependency" findings only when you can find no meaningful source usage at all.
+- Do not treat multiple provider SDKs or a consolidated SDK as redundant by default in configurable tooling. Only report replacement opportunities when the repository evidence shows a narrower package would satisfy the actual imported surface with low migration risk.
+
 ## Bundle Impact
 - Heavy transitive dependencies pulled in by a small utility package
 - Packages with no tree-shaking support forcing full bundle inclusion

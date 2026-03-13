@@ -54,3 +54,9 @@ Focus your review on:
 - Missing separate timeouts and circuit breakers per downstream dependency — a single global timeout applies the same policy to fast and slow dependencies alike
 - Database connection pool shared between OLTP request handlers and long-running batch or analytics queries
 - Missing queue depth limits — an unbounded work queue allows one slow consumer to grow memory usage without bound
+
+Requirements:
+- Only apply this reviewer when the repository clearly contains service-to-service or process-to-process communication that the code under review directly controls.
+- Do not require circuit breakers, bulkheads, or readiness endpoints for CLI tools, libraries, static analysis tools, or repos that do not expose a long-running service boundary.
+- If network policy, retry, timeout, or fallback behavior is centralized in a shared client or runtime abstraction, prefer findings on that abstraction instead of duplicating the same recommendation at each caller.
+- Return no finding rather than a speculative architecture wish when the repository does not show enough operational context.

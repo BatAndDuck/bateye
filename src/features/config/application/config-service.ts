@@ -14,6 +14,7 @@ export type ResolvedConfig = {
 };
 
 const VERCEL_OIDC_ENV = 'VERCEL_OIDC_TOKEN';
+const VERCEL_GATEWAY_ENV_NAMES = [DEFAULT_API_KEY_ENV, 'AI_GATEWAY_API_KEY', VERCEL_OIDC_ENV] as const;
 
 export function loadConfig(repoPath: string): Config {
   if (!repoPath || typeof repoPath !== 'string') {
@@ -64,6 +65,7 @@ export function resolveAuthEnvName(config: Pick<ResolvedConfig, 'model' | 'trans
   return usesVercelGateway(config) ? VERCEL_OIDC_ENV : DEFAULT_API_KEY_ENV;
 }
 
+/** Resolve the API credential required for the selected runtime transport and model. */
 export function resolveApiKey(config: Pick<ResolvedConfig, 'model' | 'transport'> = {
   model: DEFAULT_MODEL,
   transport: 'auto',
@@ -74,9 +76,7 @@ export function resolveApiKey(config: Pick<ResolvedConfig, 'model' | 'transport'
       || process.env['AI_GATEWAY_API_KEY']
       || process.env[VERCEL_OIDC_ENV];
     if (!key) {
-      throw new Error(
-        `API key not found. Set ${DEFAULT_API_KEY_ENV}, AI_GATEWAY_API_KEY, or ${VERCEL_OIDC_ENV} environment variable.`
-      );
+      throw new Error(`API key not found. Set one of: ${VERCEL_GATEWAY_ENV_NAMES.join(', ')}.`);
     }
     return key;
   }
@@ -84,17 +84,25 @@ export function resolveApiKey(config: Pick<ResolvedConfig, 'model' | 'transport'
   const envName = resolveAuthEnvName(config);
   const key = process.env[envName];
   if (!key) {
-    throw new Error(`API key not found. Set the ${envName} environment variable.`);
+    throw new Error(`API key not found. Set ${envName}.`);
   }
   return key;
 }
 
-const ALLOWED_CONFIG_KEYS: ReadonlySet<keyof Config> = new Set(['$schema', 'model', 'transport', 'apiBaseUrl', 'exclude', 'prReview']);
+const ALLOWED_CONFIG_KEYS: ReadonlySet<keyof Config> = new Set([
+  '$schema',
+  'model',
+  'transport',
+  'apiBaseUrl',
+  'exclude',
+  'prReview',
+  'disabledReviewers',
+]);
 
 /**
  * Sets a single field in the repository's CodeOwl config file.
  * @param repoPath - Path to the repository root
- * @param field - Configuration field name. Allowed values: '$schema', 'model', 'transport', 'apiBaseUrl', 'exclude', 'prReview'
+ * @param field - Configuration field name. Allowed values: '$schema', 'model', 'transport', 'apiBaseUrl', 'exclude', 'prReview', 'disabledReviewers'
  * @param value - New value to assign to the field
  * @throws Error if field is not one of the allowed config keys
  */
@@ -102,6 +110,19 @@ export function setConfigField(repoPath: string, field: keyof Config, value: str
   if (!ALLOWED_CONFIG_KEYS.has(field)) {
     throw new Error(`Unknown config field: ${field}`);
   }
+
+  if (field === 'exclude' || field === 'disabledReviewers') {
+    if (!Array.isArray(value)) {
+      throw new Error(`Config field "${field}" must be an array of non-empty strings.`);
+    }
+    const invalidEntry = value.find(entry => typeof entry !== 'string' || entry.trim().length === 0);
+    if (invalidEntry !== undefined) {
+      throw new Error(`Config field "${field}" must contain only non-empty strings.`);
+    }
+  } else if (Array.isArray(value)) {
+    throw new Error(`Config field "${field}" does not accept an array value.`);
+  }
+
   const config = loadConfig(repoPath);
   Object.assign(config, { [field]: value });
   saveConfig(repoPath, config);

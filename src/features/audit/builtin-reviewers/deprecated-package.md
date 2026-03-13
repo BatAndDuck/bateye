@@ -34,3 +34,8 @@ Focus your review on:
 - Old HTTP client libraries that should use native fetch (node-fetch, axios for simple cases)
 - Test libraries with modern alternatives (enzyme → React Testing Library)
 - Build tools replaced by faster alternatives (webpack → vite for new projects)
+
+Requirements:
+- Only report a package as deprecated, invalid, abandoned, or unsupported when the repository snapshot provides concrete evidence such as a deprecation notice in package-manager metadata, install/lockfile mismatch, incompatible runtime usage, or code comments/docs showing the supported replacement.
+- Do not claim a package name is invalid or wrong based only on memory. If the manifest and lockfile are internally consistent and no repository evidence contradicts them, prefer no finding.
+- A newer major version existing is not, by itself, a finding.

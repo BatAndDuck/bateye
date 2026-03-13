@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import execa from 'execa';
 import { z } from 'zod';
-import { RepoFile, RepoIndex, ResourceCategory, ServiceDesignDoc, ServiceInterfaceType, ServiceKind, SystemDesignResult } from '../../../types/index';
+import { RepoFile, RepoIndex, ResourceCategory, ServiceDesignDoc, ServiceInterfaceType, ServiceKind, SystemDesignInventory, SystemDesignResult } from '../../../types/index';
 import { buildRepoIndex, formatFilesForContext, readFileContent } from '../../../core/indexing/index';
 import { createRuntime, getRuntime } from '../../../core/runtime/factory';
 import { serviceDesignDocSchema, ServiceDoc } from '../../../core/validation/schemas';
@@ -209,12 +209,7 @@ export async function runSystemDesign(
 
   log('Loading configuration...');
   const config = resolveConfig(repoPath);
-  let apiKey: string | null = null;
-  try {
-    apiKey = resolveApiKey(config);
-  } catch (err) {
-    log(`API key unavailable, continuing with static architecture analysis: ${(err as Error).message}`);
-  }
+  const apiKey = resolveSystemDesignApiKey(config, log);
 
   log('Indexing repository...');
   const index = await buildRepoIndex(repoPath, config);
@@ -230,36 +225,82 @@ export async function runSystemDesign(
     runtime,
     enabled: Boolean(apiKey && runtime),
   };
+  const { services, unitAnalyses } = await analyzeArchitecturalUnits(units, index, config.model, aiContext, log);
+
+  reconcileServiceConnections(services, unitAnalyses, index);
+  const coverage = buildCoverageSummary(unitAnalyses, services);
+  appendIntegrationServices(services);
+  const repoStructure = await buildRepoStructureSummary(repoPath, index.totalFiles);
+
+  log('Synthesizing architecture...');
+  const synthesis = aiContext.enabled && aiContext.apiKey
+    ? await synthesizeArchitecture(services, repoStructure, config.model, aiContext.apiKey, coverage, config.transport, config.apiBaseUrl)
+    : synthesizeStaticArchitecture(services, repoStructure);
+  const result = buildSystemDesignResult(repoPath, outputDir, synthesis, services, coverage);
+
+  log('Writing output files...');
+  const graph = writeSystemDesignOutputs(outputDir, result, unitAnalyses, units);
+  log(`✓ HTML report: ${path.join(outputDir, 'index.html')}`);
+
+  return result;
+}
+
+function resolveSystemDesignApiKey(
+  config: ReturnType<typeof resolveConfig>,
+  logProgress: (msg: string) => void,
+): string | null {
+  try {
+    return resolveApiKey(config);
+  } catch (err) {
+    logProgress(`API key unavailable, continuing with static architecture analysis: ${(err as Error).message}`);
+    return null;
+  }
+}
+
+async function analyzeArchitecturalUnits(
+  units: ArchitecturalUnit[],
+  index: RepoIndex,
+  model: string,
+  aiContext: AIRuntimeContext,
+  logProgress: (msg: string) => void,
+): Promise<{ services: ServiceDesignDoc[]; unitAnalyses: UnitAnalysisResult[] }> {
   const services: ServiceDesignDoc[] = [];
   const unitAnalyses: UnitAnalysisResult[] = [];
 
   for (const unit of units) {
-    log(`Analyzing: ${unit.name}...`);
-    const analysis = await analyzeUnit(unit, index, config.model, aiContext, log);
+    logProgress(`Analyzing: ${unit.name}...`);
+    const analysis = await analyzeUnit(unit, index, model, aiContext, logProgress);
     services.push(analysis.service);
     unitAnalyses.push(analysis);
-    log(`  ✓ ${unit.name}: ${analysis.service.kind} from ${analysis.fileSummaries.length} file summary(ies)`);
+    logProgress(`  ✓ ${unit.name}: ${analysis.service.kind} from ${analysis.fileSummaries.length} file summary(ies)`);
   }
 
-  reconcileServiceConnections(services, unitAnalyses, index);
-  const coverage = buildCoverageSummary(unitAnalyses, services);
+  return { services, unitAnalyses };
+}
+
+function appendIntegrationServices(services: ServiceDesignDoc[]): void {
   const integrationServices = buildIntegrationServices(services);
   for (const integrationService of integrationServices) {
     if (!services.some(service => service.serviceId === integrationService.serviceId)) {
       services.push(integrationService);
     }
   }
+}
 
+async function buildRepoStructureSummary(repoPath: string, totalFiles: number): Promise<string> {
   const topLevelDirs = await listTopLevelDirs(repoPath);
-  const repoStructure = `Top-level directories: ${topLevelDirs.join(', ')}\nTotal files: ${index.totalFiles}`;
+  return `Top-level directories: ${topLevelDirs.join(', ')}\nTotal files: ${totalFiles}`;
+}
 
-  log('Synthesizing architecture...');
-  const synthesis = aiContext.enabled && aiContext.apiKey
-    ? await synthesizeArchitecture(services, repoStructure, config.model, aiContext.apiKey, coverage, config.transport, config.apiBaseUrl)
-    : synthesizeStaticArchitecture(services, repoStructure);
+function buildSystemDesignResult(
+  repoPath: string,
+  outputDir: string,
+  synthesis: Awaited<ReturnType<typeof synthesizeArchitecture>> | ReturnType<typeof synthesizeStaticArchitecture>,
+  services: ServiceDesignDoc[],
+  coverage: SystemDesignResult['coverage'],
+): SystemDesignResult {
   const generatedAt = new Date().toISOString();
-
-  const result: SystemDesignResult = {
+  return {
     command: 'system-design',
     repoPath: path.resolve(repoPath),
     architectureType: synthesis.architectureType,
@@ -280,12 +321,6 @@ export async function runSystemDesign(
     },
     generatedAt,
   };
-
-  log('Writing output files...');
-  const graph = writeSystemDesignOutputs(outputDir, result, unitAnalyses, units);
-  log(`✓ HTML report: ${path.join(outputDir, 'index.html')}`);
-
-  return result;
 }
 
 /**
@@ -304,9 +339,40 @@ function writeSystemDesignOutputs(
   ensureDir(outputDir);
   writeSystemDesignResult(outputDir, result);
   ensureDir(result.artifacts.unitsDir);
+  writeUnitAnalysisOutputs(result.artifacts.unitsDir, unitAnalyses);
 
+  const graph = buildGraph(result);
+  writeJson(path.join(outputDir, 'graph.json'), graph);
+  writeJson(result.artifacts.coveragePath, coverage);
+  writeJson(result.artifacts.inventoryPath, buildInventoryOutput(result, unitAnalyses, detectedUnits));
+  writeJson(result.artifacts.architecturePath, {
+    architectureType: result.architectureType,
+    score: result.score,
+    strengths: result.strengths,
+    weaknesses: result.weaknesses,
+    globalSummary: result.globalSummary,
+    coverage,
+    services,
+    generatedAt,
+  });
+  writeJson(path.join(outputDir, 'summary.json'), {
+    architectureType: result.architectureType,
+    score: result.score,
+    strengths: result.strengths,
+    weaknesses: result.weaknesses,
+    globalSummary: result.globalSummary,
+    serviceCount: services.length,
+    coverage,
+    generatedAt,
+  });
+
+  generateHTMLReport(outputDir, graph);
+  return graph;
+}
+
+function writeUnitAnalysisOutputs(unitsDir: string, unitAnalyses: UnitAnalysisResult[]): void {
   for (const analysis of unitAnalyses) {
-    writeJson(path.join(result.artifacts.unitsDir, `${analysis.service.serviceId}.json`), {
+    writeJson(path.join(unitsDir, `${analysis.service.serviceId}.json`), {
       serviceId: analysis.service.serviceId,
       name: analysis.service.name,
       kind: analysis.service.kind,
@@ -334,12 +400,15 @@ function writeSystemDesignOutputs(
       conflicts: analysis.service.conflicts,
     });
   }
+}
 
-  const graph = buildGraph(result);
-  writeJson(path.join(outputDir, 'graph.json'), graph);
-  writeJson(result.artifacts.coveragePath, coverage);
-  writeJson(result.artifacts.inventoryPath, {
-    generatedAt,
+function buildInventoryOutput(
+  result: SystemDesignResult,
+  unitAnalyses: UnitAnalysisResult[],
+  detectedUnits: ArchitecturalUnit[],
+): SystemDesignInventory {
+  return {
+    generatedAt: result.generatedAt,
     repoPath: result.repoPath,
     units: unitAnalyses.map(analysis => ({
       unitId: analysis.service.serviceId,
@@ -355,33 +424,10 @@ function writeSystemDesignOutputs(
       evidence: analysis.fileSummaries.map(summary => ({ filePath: summary.filePath, reason: summary.summary })),
       confidence: analysis.service.confidence,
     })),
-    integrations: services.flatMap(service => service.integrations.filter(integration => !integration.internal)),
-    gaps: coverage.gaps,
-    conflicts: coverage.conflicts,
-  });
-  writeJson(result.artifacts.architecturePath, {
-    architectureType: result.architectureType,
-    score: result.score,
-    strengths: result.strengths,
-    weaknesses: result.weaknesses,
-    globalSummary: result.globalSummary,
-    coverage,
-    services,
-    generatedAt,
-  });
-  writeJson(path.join(outputDir, 'summary.json'), {
-    architectureType: result.architectureType,
-    score: result.score,
-    strengths: result.strengths,
-    weaknesses: result.weaknesses,
-    globalSummary: result.globalSummary,
-    serviceCount: services.length,
-    coverage,
-    generatedAt,
-  });
-
-  generateHTMLReport(outputDir, graph);
-  return graph;
+    integrations: result.services.flatMap(service => service.integrations.filter(integration => !integration.internal)),
+    gaps: result.coverage.gaps,
+    conflicts: result.coverage.conflicts,
+  };
 }
 
 /** A detected architectural unit (service, module, or app) with its directory path and enriched analysis hints */
@@ -421,6 +467,7 @@ interface WorkspaceContext {
   packagesByName: Map<string, WorkspacePackageInfo>;
 }
 
+/** Detect architectural units by scanning repository structure, workspace manifests, and compose definitions. */
 export async function detectArchitecturalUnits(
   repoPath: string,
   index: RepoIndex,
