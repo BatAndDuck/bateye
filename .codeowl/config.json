@@ -1,5 +1,11 @@
 {
   "$schema": "./node_modules/codeowl/schemas/codeowl-config.schema.json",
   "model": "vercel/minimax/minimax-m2.5",
-  "exclude": ["generated", "vendor"]
+  "exclude": ["generated", "vendor"],
+  "prReview": {
+    "autoApprove": {
+      "enabled": true,
+      "maxSeverity": "medium"
+    }
+  }
 }
