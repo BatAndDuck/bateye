@@ -43,25 +43,11 @@ export function createCLI(): Command {
     });
 
   // ── models ────────────────────────────────────────────────────────────
-  const modelsCmd = program
-    .command('models')
-    .description('List available AI models')
-    .action(async (_, cmd) => {
-      await runModels(getRepoPath(cmd));
-    });
-
-  modelsCmd
-    .command('anthropic')
-    .description('List Anthropic models')
-    .action(async (_, cmd) => {
-      await runModels(getRepoPath(cmd.parent!.parent!), 'anthropic');
-    });
-
-  modelsCmd
-    .command('openai')
-    .description('List OpenAI models')
-    .action(async (_, cmd) => {
-      await runModels(getRepoPath(cmd.parent!.parent!), 'openai');
+  program
+    .command('models [provider]')
+    .description('List available AI models (optionally filter by provider, e.g. groq, anthropic, openai)')
+    .action(async (provider, _, cmd) => {
+      await runModels(getRepoPath(cmd), provider);
     });
 
   // ── config ────────────────────────────────────────────────────────────
