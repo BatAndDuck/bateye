@@ -72,10 +72,13 @@ export type PRReviewResult = {
   autoApproved?: boolean;
 };
 
+/** The communication interface type exposed by a service (e.g. REST, GraphQL, event stream) */
 export type ServiceInterfaceType = "http" | "graphql" | "event" | "queue" | "cron" | "db";
 
+/** Classifies the type of architectural code unit detected in the repository */
 export type ServiceKind = "service" | "module" | "library" | "app" | "worker" | "gateway" | "resource";
 
+/** Category of an external dependency or infrastructure integration */
 export type ResourceCategory =
   | "database"
   | "cache"
@@ -86,12 +89,14 @@ export type ResourceCategory =
   | "external-api"
   | "internal-platform";
 
+/** A reference to a specific file that provided evidence for an architectural decision */
 export type EvidenceRef = {
   filePath: string;
   reason: string;
   signal?: string;
 };
 
+/** A reference to an external or internal service that a unit integrates with */
 export type IntegrationRef = {
   name: string;
   description: string;

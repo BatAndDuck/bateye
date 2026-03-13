@@ -477,53 +477,18 @@ export async function detectArchitecturalUnits(
   const hasRootApplicationBoundary = units.some(unit => unit.dirPath === '.' || unit.dirPath.startsWith('.#'));
 
   // Phase 2: Multi-service container directories.
-  for (const pattern of CONTAINER_DIRS) {
-    const patternDir = path.join(repoPath, pattern);
-    if (!fs.existsSync(patternDir)) continue;
-    const subdirs = fs.readdirSync(patternDir)
-      .filter(e => fs.statSync(path.join(patternDir, e)).isDirectory());
-    for (const subdir of subdirs) {
-      const dirPath = `${pattern}/${subdir}`;
-      const files = index.files.filter(f => f.relativePath.startsWith(dirPath + '/'));
-      addUnit(subdir, dirPath, files, {
-        kindHint: inferServiceKind(subdir, dirPath),
-        analysisHints: [`Detected from directory: ${dirPath}`],
-      });
-    }
+  for (const unit of detectContainerDirUnits(repoPath, index)) {
+    addUnit(unit.name, unit.dirPath, unit.files, unit);
   }
 
   // Phase 3: Common top-level service/resource directories.
-  for (const dirName of TOP_LEVEL_SERVICE_DIRS) {
-    const fullPath = path.join(repoPath, dirName);
-    if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isDirectory()) continue;
-    const files = index.files.filter(f => f.relativePath.startsWith(dirName + '/'));
-    addUnit(dirName, dirName, files, {
-      kindHint: inferServiceKind(dirName, dirName),
-      analysisHints: [`Detected from top-level directory: ${dirName}`],
-    });
+  for (const unit of detectTopLevelServiceDirUnits(repoPath, index)) {
+    addUnit(unit.name, unit.dirPath, unit.files, unit);
   }
 
   // Phase 4: Look under src/ and common containers inside src/.
-  for (const parentDir of ['src', 'src/apps', 'src/services', 'src/modules']) {
-    if (parentDir === 'src' && hasRootApplicationBoundary) continue;
-    const fullPath = path.join(repoPath, parentDir);
-    if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isDirectory()) continue;
-    const subdirs = fs.readdirSync(fullPath)
-      .filter(entry => fs.statSync(path.join(fullPath, entry)).isDirectory());
-
-    for (const subdir of subdirs) {
-      const dirPath = `${parentDir}/${subdir}`;
-      const files = index.files.filter(f => f.relativePath.startsWith(dirPath + '/'));
-      if (files.length === 0) continue;
-
-      const shouldInclude = subdirs.length > 1 || isServiceLikeDir(subdir) || RESOURCE_NAME_PATTERN.test(subdir);
-      if (!shouldInclude) continue;
-
-      addUnit(subdir, dirPath, files, {
-        kindHint: inferServiceKind(subdir, dirPath),
-        analysisHints: [`Detected from source directory: ${dirPath}`],
-      });
-    }
+  for (const unit of detectSrcDirUnits(repoPath, index, hasRootApplicationBoundary)) {
+    addUnit(unit.name, unit.dirPath, unit.files, unit);
   }
 
   // Fallback: entire src/ or root as a single unit
@@ -2115,6 +2080,117 @@ function buildIntegrationServiceId(integration: { name: string; instanceKey?: st
   const base = normalizeToken(integration.name) || 'integration';
   const instance = normalizeToken(integration.instanceKey || '');
   return instance ? `integration-${base}-${instance}` : `integration-${base}`;
+}
+
+function detectContainerDirUnits(repoPath: string, index: RepoIndex): ArchitecturalUnit[] {
+  const units: ArchitecturalUnit[] = [];
+  for (const pattern of CONTAINER_DIRS) {
+    const patternDir = path.join(repoPath, pattern);
+    let subdirs: string[];
+    try {
+      if (!fs.existsSync(patternDir)) continue;
+      subdirs = fs.readdirSync(patternDir)
+        .filter(e => {
+          try {
+            return fs.statSync(path.join(patternDir, e)).isDirectory();
+          } catch {
+            return false;
+          }
+        });
+    } catch (err) {
+      continue;
+    }
+    for (const subdir of subdirs) {
+      const dirPath = `${pattern}/${subdir}`;
+      const files = index.files.filter(f => f.relativePath.startsWith(dirPath + '/'));
+      units.push({
+        name: subdir,
+        dirPath,
+        files,
+        kindHint: inferServiceKind(subdir, dirPath),
+        dependencyHints: [],
+        analysisHints: [`Detected from directory: ${dirPath}`],
+        capabilityHints: [],
+        integrationHints: [],
+        submoduleHints: [],
+        entityHints: [],
+        interfaceHints: [],
+      });
+    }
+  }
+  return units;
+}
+
+function detectTopLevelServiceDirUnits(repoPath: string, index: RepoIndex): ArchitecturalUnit[] {
+  const units: ArchitecturalUnit[] = [];
+  for (const dirName of TOP_LEVEL_SERVICE_DIRS) {
+    const fullPath = path.join(repoPath, dirName);
+    try {
+      if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    const files = index.files.filter(f => f.relativePath.startsWith(dirName + '/'));
+    units.push({
+      name: dirName,
+      dirPath: dirName,
+      files,
+      kindHint: inferServiceKind(dirName, dirName),
+      dependencyHints: [],
+      analysisHints: [`Detected from top-level directory: ${dirName}`],
+      capabilityHints: [],
+      integrationHints: [],
+      submoduleHints: [],
+      entityHints: [],
+      interfaceHints: [],
+    });
+  }
+  return units;
+}
+
+function detectSrcDirUnits(repoPath: string, index: RepoIndex, hasRootApplicationBoundary: boolean): ArchitecturalUnit[] {
+  const units: ArchitecturalUnit[] = [];
+  for (const parentDir of COMMON_SERVICE_PREFIXES.filter(p => p.startsWith('src'))) {
+    if (parentDir === 'src' && hasRootApplicationBoundary) continue;
+    const fullPath = path.join(repoPath, parentDir);
+    let subdirs: string[];
+    try {
+      if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isDirectory()) continue;
+      subdirs = fs.readdirSync(fullPath)
+        .filter(entry => {
+          try {
+            return fs.statSync(path.join(fullPath, entry)).isDirectory();
+          } catch {
+            return false;
+          }
+        });
+    } catch {
+      continue;
+    }
+    for (const subdir of subdirs) {
+      const dirPath = `${parentDir}/${subdir}`;
+      const files = index.files.filter(f => f.relativePath.startsWith(dirPath + '/'));
+      if (files.length === 0) continue;
+
+      const shouldInclude = subdirs.length > 1 || isServiceLikeDir(subdir) || RESOURCE_NAME_PATTERN.test(subdir);
+      if (!shouldInclude) continue;
+
+      units.push({
+        name: subdir,
+        dirPath,
+        files,
+        kindHint: inferServiceKind(subdir, dirPath),
+        dependencyHints: [],
+        analysisHints: [`Detected from source directory: ${dirPath}`],
+        capabilityHints: [],
+        integrationHints: [],
+        submoduleHints: [],
+        entityHints: [],
+        interfaceHints: [],
+      });
+    }
+  }
+  return units;
 }
 
 function detectPackageUnits(repoPath: string, index: RepoIndex): ArchitecturalUnit[] {

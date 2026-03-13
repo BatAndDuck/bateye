@@ -174,6 +174,43 @@ permissions:
 | Google | `google/gemini-*` | `CODE_OWL_LLM_MODEL_API_KEY` |
 | Vercel AI Gateway | `vercel/<provider>/<model>` | `VERCEL_OIDC_TOKEN` |
 
+## Environment Variables
+
+| Variable | Purpose |
+|---|---|
+| `CODE_OWL_LLM_MODEL_API_KEY` | API key for Anthropic, OpenAI, OpenRouter, or Google |
+| `VERCEL_OIDC_TOKEN` | OIDC token for Vercel AI Gateway models |
+| `AI_GATEWAY_API_KEY` | Alternative API key for Vercel AI Gateway |
+
+The `apiBaseUrl` config field can point to any OpenAI-compatible gateway endpoint.
+
+## Version & Upgrade
+
+```bash
+codeowl --version        # Check installed version
+npm update -g codeowl   # Upgrade to latest
+```
+
+## Troubleshooting
+
+**API key not found**
+- Verify `CODE_OWL_LLM_MODEL_API_KEY` is set in your environment
+- For Vercel models, set `VERCEL_OIDC_TOKEN` instead
+- Run `codeowl doctor` to validate your config and credentials
+
+**Model not available / request failed**
+- Run `codeowl models` to list available models for your provider
+- Confirm the `model` field in `.codeowl/config.json` uses `provider/model-id` format
+- Check network connectivity; some providers may have rate limits
+
+**No reviewers found**
+- Built-in reviewers load automatically — if missing, verify the npm package is correctly installed
+- Custom reviewers must live in `.codeowl/reviewers/*.md` and include valid frontmatter
+
+**Config validation errors**
+- Run `codeowl doctor` for a full config check
+- Validate your `.codeowl/config.json` against the schema at `node_modules/codeowl/schemas/codeowl-config.schema.json`
+
 ## Local Development
 
 ```bash
