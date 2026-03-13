@@ -101,6 +101,6 @@ export function setConfigField(repoPath: string, field: keyof Config, value: str
     throw new Error(`Unknown config field: ${field}`);
   }
   const config = loadConfig(repoPath);
-  (config as Record<string, unknown>)[field] = value;
+  Object.assign(config, { [field]: value });
   saveConfig(repoPath, config);
 }

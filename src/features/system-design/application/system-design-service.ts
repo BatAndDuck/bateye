@@ -2082,6 +2082,7 @@ function buildIntegrationServiceId(integration: { name: string; instanceKey?: st
   return instance ? `integration-${base}-${instance}` : `integration-${base}`;
 }
 
+/** Detects architectural units from container directories (e.g. apps/, services/, modules/). */
 function detectContainerDirUnits(repoPath: string, index: RepoIndex): ArchitecturalUnit[] {
   const units: ArchitecturalUnit[] = [];
   for (const pattern of CONTAINER_DIRS) {
@@ -2121,6 +2122,7 @@ function detectContainerDirUnits(repoPath: string, index: RepoIndex): Architectu
   return units;
 }
 
+/** Detects architectural units from well-known top-level service directories (e.g. frontend/, api/, worker/). */
 function detectTopLevelServiceDirUnits(repoPath: string, index: RepoIndex): ArchitecturalUnit[] {
   const units: ArchitecturalUnit[] = [];
   for (const dirName of TOP_LEVEL_SERVICE_DIRS) {
@@ -2148,6 +2150,10 @@ function detectTopLevelServiceDirUnits(repoPath: string, index: RepoIndex): Arch
   return units;
 }
 
+/**
+ * Detects architectural units from subdirectories under src/ (or src/apps, src/services, etc.).
+ * Skips src/ itself when a root application boundary is already detected to avoid duplication.
+ */
 function detectSrcDirUnits(repoPath: string, index: RepoIndex, hasRootApplicationBoundary: boolean): ArchitecturalUnit[] {
   const units: ArchitecturalUnit[] = [];
   for (const parentDir of COMMON_SERVICE_PREFIXES.filter(p => p.startsWith('src'))) {
@@ -2193,6 +2199,7 @@ function detectSrcDirUnits(repoPath: string, index: RepoIndex, hasRootApplicatio
   return units;
 }
 
+/** Detects architectural units from package.json files in a monorepo workspace (npm/yarn/pnpm workspaces). */
 function detectPackageUnits(repoPath: string, index: RepoIndex): ArchitecturalUnit[] {
   const packageFiles = index.files.filter(file =>
     file.relativePath === 'package.json' || file.relativePath.endsWith('/package.json')
