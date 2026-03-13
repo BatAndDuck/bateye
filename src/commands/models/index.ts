@@ -30,7 +30,12 @@ export async function runModels(repoPath: string, provider?: string): Promise<vo
 
   let providers: string[];
   if (provider) {
-    providers = [provider.toLowerCase()];
+    const normalised = provider.toLowerCase();
+    if (!SUPPORTED_PROVIDERS.includes(normalised)) {
+      console.log(chalk.red(`Unknown provider: ${provider}. Supported: ${SUPPORTED_PROVIDERS.join(', ')}`));
+      return;
+    }
+    providers = [normalised];
   } else {
     // Default: show models for the currently configured provider
     const activeTransport = config.transport && config.transport !== 'auto'
