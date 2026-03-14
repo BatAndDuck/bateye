@@ -37,6 +37,11 @@ export const MAX_CONCURRENT_AUDIT_REVIEWERS = 10;
 /** Maximum token budget for a single audit reviewer response. */
 export const MAX_AUDIT_REVIEWER_TOKENS = 8096;
 
+/** Default timeout for external scanning tools (ms) */
+export const DEFAULT_TOOL_TIMEOUT_MS = 60_000;
+/** Default max characters to capture from tool stdout */
+export const DEFAULT_TOOL_MAX_OUTPUT_CHARS = 50_000;
+
 export const CODEOWL_SUMMARY_MARKER = '<!-- codeowl-summary -->';
 export const CODEOWL_STATUS_MARKER = '<!-- codeowl-status -->';
 export const CODEOWL_COMMENT_MARKER = '[CodeOwl';

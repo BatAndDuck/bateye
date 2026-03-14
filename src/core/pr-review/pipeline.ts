@@ -19,6 +19,8 @@ import { verifyFindings } from './verifier';
 import { deduplicateFindings } from './deduplicator';
 import { buildConversation, filterAlreadyPosted, PRConversation } from './conversation';
 import { IRuntime } from '../runtime/interface';
+import { runReviewerTool } from '../tools/runner';
+import { formatToolContext } from '../tools/format';
 
 export interface PRReviewPipelineOptions {
   repoPath: string;
@@ -147,10 +149,13 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   log('Running reviewers in parallel...');
 
   const reviewerPromises = selectedReviewers.map(reviewer =>
-    runPRReviewer(reviewer, structuredDiff, changedFiles, config.model, apiKey, config.transport, config.apiBaseUrl, runtime, log)
+    runPRReviewer(reviewer, structuredDiff, changedFiles, repoPath, config.model, apiKey, config.transport, config.apiBaseUrl, runtime, log)
   );
-  const reviewerResults = await Promise.all(reviewerPromises);
-  const allFindings = reviewerResults.flat();
+  const reviewerRunResults = await Promise.all(reviewerPromises);
+  const toolSummaries = reviewerRunResults
+    .filter(r => r.hasTool)
+    .map(r => ({ reviewerName: r.reviewerName, toolRan: r.toolRan, findingCount: r.findings.length, error: r.toolError }));
+  const allFindings = reviewerRunResults.flatMap(r => r.findings);
   log(`Collected ${allFindings.length} raw findings from all reviewers`);
 
   // ─── Stage 6: Evidence verification ───
@@ -212,7 +217,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     }
 
     // Build summary from findings that were actually posted so counts are accurate
-    const summary = buildPRSummaryPrompt(postedFindings, rejected.length);
+    const summary = buildPRSummaryPrompt(postedFindings, rejected.length, toolSummaries);
     result.summary = summary;
     result.findings = postedFindings;
 
@@ -225,14 +230,13 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     await platform.updateStatusComment(statusBody);
 
     // Auto-approve if configured and threshold met.
-    // Use `deduped` (all findings from THIS run's AI analysis) not `finalFindings` (new-only).
-    // `deduped` only contains what the AI found right now — it does NOT carry over findings
-    // from previous runs. If a prior HIGH finding was fixed, the current run won't include it
-    // and approval proceeds. If it isn't fixed, the AI will find it again and block approval.
+    // Use `postedFindings` (what was actually reported in this run) for the threshold check.
+    // This ensures that already-posted findings from previous runs don't permanently block
+    // auto-approval on re-runs — what matters is whether THIS run's new findings exceed the threshold.
     if (config.prReview?.autoApprove?.enabled) {
       const maxSev = config.prReview.autoApprove.maxSeverity || 'low';
       const threshold = SEVERITY_ORDER[maxSev] ?? 1;
-      const hasBlocker = deduped.some(f => SEVERITY_ORDER[f.priority] > threshold);
+      const hasBlocker = postedFindings.some(f => SEVERITY_ORDER[f.priority] > threshold);
 
       if (!hasBlocker) {
         log('Auto-approving PR (no findings exceed threshold)...');
@@ -252,7 +256,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     log(`✓ GitHub comments posted`);
   } else {
     // Dry-run or no platform — use all finalFindings for the summary
-    result.summary = buildPRSummaryPrompt(finalFindings, rejected.length);
+    result.summary = buildPRSummaryPrompt(finalFindings, rejected.length, toolSummaries);
   }
 
   // Write local artifact after summary is finalised
@@ -263,19 +267,54 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   return result;
 }
 
+interface PRReviewerRunResult {
+  findings: PRFinding[];
+  reviewerName: string;
+  hasTool: boolean;
+  toolRan: boolean;
+  toolError?: string;
+}
+
 async function runPRReviewer(
   reviewer: Reviewer,
   structuredDiff: string,
   changedFiles: string[],
+  repoPath: string,
   model: string,
   apiKey: string,
   transport: string,
   apiBaseUrl: string | undefined,
   runtime: IRuntime,
   log: (msg: string) => void
-): Promise<PRFinding[]> {
+): Promise<PRReviewerRunResult> {
+  // Run external tool if configured
+  let toolContext: string | undefined;
+  let toolRan = false;
+  let toolError: string | undefined;
+
+  if (reviewer.tool) {
+    const targetFiles =
+      reviewer.tool.targeting === 'file' && reviewer.tool.fileArgs
+        ? changedFiles
+        : undefined;
+
+    const toolResult = await runReviewerTool(reviewer.tool, repoPath, targetFiles);
+    toolRan = true;
+
+    if (toolResult.success || toolResult.stdout.length > 0) {
+      toolContext = formatToolContext(reviewer.name, toolResult);
+    } else if (!reviewer.tool.optional) {
+      log(`  ✗ Required tool for ${reviewer.name} failed: ${toolResult.error}`);
+      return { findings: [], reviewerName: reviewer.name, hasTool: true, toolRan: false, toolError: toolResult.error };
+    } else {
+      toolError = toolResult.error;
+      toolRan = false;
+      log(`  ⚠ Tool for ${reviewer.name} failed (continuing AI-only): ${toolResult.error}`);
+    }
+  }
+
   const systemPrompt = buildPRReviewSystemPrompt(reviewer.instructions, reviewer.id, reviewer.name);
-  const userMessage = buildPRReviewUserMessage(structuredDiff, changedFiles);
+  const userMessage = buildPRReviewUserMessage(structuredDiff, changedFiles, toolContext);
 
   try {
     log(`  Running reviewer: ${reviewer.name}...`);
@@ -300,10 +339,10 @@ async function runPRReviewer(
     }));
 
     log(`  ✓ ${reviewer.name}: ${findings.length} findings`);
-    return findings;
+    return { findings, reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError };
   } catch (err) {
     log(`  ✗ ${reviewer.name} failed: ${(err as Error).message}`);
-    return [];
+    return { findings: [], reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError };
   }
 }
 

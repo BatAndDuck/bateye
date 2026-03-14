@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import matter from 'gray-matter';
-import { Reviewer, ReviewerMode, Config } from '../../../types/index';
+import { Reviewer, ReviewerMode, ReviewerToolConfig, Config } from '../../../types/index';
 import { ReviewerLoadResult } from '../../../core/reviewers/types';
 import { REVIEWERS_DIR } from '../../../core/config/defaults';
 
@@ -51,6 +51,7 @@ function parseReviewerFile(
         model: data.model ? String(data.model) : undefined,
         mode,
         category: data.category ? String(data.category) as Reviewer['category'] : undefined,
+        tool: parseToolConfig(data.tool),
         instructions: content.trim(),
         sourcePath: filePath,
         isBuiltIn,
@@ -122,6 +123,21 @@ export function loadReviewers(repoPath: string): ReviewerLoadResult {
  * Load reviewers filtered by mode and applying per-mode disabledReviewers from config.
  * Reviewers with mode 'both' are always included in either mode.
  */
+function parseToolConfig(raw: unknown): ReviewerToolConfig | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const obj = raw as Record<string, unknown>;
+  if (typeof obj.command !== 'string') return undefined;
+  return {
+    command: obj.command,
+    args: Array.isArray(obj.args) ? obj.args.map(String) : [],
+    targeting: obj.targeting === 'file' ? 'file' : 'project',
+    fileArgs: obj.fileArgs === true,
+    timeout: typeof obj.timeout === 'number' ? obj.timeout : undefined,
+    maxOutputChars: typeof obj.maxOutputChars === 'number' ? obj.maxOutputChars : undefined,
+    optional: obj.optional !== false,
+  };
+}
+
 export function loadReviewersForMode(
   repoPath: string,
   mode: ReviewerMode,

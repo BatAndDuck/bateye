@@ -43,6 +43,10 @@ export type ReviewerResult = {
     scopedFiles: number;
     totalRepoFilesSeen: number;
     warnings?: string[];
+    toolRan?: boolean;
+    toolDurationMs?: number;
+    toolError?: string;
+    toolOutput?: string;
   };
 };
 
@@ -232,6 +236,25 @@ export type Config = {
 
 export type ReviewerMode = 'audit' | 'pr-review' | 'both';
 
+/** Whether a tool targets individual files or the whole project */
+export type ToolTargeting = 'file' | 'project';
+
+/** Configuration for an external scanning tool attached to a reviewer */
+export type ReviewerToolConfig = {
+  command: string;
+  args: string[];
+  /** 'file' appends changed files to args in PR mode; 'project' runs on the whole project */
+  targeting?: ToolTargeting;
+  /** When targeting=file, append file paths to the end of args */
+  fileArgs?: boolean;
+  /** Timeout in milliseconds (default 60000) */
+  timeout?: number;
+  /** Truncate tool stdout beyond this character count (default 50000) */
+  maxOutputChars?: number;
+  /** If true (default), tool failure means AI-only fallback; if false, reviewer fails */
+  optional?: boolean;
+};
+
 export type ReviewerCategory =
   | 'ux'
   | 'security'
@@ -259,6 +282,8 @@ export type ReviewerMetadata = {
   mode?: ReviewerMode;
   /** Logical category for grouping and display. */
   category?: ReviewerCategory;
+  /** Optional external scanning tool to run before AI analysis. */
+  tool?: ReviewerToolConfig;
 };
 
 export type Reviewer = ReviewerMetadata & {
