@@ -7,7 +7,7 @@ mode: audit
 category: code-quality
 tool:
   command: npx
-  args: ["jscpd", "--reporters", "json", "--silent", "--min-lines", "10", "--min-tokens", "70", "."]
+  args: ["jscpd", "--reporters", "json", "--silent", "--min-lines", "10", "--min-tokens", "70", "--ignore", "**/{dist,node_modules,coverage,build}/**", "src/"]
   targeting: project
   timeout: 120000
   maxOutputChars: 60000

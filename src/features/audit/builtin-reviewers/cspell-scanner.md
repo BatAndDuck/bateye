@@ -7,7 +7,7 @@ mode: both
 category: code-quality
 tool:
   command: npx
-  args: ["cspell", "--no-progress", "--no-summary", "--dot", "**/*.{ts,js,tsx,jsx,md,json}"]
+  args: ["cspell", "--no-progress", "--no-summary", "--dot", "--exclude", "dist/**", "--exclude", "node_modules/**", "--exclude", "coverage/**", "src/**/*.{ts,js,tsx,jsx,md}", "*.md"]
   targeting: file
   fileArgs: true
   timeout: 60000

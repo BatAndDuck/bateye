@@ -7,7 +7,7 @@ mode: both
 category: ux
 tool:
   command: npx
-  args: ["html-validate", "--formatter", "json", "**/*.html"]
+  args: ["html-validate", "--formatter", "json", "src/**/*.html"]
   targeting: file
   fileArgs: true
   timeout: 60000

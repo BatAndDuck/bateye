@@ -7,7 +7,7 @@ mode: both
 category: code-quality
 tool:
   command: npx
-  args: ["eslint", "--format", "json", "--no-error-on-unmatched-pattern", "."]
+  args: ["eslint", "--format", "json", "--no-error-on-unmatched-pattern", "src/"]
   targeting: file
   fileArgs: true
   timeout: 120000

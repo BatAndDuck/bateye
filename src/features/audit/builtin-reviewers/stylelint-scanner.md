@@ -7,7 +7,7 @@ mode: both
 category: code-quality
 tool:
   command: npx
-  args: ["stylelint", "--formatter", "json", "**/*.{css,scss,less}"]
+  args: ["stylelint", "--formatter", "json", "--ignore-path", ".gitignore", "src/**/*.{css,scss,less}"]
   targeting: file
   fileArgs: true
   timeout: 60000
