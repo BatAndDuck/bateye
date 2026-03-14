@@ -188,6 +188,8 @@ async function runSingleReviewer(
   let toolDurationMs: number | undefined;
   let toolError: string | undefined;
 
+  let toolOutput: string | undefined;
+
   if (reviewer.tool) {
     const toolResult = await runReviewerTool(reviewer.tool, index.repoPath);
     toolRan = true;
@@ -195,6 +197,7 @@ async function runSingleReviewer(
 
     if (toolResult.success || toolResult.stdout.length > 0) {
       toolContext = formatToolContext(reviewer.name, toolResult);
+      toolOutput = toolResult.stdout;
     } else {
       toolError = toolResult.error;
       if (!reviewer.tool.optional) {
@@ -249,6 +252,7 @@ async function runSingleReviewer(
       toolRan,
       toolDurationMs,
       toolError,
+      toolOutput,
     },
   };
 }

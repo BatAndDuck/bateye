@@ -46,6 +46,7 @@ export type ReviewerResult = {
     toolRan?: boolean;
     toolDurationMs?: number;
     toolError?: string;
+    toolOutput?: string;
   };
 };
 

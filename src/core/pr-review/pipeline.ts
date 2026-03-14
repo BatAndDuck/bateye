@@ -151,8 +151,11 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   const reviewerPromises = selectedReviewers.map(reviewer =>
     runPRReviewer(reviewer, structuredDiff, changedFiles, repoPath, config.model, apiKey, config.transport, config.apiBaseUrl, runtime, log)
   );
-  const reviewerResults = await Promise.all(reviewerPromises);
-  const allFindings = reviewerResults.flat();
+  const reviewerRunResults = await Promise.all(reviewerPromises);
+  const toolSummaries = reviewerRunResults
+    .filter(r => r.hasTool)
+    .map(r => ({ reviewerName: r.reviewerName, toolRan: r.toolRan, findingCount: r.findings.length, error: r.toolError }));
+  const allFindings = reviewerRunResults.flatMap(r => r.findings);
   log(`Collected ${allFindings.length} raw findings from all reviewers`);
 
   // ─── Stage 6: Evidence verification ───
@@ -214,7 +217,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     }
 
     // Build summary from findings that were actually posted so counts are accurate
-    const summary = buildPRSummaryPrompt(postedFindings, rejected.length);
+    const summary = buildPRSummaryPrompt(postedFindings, rejected.length, toolSummaries);
     result.summary = summary;
     result.findings = postedFindings;
 
@@ -253,7 +256,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     log(`✓ GitHub comments posted`);
   } else {
     // Dry-run or no platform — use all finalFindings for the summary
-    result.summary = buildPRSummaryPrompt(finalFindings, rejected.length);
+    result.summary = buildPRSummaryPrompt(finalFindings, rejected.length, toolSummaries);
   }
 
   // Write local artifact after summary is finalised
@@ -262,6 +265,14 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   writePRReviewResult(outputPath, result);
 
   return result;
+}
+
+interface PRReviewerRunResult {
+  findings: PRFinding[];
+  reviewerName: string;
+  hasTool: boolean;
+  toolRan: boolean;
+  toolError?: string;
 }
 
 async function runPRReviewer(
@@ -275,9 +286,11 @@ async function runPRReviewer(
   apiBaseUrl: string | undefined,
   runtime: IRuntime,
   log: (msg: string) => void
-): Promise<PRFinding[]> {
+): Promise<PRReviewerRunResult> {
   // Run external tool if configured
   let toolContext: string | undefined;
+  let toolRan = false;
+  let toolError: string | undefined;
 
   if (reviewer.tool) {
     const targetFiles =
@@ -286,13 +299,16 @@ async function runPRReviewer(
         : undefined;
 
     const toolResult = await runReviewerTool(reviewer.tool, repoPath, targetFiles);
+    toolRan = true;
 
     if (toolResult.success || toolResult.stdout.length > 0) {
       toolContext = formatToolContext(reviewer.name, toolResult);
     } else if (!reviewer.tool.optional) {
       log(`  ✗ Required tool for ${reviewer.name} failed: ${toolResult.error}`);
-      return [];
+      return { findings: [], reviewerName: reviewer.name, hasTool: true, toolRan: false, toolError: toolResult.error };
     } else {
+      toolError = toolResult.error;
+      toolRan = false;
       log(`  ⚠ Tool for ${reviewer.name} failed (continuing AI-only): ${toolResult.error}`);
     }
   }
@@ -323,10 +339,10 @@ async function runPRReviewer(
     }));
 
     log(`  ✓ ${reviewer.name}: ${findings.length} findings`);
-    return findings;
+    return { findings, reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError };
   } catch (err) {
     log(`  ✗ ${reviewer.name} failed: ${(err as Error).message}`);
-    return [];
+    return { findings: [], reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError };
   }
 }
 
