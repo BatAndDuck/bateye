@@ -31,7 +31,7 @@ async function getRemoteUrl(repoPath: string): Promise<string | null> {
   }
 }
 
-function parseGithubRepoFromUrl(url: string): { owner: string; repo: string } | null {
+export function parseGithubRepoFromUrl(url: string): { owner: string; repo: string } | null {
   // Match https://github.com/owner/repo.git or git@github.com:owner/repo.git
   const httpsMatch = url.match(/github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?$/);
   if (httpsMatch) {

@@ -22,13 +22,21 @@ const findingRangeFields = {
 };
 
 function withValidLineRange<T extends z.ZodRawShape>(shape: T) {
-  return z.object(shape).refine(
-    finding => finding.endLine >= finding.startLine,
-    {
-      message: 'endLine must be greater than or equal to startLine',
-      path: ['endLine'],
-    },
-  );
+  return z.object(shape)
+    .refine(
+      finding => finding.endLine >= finding.startLine,
+      {
+        message: 'endLine must be greater than or equal to startLine',
+        path: ['endLine'],
+      },
+    )
+    .refine(
+      finding => !finding.endColumn || !finding.startColumn || finding.endColumn >= finding.startColumn,
+      {
+        message: 'endColumn must be greater than or equal to startColumn',
+        path: ['endColumn'],
+      },
+    );
 }
 
 export const findingSchema = withValidLineRange({

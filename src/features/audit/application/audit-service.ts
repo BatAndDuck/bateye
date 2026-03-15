@@ -383,7 +383,10 @@ const DUPLICATE_SIMILARITY_THRESHOLD = 0.4;
 
 /**
  * Line numbers within this many lines of each other are treated as overlapping
- * for the purpose of cross-reviewer deduplication.
+ * for the purpose of cross-reviewer deduplication. 3 lines is chosen as a
+ * practical buffer: two reviewers citing the same issue may reference slightly
+ * different lines (e.g. a function signature vs its first statement), but
+ * typically within a few lines of each other.
  */
 const LINE_OVERLAP_TOLERANCE = 3;
 

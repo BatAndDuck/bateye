@@ -478,7 +478,7 @@ interface WorkspaceContext {
 }
 
 /** Detect architectural units by scanning repository structure, workspace manifests, and compose definitions. */
-async function detectArchitecturalUnits(
+export async function detectArchitecturalUnits(
   repoPath: string,
   index: RepoIndex,
 ): Promise<ArchitecturalUnit[]> {
@@ -3391,7 +3391,7 @@ function stripWrappingQuotes(value: string): string {
   return value.trim().replace(/^['"]|['"]$/g, '');
 }
 
-function resolveSystemDesignTemplatePath(): string {
+export function resolveSystemDesignTemplatePath(): string {
   for (const candidate of SYSTEM_DESIGN_TEMPLATE_CANDIDATES) {
     if (fs.existsSync(candidate)) return candidate;
   }
