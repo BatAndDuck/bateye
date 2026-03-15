@@ -110,13 +110,13 @@ export class GitHubReviewPlatform implements ReviewPlatform {
     });
   }
 
-  async addReaction(commentId: number, reaction: string): Promise<void> {
+  async addReaction(commentId: number, reaction: '+1' | '-1' | 'laugh' | 'confused' | 'heart' | 'hooray' | 'rocket' | 'eyes'): Promise<void> {
     try {
       await this.octokit.rest.reactions.createForIssueComment({
         owner: this.owner,
         repo: this.repo,
         comment_id: commentId,
-        content: reaction as '+1' | '-1' | 'laugh' | 'confused' | 'heart' | 'hooray' | 'rocket' | 'eyes',
+        content: reaction,
       });
     } catch (err) {
       console.warn(`Could not add reaction to comment ${commentId}: ${(err as Error).message}`);

@@ -41,7 +41,7 @@ export interface ReviewPlatform {
   /** Post a finding as a line-level comment on the diff. Returns true if posted successfully. */
   publishInlineComment(comment: InlineComment): Promise<boolean>;
   publishSummaryComment(body: string): Promise<void>;
-  addReaction(commentId: number, reaction: string): Promise<void>;
+  addReaction(commentId: number, reaction: '+1' | '-1' | 'laugh' | 'confused' | 'heart' | 'hooray' | 'rocket' | 'eyes'): Promise<void>;
   publishStartComment(): Promise<void>;
   /** Update the summary comment if it already exists, otherwise create it */
   updateOrCreateSummary(body: string): Promise<void>;

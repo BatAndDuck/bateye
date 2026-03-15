@@ -42,8 +42,8 @@ npm run dev
 npm run test:unit
 npm run test:integration
 
-# Link for local development
-npm link
+# Link for local development (builds first, then links)
+npm run link:local
 
 # Set your credential
 export CODE_OWL_LLM_MODEL_API_KEY=your-provider-key
