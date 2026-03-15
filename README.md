@@ -35,7 +35,7 @@ npm ci
 # Build
 npm run build
 
-# Optional watch-style development loop
+# Run the CLI from source (no watch — re-run after changes)
 npm run dev
 
 # Run the automated checks used in local development
@@ -254,7 +254,7 @@ npm update -g codeowl   # Upgrade to latest
 
 ```bash
 npm run build       # Compile TypeScript + copy templates
-npm run dev         # Run the CLI from source with ts-node
+npm run dev         # Run the CLI from source via ts-node (no watch; re-run after changes)
 node dist/index.js  # Run directly
 npm link            # Install as global `codeowl` command
 npm run test:unit   # Fast verification for source changes

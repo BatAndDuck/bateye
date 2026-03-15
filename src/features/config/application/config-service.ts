@@ -57,7 +57,7 @@ export function resolveConfig(
   };
 }
 
-export function usesVercelGateway(config: Pick<ResolvedConfig, 'model' | 'transport'>): boolean {
+function usesVercelGateway(config: Pick<ResolvedConfig, 'model' | 'transport'>): boolean {
   return config.transport === 'vercel' || config.model.startsWith('vercel/');
 }
 

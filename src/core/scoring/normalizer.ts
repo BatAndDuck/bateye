@@ -3,7 +3,7 @@ import { ReviewerResult } from '../../types/index';
 /**
  * Clamp a score to [0, 100].
  */
-export function clampScore(score: number): number {
+function clampScore(score: number): number {
   return Math.max(0, Math.min(100, Math.round(score)));
 }
 
@@ -11,7 +11,7 @@ export function clampScore(score: number): number {
  * Normalize a reviewer's raw score to [0, 100].
  * The reviewer proposes a score; we ensure it's valid.
  */
-export function normalizeReviewerScore(rawScore: number | undefined): number {
+function normalizeReviewerScore(rawScore: number | undefined): number {
   if (rawScore === undefined || rawScore === null || isNaN(rawScore)) {
     return 50; // neutral default
   }

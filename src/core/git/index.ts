@@ -20,14 +20,7 @@ export async function getChangedFiles(repoPath: string, baseRef: string, headRef
   return result.stdout.split('\n').filter(Boolean);
 }
 
-export async function getCurrentBranch(repoPath: string): Promise<string> {
-  const result = await execa('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-    cwd: repoPath,
-  });
-  return result.stdout.trim();
-}
-
-export async function getRemoteUrl(repoPath: string): Promise<string | null> {
+async function getRemoteUrl(repoPath: string): Promise<string | null> {
   try {
     const result = await execa('git', ['remote', 'get-url', 'origin'], {
       cwd: repoPath,
@@ -38,7 +31,7 @@ export async function getRemoteUrl(repoPath: string): Promise<string | null> {
   }
 }
 
-export function parseGithubRepoFromUrl(url: string): { owner: string; repo: string } | null {
+function parseGithubRepoFromUrl(url: string): { owner: string; repo: string } | null {
   // Match https://github.com/owner/repo.git or git@github.com:owner/repo.git
   const httpsMatch = url.match(/github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?$/);
   if (httpsMatch) {

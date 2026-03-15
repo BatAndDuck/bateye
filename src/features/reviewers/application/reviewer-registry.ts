@@ -10,7 +10,7 @@ const BUILTIN_REVIEWER_DIR_CANDIDATES = [
   path.resolve(__dirname, '../../../../src/features/audit/builtin-reviewers'),
 ];
 
-export function getBuiltInReviewerDirs(): string[] {
+function getBuiltInReviewerDirs(): string[] {
   const seen = new Set<string>();
   const dirs: string[] = [];
 

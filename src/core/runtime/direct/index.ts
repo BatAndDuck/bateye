@@ -37,7 +37,7 @@ function resolveVercelGatewayApiKey(cwd?: string): string | undefined {
   return resolveDotEnvValue('AI_GATEWAY_API_KEY', cwd);
 }
 
-export function resolveVercelGatewayCredential(configuredApiKey?: string, cwd?: string): string | undefined {
+function resolveVercelGatewayCredential(configuredApiKey?: string, cwd?: string): string | undefined {
   // Prefer the explicitly configured key so a stale pulled OIDC token cannot
   // override a working local gateway API key.
   return configuredApiKey?.trim() || resolveVercelGatewayApiKey(cwd) || resolveVercelOidcToken(cwd);
