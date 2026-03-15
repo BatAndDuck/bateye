@@ -216,7 +216,7 @@ export async function runSystemDesign(
   try {
     index = await buildRepoIndex(repoPath, config);
   } catch (err) {
-    throw new Error(`Failed to index repository: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`Failed to index repository: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
   log(`Found ${index.totalFiles} files.`);
 
@@ -225,7 +225,7 @@ export async function runSystemDesign(
   try {
     units = await detectArchitecturalUnits(repoPath, index);
   } catch (err) {
-    throw new Error(`Failed to detect architectural units: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`Failed to detect architectural units: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
   log(`Detected ${units.length} architectural unit(s): ${units.map(unit => unit.name).join(', ')}`);
 

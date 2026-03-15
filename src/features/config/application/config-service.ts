@@ -29,7 +29,7 @@ export function loadConfig(repoPath: string): Config {
     const raw = fs.readFileSync(configPath, 'utf-8');
     return JSON.parse(raw) as Config;
   } catch (err) {
-    throw new Error(`Failed to parse ${configPath}: ${(err as Error).message}`);
+    throw new Error(`Failed to parse ${configPath}: ${(err as Error).message}`, { cause: err });
   }
 }
 

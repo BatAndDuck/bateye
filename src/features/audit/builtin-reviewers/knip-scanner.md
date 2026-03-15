@@ -44,13 +44,14 @@ Analyze the Knip results and report genuinely unused code that should be cleaned
 - **Peer dependencies**: Packages that are expected to be provided by the consuming project
 - **Frontmatter/markdown parsers**: Packages like `gray-matter` used to parse `.md` files with YAML frontmatter at runtime
 
-**Mandatory subprocess check before flagging any production dependency as unused**: Search the provided source files for the package's binary name or CLI command (often different from the npm package name). Examples:
-- `dependency-cruiser` package → binary is `depcruise` → search source files for `depcruise`, `dependency-cruiser`, or `node_modules/.bin/depcruise`. If found in binary path arrays or subprocess calls, do NOT flag.
-- `eslint` → used via config files, not imported — do NOT flag if `eslint.config.*` exists.
-- `typescript-eslint` and `@eslint/js` → ESLint plugin packages used only in config — do NOT flag.
-- Any package whose name appears in npm scripts as a command should not be flagged as unused.
+**Mandatory subprocess check before flagging any production dependency as unused**: You only see the Knip JSON output — you do NOT have access to the full source files. For this reason:
 
-If you cannot inspect the source files directly, err on the side of NOT flagging production dependencies that are CLI tools (have a `bin` field, are commonly used as CLIs).
+1. Never flag `dependency-cruiser` as unused. It ships a `depcruise` binary and is a well-known subprocess tool for dependency analysis. It is intentionally invoked as a child process, not imported.
+2. Never flag `eslint`, `@eslint/js`, or `typescript-eslint` as unused — they are consumed via config files.
+3. Any package that ships a binary (CLI tool) and is listed as a production dependency should be assumed to be invoked as a subprocess unless there is strong, direct evidence otherwise.
+4. Any package whose name appears in npm scripts as a command should not be flagged as unused.
+
+When in doubt about a production dependency, do NOT flag it. A false negative (missing a real unused dep) is far less harmful than a false positive that causes developers to remove a runtime-critical package.
 
 ## Severity Guidelines
 
