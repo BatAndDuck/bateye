@@ -25,7 +25,6 @@
     "glob": "^10.4.5",
     "gray-matter": "^4.0.3",
     "ignore": "^5.3.2",
-    "inquirer": "^8.2.6",
     "octokit": "^4.0.3",
     "openai": "^4.78.1",
     "ora": "^5.4.1",
@@ -33,7 +32,6 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/inquirer": "^8.2.10",
     "@types/node": "^22.10.5",
     "eslint": "^10.0.3",
     "ts-node": "^10.9.2",
