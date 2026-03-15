@@ -39,3 +39,9 @@ Requirements:
 - Only report a package as deprecated, invalid, abandoned, or unsupported when the repository snapshot provides concrete evidence such as a deprecation notice in package-manager metadata, install/lockfile mismatch, incompatible runtime usage, or code comments/docs showing the supported replacement.
 - Do not claim a package name is invalid or wrong based only on memory. If the manifest and lockfile are internally consistent and no repository evidence contradicts them, prefer no finding.
 - A newer major version existing is not, by itself, a finding.
+- **Anti-hallucination rules — mandatory**:
+  - Never fabricate CVE identifiers or claim a package has "known CVEs" unless you have a specific CVE number (e.g., CVE-2023-12345) from the provided data.
+  - Never claim a specific version was released in a specific year unless that date appears in the provided repository data.
+  - Never claim a version number is "outdated" if it is HIGHER than what you believe the current stable version is — your training data may be older than the package.
+  - **CRITICAL**: If a version number conflicts with your knowledge (e.g., you believe v9 is latest but the project uses v10), do NOT flag it and do NOT speculate that the version "may not be stable" — assume the project is correct and your knowledge is outdated. ESLint v10, for example, IS a valid stable release even if your training data only shows v9 as latest. Never flag a package version as potentially unstable based solely on the version number being higher than what you know.
+  - Do not assert compatibility problems between packages based on assumptions. Only report incompatibility if there is direct evidence in the code (errors, explicit comments, failing imports).

@@ -45,7 +45,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
         rawResponse: rawText,
       };
     } finally {
-      try { fs.unlinkSync(promptFile); } catch {}
+      try { fs.unlinkSync(promptFile); } catch (err) { console.debug(`Cleanup failed for ${promptFile}: ${err}`); }
     }
   }
 

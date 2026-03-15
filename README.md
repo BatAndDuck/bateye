@@ -35,15 +35,15 @@ npm ci
 # Build
 npm run build
 
-# Optional watch-style development loop
+# Run the CLI from source (no watch — re-run after changes)
 npm run dev
 
 # Run the automated checks used in local development
 npm run test:unit
 npm run test:integration
 
-# Link for local development
-npm link
+# Link for local development (builds first, then links)
+npm run link:local
 
 # Set your credential
 export CODE_OWL_LLM_MODEL_API_KEY=your-provider-key
@@ -190,7 +190,28 @@ permissions:
 | OpenAI | `openai/gpt-*` | `CODE_OWL_LLM_MODEL_API_KEY` |
 | OpenRouter | `openrouter/...` | `CODE_OWL_LLM_MODEL_API_KEY` |
 | Google | `google/gemini-*` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| DeepSeek | `deepseek/...` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| Groq | `groq/...` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| Cerebras | `cerebras/...` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| Together | `together/...` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| Fireworks | `fireworks/...` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| xAI | `xai/...` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| Mistral | `mistral/...` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| Cohere | `cohere/...` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| Perplexity | `perplexity/...` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| MiniMax | `minimax/...` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| DeepInfra | `deepinfra/...` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| HuggingFace | `huggingface/...` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| Moonshot | `moonshot/...` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| Novita | `novita/...` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| SambaNova | `sambanova/...` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| Nebius | `nebius/...` | `CODE_OWL_LLM_MODEL_API_KEY` |
+| Azure | `azure/...` | `CODE_OWL_LLM_MODEL_API_KEY` + `AZURE_RESOURCE_NAME` |
+| Ollama (local) | `ollama/...` | _(no key needed)_ |
+| LM Studio (local) | `lmstudio/...` | _(no key needed)_ |
 | Vercel AI Gateway | `vercel/<provider>/<model>` | `VERCEL_OIDC_TOKEN` |
+
+Run `codeowl models` to list available models for the configured provider, or `codeowl models <provider>` for any specific provider.
 
 ## Environment Variables
 
@@ -254,7 +275,7 @@ npm update -g codeowl   # Upgrade to latest
 
 ```bash
 npm run build       # Compile TypeScript + copy templates
-npm run dev         # Run the CLI from source with ts-node
+npm run dev         # Run the CLI from source via ts-node (no watch; re-run after changes)
 node dist/index.js  # Run directly
 npm link            # Install as global `codeowl` command
 npm run test:unit   # Fast verification for source changes

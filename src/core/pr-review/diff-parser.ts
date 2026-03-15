@@ -65,11 +65,6 @@ export function parseUnifiedDiff(rawDiff: string): ParsedDiff {
     for (let h = 0; h < hunkStarts.length; h++) {
       const hunkInfo = hunkStarts[h];
       const startIdx = hunkInfo.index;
-      const endIdx = h + 1 < hunkStarts.length
-        ? block.lastIndexOf('\n@@ ', hunkStarts[h + 1].index) !== -1
-          ? block.indexOf('\n@@ ', startIdx)
-          : hunkStarts[h + 1].index - block.slice(0, hunkStarts[h + 1].index).match(/@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@.*$/m)?.[0]?.length! - 1
-        : block.length;
 
       // Get the text between this hunk header and the next
       const hunkBody = block.slice(startIdx, h + 1 < hunkStarts.length ? block.indexOf('\n@@ ', startIdx + 1) : block.length);

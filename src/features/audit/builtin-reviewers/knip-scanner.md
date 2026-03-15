@@ -36,11 +36,22 @@ Analyze the Knip results and report genuinely unused code that should be cleaned
 
 - **Plugin/loader dependencies**: Packages loaded implicitly by frameworks (e.g., babel plugins, eslint plugins, jest transformers)
 - **Bin/CLI dependencies**: Packages used via `npx` or npm scripts but not imported in source
+- **Subprocess tools**: Packages invoked as external CLI commands via `child_process`, `execa`, or `spawn` — these are not imported but are legitimate runtime dependencies (e.g., `dependency-cruiser`, `jest`, external scanners). Also look for the package's binary name appearing as a string in the source (e.g., `node_modules/.bin/depcruise` in a binary path array means `dependency-cruiser` is being used as a subprocess tool)
 - **Dynamic imports**: Code loaded via `require()` with variable paths or `import()` with template strings
 - **Re-exports**: Barrel files (index.ts) that re-export for public API — the re-export itself may appear "unused" internally
-- **Configuration references**: Packages referenced in config files (tsconfig paths, jest moduleNameMapper, etc.)
+- **Configuration references**: Packages referenced in config files (tsconfig paths, jest moduleNameMapper, eslint.config.mjs, etc.) — linting packages like `eslint`, `@eslint/js`, and `typescript-eslint` are used via their config files, not via `import` statements in source code
 - **Template/asset files**: HTML, CSS, image files that may be loaded by bundlers
 - **Peer dependencies**: Packages that are expected to be provided by the consuming project
+- **Frontmatter/markdown parsers**: Packages like `gray-matter` used to parse `.md` files with YAML frontmatter at runtime
+
+**Mandatory subprocess check before flagging any production dependency as unused**: You only see the Knip JSON output — you do NOT have access to the full source files. For this reason:
+
+1. Never flag `dependency-cruiser` as unused. It ships a `depcruise` binary and is a well-known subprocess tool for dependency analysis. It is intentionally invoked as a child process, not imported.
+2. Never flag `eslint`, `@eslint/js`, or `typescript-eslint` as unused — they are consumed via config files.
+3. Any package that ships a binary (CLI tool) and is listed as a production dependency should be assumed to be invoked as a subprocess unless there is strong, direct evidence otherwise.
+4. Any package whose name appears in npm scripts as a command should not be flagged as unused.
+
+When in doubt about a production dependency, do NOT flag it. A false negative (missing a real unused dep) is far less harmful than a false positive that causes developers to remove a runtime-critical package.
 
 ## Severity Guidelines
 

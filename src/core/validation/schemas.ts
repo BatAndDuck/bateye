@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+// Neutral midpoint confidence when an AI reviewer does not express certainty
+const DEFAULT_CONFIDENCE = 0.5;
+
 export const prioritySchema = z.enum(['critical', 'high', 'medium', 'low', 'info']);
 
 const findingRangeFields = {
@@ -19,13 +22,21 @@ const findingRangeFields = {
 };
 
 function withValidLineRange<T extends z.ZodRawShape>(shape: T) {
-  return z.object(shape).refine(
-    finding => finding.endLine >= finding.startLine,
-    {
-      message: 'endLine must be greater than or equal to startLine',
-      path: ['endLine'],
-    },
-  );
+  return z.object(shape)
+    .refine(
+      finding => finding.endLine >= finding.startLine,
+      {
+        message: 'endLine must be greater than or equal to startLine',
+        path: ['endLine'],
+      },
+    )
+    .refine(
+      finding => !finding.endColumn || !finding.startColumn || finding.endColumn >= finding.startColumn,
+      {
+        message: 'endColumn must be greater than or equal to startColumn',
+        path: ['endColumn'],
+      },
+    );
 }
 
 export const findingSchema = withValidLineRange({
@@ -105,7 +116,7 @@ export const serviceDesignDocSchema = z.object({
   submodules: z.array(z.string()),
   complexityScore: z.number().min(1).max(10),
   risks: z.array(z.string()),
-  confidence: z.number().min(0).max(1).default(0.5),
+  confidence: z.number().min(0).max(1).default(DEFAULT_CONFIDENCE),
   evidence: z.object({
     filePaths: z.array(z.string()),
     reasons: z.array(z.string()),

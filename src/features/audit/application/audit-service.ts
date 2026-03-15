@@ -263,26 +263,19 @@ function isActionableAuditFinding(
   index: import('../../../types/index').RepoIndex,
 ): boolean {
   const normalizedPath = normalizeRepoPath(finding.filePath);
-  const shouldDropGeneratedArtifact = isGeneratedArtifactPath(normalizedPath);
-  if (shouldDropGeneratedArtifact) {
-    return false;
-  }
 
+  // Filter 1: skip findings pointing at generated output directories
+  if (isGeneratedArtifactPath(normalizedPath)) return false;
+
+  // Filter 2: skip findings pointing at paths that don't exist in the repo
   const absolutePath = path.resolve(index.repoPath, normalizedPath);
-  const shouldDropMissingPath = !fs.existsSync(absolutePath) && !isKnownRepoMetadataPath(normalizedPath);
-  if (shouldDropMissingPath) {
-    return false;
-  }
+  if (!fs.existsSync(absolutePath) && !isKnownRepoMetadataPath(normalizedPath)) return false;
 
-  const shouldDropDependencyPlacementNoise = shouldDropDependencyPlacementNoiseFinding(reviewer, finding, index.files);
-  if (shouldDropDependencyPlacementNoise) {
-    return false;
-  }
+  // Filter 3: skip dependency placement noise (package in wrong dep block but present in source)
+  if (shouldDropDependencyPlacementNoiseFinding(reviewer, finding, index.files)) return false;
 
-  const shouldDropSpeculativeCoverageGap = reviewer.category === 'qa' && isSpeculativeCoverageGap(finding);
-  if (shouldDropSpeculativeCoverageGap) {
-    return false;
-  }
+  // Filter 4: skip speculative coverage gap findings from QA reviewers
+  if (reviewer.category === 'qa' && isSpeculativeCoverageGap(finding)) return false;
 
   return true;
 }
@@ -390,7 +383,10 @@ const DUPLICATE_SIMILARITY_THRESHOLD = 0.4;
 
 /**
  * Line numbers within this many lines of each other are treated as overlapping
- * for the purpose of cross-reviewer deduplication.
+ * for the purpose of cross-reviewer deduplication. 3 lines is chosen as a
+ * practical buffer: two reviewers citing the same issue may reference slightly
+ * different lines (e.g. a function signature vs its first statement), but
+ * typically within a few lines of each other.
  */
 const LINE_OVERLAP_TOLERANCE = 3;
 
@@ -416,7 +412,7 @@ function linesOverlap(s1: number, e1: number, s2: number, e2: number, tolerance 
 
 const PRIORITY_ORDER: Record<string, number> = { info: 0, low: 1, medium: 2, high: 3, critical: 4 };
 
-export function deduplicateAuditFindings(findings: Finding[]): Finding[] {
+function deduplicateAuditFindings(findings: Finding[]): Finding[] {
   const dropped = new Set<number>();
 
   for (let i = 0; i < findings.length; i++) {
@@ -445,7 +441,7 @@ export function deduplicateAuditFindings(findings: Finding[]): Finding[] {
   return findings.filter((_, i) => !dropped.has(i));
 }
 
-export function buildAuditSummary(score: number, totalFindings: number, criticalCount: number, reviewerCount: number): string {
+function buildAuditSummary(score: number, totalFindings: number, criticalCount: number, reviewerCount: number): string {
   const threshold = SCORE_THRESHOLDS.find(t => score >= t.min) ?? SCORE_THRESHOLDS[SCORE_THRESHOLDS.length - 1];
   return threshold.message(totalFindings, criticalCount, reviewerCount);
 }

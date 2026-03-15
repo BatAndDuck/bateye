@@ -320,3 +320,47 @@ test('reviewerAnalysisSchema rejects findings where endLine is before startLine'
   });
   assert.ok(!result.success);
 });
+
+test('reviewerAnalysisSchema rejects findings with startLine = 0 (must be >= 1)', () => {
+  const result = reviewerAnalysisSchema.safeParse({
+    score: 80,
+    summary: 'Summary',
+    findings: [
+      {
+        id: 'f1',
+        title: 'Issue',
+        description: 'Desc',
+        priority: 'medium',
+        confidence: 0.8,
+        filePath: 'src/foo.ts',
+        startLine: 0,
+        endLine: 1,
+        evidence: [],
+        recommendation: 'Fix it',
+      },
+    ],
+  });
+  assert.ok(!result.success);
+});
+
+test('reviewerAnalysisSchema rejects findings with endLine = 0 (must be >= 1)', () => {
+  const result = reviewerAnalysisSchema.safeParse({
+    score: 80,
+    summary: 'Summary',
+    findings: [
+      {
+        id: 'f1',
+        title: 'Issue',
+        description: 'Desc',
+        priority: 'medium',
+        confidence: 0.8,
+        filePath: 'src/foo.ts',
+        startLine: 1,
+        endLine: 0,
+        evidence: [],
+        recommendation: 'Fix it',
+      },
+    ],
+  });
+  assert.ok(!result.success);
+});

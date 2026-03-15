@@ -22,6 +22,7 @@ Focus your review on:
 ## Unused Code
 - Exported functions, classes, or constants with no import statement anywhere in the codebase pointing to them — they are dead exports that add to the public API surface unnecessarily
 - Unused local variables or function parameters that are declared but never read — they add noise and suggest the code was partially refactored without completing the cleanup
+  - **Exception**: Parameters prefixed with underscore (`_param`, `_unused`) are a TypeScript/JavaScript convention for intentionally unused parameters (e.g., when implementing an interface that requires the parameter signature). Do not flag these.
 - Unreachable code appearing after `return`, `throw`, `break`, or `continue` statements — the compiler or runtime will never execute these lines
 - Unused imports at the top of files — symbols imported but never referenced, often left behind after refactoring
 - Test cases or test suites marked as skipped (`.skip`, `@pytest.mark.skip`, `t.Skip()`) that are never re-enabled and are no longer maintained alongside the code they were meant to test

@@ -81,14 +81,11 @@ test('scopeFilesForReviewer falls back to all files when scopeHint matches nothi
   assert.equal(result.length, 2);
 });
 
-test('scopeFilesForReviewer filters by recommendedGlobs prefix', () => {
+test('scopeFilesForReviewer filters by scopeHints to only matching files', () => {
   const index = makeIndex(['src/api/routes.ts', 'src/db/schema.ts', 'src/utils.ts']);
-  // glob pattern 'src/api/**' → patternBase 'src/api/' → first segment 'src'
-  // Actually the implementation checks: patternBase.split('/')[0] = 'src'
-  // so all 'src/' files match. Let's use a more specific path-based filter.
-  const result = scopeFilesForReviewer(index, undefined, ['src/api/**']);
-  // All files start with 'src', so all match the 'src' prefix
-  assert.ok(result.length > 0);
+  const result = scopeFilesForReviewer(index, ['api']);
+  assert.equal(result.length, 1);
+  assert.ok(result[0].relativePath.includes('api'));
 });
 
 test('scopeFilesForReviewer returns all when recommendedGlobs match nothing', () => {

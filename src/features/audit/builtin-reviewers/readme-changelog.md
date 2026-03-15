@@ -25,6 +25,7 @@ Focus your review on:
 ## Environment Variables and Setup
 - New environment variables introduced (`process.env.NEW_VAR`, `os.environ["NEW_VAR"]`) without a corresponding entry in `.env.example` showing the variable name and an example or placeholder value
 - New environment variables not documented in the README's "Setup" or "Configuration" section
+  - **Exception**: Environment variables found only in test fixtures, mock files, or test helpers (files in `test/`, `__mocks__/`, `spec/`, `fixtures/`, or prefixed `mock-`) are internal test infrastructure and do NOT need to be documented in the README or `.env.example`.
 - Required environment variables made optional (or vice versa) without updating the README and `.env.example` to reflect the change
 - New external service dependencies (third-party APIs, databases, message queues) added without README instructions for provisioning or configuring them locally
 
@@ -33,6 +34,7 @@ Focus your review on:
 - Significant new features that users would benefit from knowing about (new commands, new integrations, new output formats) missing from the CHANGELOG
 - Bug fixes that address commonly reported issues not recorded in the CHANGELOG
 - CHANGELOG entries present but placed under the wrong version heading, or formatted inconsistently with the existing changelog style (Keep a Changelog, conventional commits, etc.)
+- **Note**: `## Unreleased` or `## [Unreleased]` without a version number is standard Keep a Changelog format. Do not flag this as an error — it is intentionally versionless until the next release.
 
 ## Deprecated Features
 - Features, functions, or configuration options marked as deprecated in code (via `@deprecated` JSDoc, deprecation warnings) still documented in the README as active and recommended

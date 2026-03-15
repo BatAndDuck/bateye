@@ -60,3 +60,21 @@ Focus your review on:
 - GraphQL type removals or interface changes that invalidate existing client operations
 - Changed pagination format or cursor encoding scheme breaking clients that page through results
 - Added required input fields to GraphQL mutations without default values, breaking existing mutation calls
+
+## Severity Guidance
+
+- Use **critical** only when the breaking change will cause immediate runtime failures in production consumers (e.g., removed required API endpoint, removed field from a response type used everywhere).
+- Use **high** for changes with a clear, concrete breakage path — an external consumer calling a removed function, a removed config key that deployments will have set.
+- Use **medium** for changes that are technically breaking but are unlikely to affect real consumers (e.g., a helper function removed from an internal utilities module).
+- Use **low** or omit entirely for changes that are breaking in theory but have no realistic consumers outside the current repo.
+
+## What is NOT a breaking change
+
+- Removing `export` from a function or class that is only used **within the same repository** and has no external consumers — this is a visibility reduction, not a public API break. Only flag export removals if you have evidence of cross-package imports or the function is part of a documented public API.
+- Making a previously exported function or type internal (un-exporting it) when the module is an application, CLI tool, or internal library not published to a package registry.
+- Renaming or removing a function that has no callers outside its own file or feature folder.
+- Adding optional fields to a schema or type — consumers that don't use the field are unaffected.
+- Changing the implementation body of a function without changing its signature or behavior contract.
+- Extracting a constant, changing a comment, or renaming an internal variable.
+
+**Key principle**: A breaking change requires a plausible consumer. Before flagging, ask: "Does concrete evidence exist that an external caller depends on this?" For intra-repo changes, require direct evidence (an import from outside the module, documented public API, or published package usage) before raising a finding.

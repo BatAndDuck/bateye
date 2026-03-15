@@ -25,6 +25,7 @@ Focus your review on:
 - Files exceeding 300 lines of code — a strong signal that the file has accumulated too many responsibilities and should be split by concern
 - Inconsistent file naming conventions within the same project: PascalCase mixed with kebab-case mixed with snake_case for files of the same type (e.g., services named `UserService.ts`, `auth-service.ts`, and `payment_service.ts`)
 - Test files not co-located with the production code they test — distant placement makes it harder to notice when tests are out of date with code changes
+  - **Note**: A root-level `test/` or `tests/` directory is a widely accepted Node.js, Python, and CLI project convention. If the project consistently uses this pattern with no co-located tests anywhere, do NOT flag it at all. Only flag when the project inconsistently mixes co-located tests in some places with a separate test/ directory in others, or when there is concrete evidence (stale tests referencing deleted code) of test drift caused by the separation.
 - Configuration or environment files mixed into source directories rather than having a designated configuration directory
 
 ## Import/Dependency Patterns

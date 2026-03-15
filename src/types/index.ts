@@ -220,6 +220,7 @@ export type PRReviewConfig = {
   };
 };
 
+/** Repository-level configuration loaded from `.codeowl/config.json`. */
 export type Config = {
   $schema?: string;
   model?: string;
@@ -271,6 +272,7 @@ export type ReviewerCategory =
   | 'database'
   | 'dependency';
 
+/** Metadata fields shared by both the in-memory Reviewer and its serialised form. */
 export type ReviewerMetadata = {
   id: string;
   name: string;

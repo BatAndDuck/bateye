@@ -212,11 +212,21 @@ export async function runSystemDesign(
   const apiKey = resolveSystemDesignApiKey(config, log);
 
   log('Indexing repository...');
-  const index = await buildRepoIndex(repoPath, config);
+  let index: Awaited<ReturnType<typeof buildRepoIndex>>;
+  try {
+    index = await buildRepoIndex(repoPath, config);
+  } catch (err) {
+    throw new Error(`Failed to index repository: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+  }
   log(`Found ${index.totalFiles} files.`);
 
   log('Detecting services and modules...');
-  const units = await detectArchitecturalUnits(repoPath, index);
+  let units: Awaited<ReturnType<typeof detectArchitecturalUnits>>;
+  try {
+    units = await detectArchitecturalUnits(repoPath, index);
+  } catch (err) {
+    throw new Error(`Failed to detect architectural units: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+  }
   log(`Detected ${units.length} architectural unit(s): ${units.map(unit => unit.name).join(', ')}`);
 
   const runtime = apiKey ? await resolveSystemDesignRuntime(dependencies, log) : null;

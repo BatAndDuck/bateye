@@ -78,7 +78,8 @@ Check reviewer ${i}.
           async run(_options, schema) {
             activeRuns += 1;
             maxActiveRuns = Math.max(maxActiveRuns, activeRuns);
-            await new Promise(resolve => setTimeout(resolve, 25));
+            const CONCURRENCY_TEST_DELAY_MS = 25; // small delay to allow concurrent reviewers to interleave
+            await new Promise(resolve => setTimeout(resolve, CONCURRENCY_TEST_DELAY_MS));
             activeRuns -= 1;
             return {
               data: schema.parse({ score: 85, summary: 'ok', findings: [] }),

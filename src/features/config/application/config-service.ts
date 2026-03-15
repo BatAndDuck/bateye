@@ -29,7 +29,7 @@ export function loadConfig(repoPath: string): Config {
     const raw = fs.readFileSync(configPath, 'utf-8');
     return JSON.parse(raw) as Config;
   } catch (err) {
-    throw new Error(`Failed to parse ${configPath}: ${(err as Error).message}`);
+    throw new Error(`Failed to parse ${configPath}: ${(err as Error).message}`, { cause: err });
   }
 }
 
@@ -57,7 +57,7 @@ export function resolveConfig(
   };
 }
 
-export function usesVercelGateway(config: Pick<ResolvedConfig, 'model' | 'transport'>): boolean {
+function usesVercelGateway(config: Pick<ResolvedConfig, 'model' | 'transport'>): boolean {
   return config.transport === 'vercel' || config.model.startsWith('vercel/');
 }
 

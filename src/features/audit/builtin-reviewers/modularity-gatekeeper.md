@@ -49,6 +49,12 @@ Focus your review on:
 - Modules where every new feature requires touching the same central file — a sign of a missing extension point or that the module needs splitting
 - Increasing average import count per file over time — each new file importing from more and more places signals emerging spaghetti dependencies
 
+## Project Type Considerations
+
+- **CLI tools and single-package libraries**: Test files importing from internal application directories (`application/`, `domain/`, `infrastructure/`) of the SAME feature is expected and appropriate — there is no external consumer that could break. Only flag cross-module test coupling when a test for feature A imports internals from a completely unrelated feature B. Tests importing from `dist/` (compiled output) of the feature they are testing is also acceptable for TypeScript CLI projects that compile before running tests — do not flag this pattern.
+- **Frontend applications**: Stricter enforcement of component boundaries and public API surfaces applies; components should not reach into sibling component internals.
+- **Backend services**: Service-to-service imports should route through published interfaces; internal layer imports within a single service are acceptable.
+
 Severity guidance:
 - Large-file and cohesion findings are usually **medium**. Use **high** only when you can show a concrete coupling or change-risk problem in the current code.
 - Do not report duplicated logic across layers when one module is only a thin re-export or facade over the other.
