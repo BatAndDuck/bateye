@@ -52,3 +52,11 @@ Focus your review on:
 - Service classes that reach through collaborators to access their collaborators' state, creating hidden coupling to internal structure
 - Functions that navigate deeply into nested data structures passed as arguments, rather than receiving the specific value they need
 - Modules that import a class only to access a static property on it — the value should be passed as a dependency instead
+
+## Severity Guidance
+
+- Use **critical** only for violations that create immediate risk of data loss, security failures, or runtime crashes. Structural/design principle violations in working code are never critical.
+- Reserve **high** for violations with a concrete, demonstrable failure mode — a bug that exists because of the violation, or a coupling that would make a required change extremely risky.
+- Most SOLID and DRY findings are **medium**. Size-based SRP findings (large files/functions) are typically **medium** unless you can show a specific coupling or change-risk problem.
+- **DIP Note**: Using Node.js built-in modules (`fs`, `path`, `os`, `child_process`, `crypto`) directly in application code is NOT a Dependency Inversion violation — these are stable platform APIs, not volatile dependencies. Only flag DIP violations for third-party services, databases, HTTP clients, or other replaceable dependencies that vary across environments.
+- **Project type context**: CLI tools and applications are less likely to need strict DI frameworks than backend services. If the code works correctly and the "violation" is not causing real problems, lower the severity or skip the finding.

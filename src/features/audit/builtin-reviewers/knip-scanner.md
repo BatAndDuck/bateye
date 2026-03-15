@@ -36,11 +36,21 @@ Analyze the Knip results and report genuinely unused code that should be cleaned
 
 - **Plugin/loader dependencies**: Packages loaded implicitly by frameworks (e.g., babel plugins, eslint plugins, jest transformers)
 - **Bin/CLI dependencies**: Packages used via `npx` or npm scripts but not imported in source
+- **Subprocess tools**: Packages invoked as external CLI commands via `child_process`, `execa`, or `spawn` — these are not imported but are legitimate runtime dependencies (e.g., `dependency-cruiser`, `jest`, external scanners). Also look for the package's binary name appearing as a string in the source (e.g., `node_modules/.bin/depcruise` in a binary path array means `dependency-cruiser` is being used as a subprocess tool)
 - **Dynamic imports**: Code loaded via `require()` with variable paths or `import()` with template strings
 - **Re-exports**: Barrel files (index.ts) that re-export for public API — the re-export itself may appear "unused" internally
-- **Configuration references**: Packages referenced in config files (tsconfig paths, jest moduleNameMapper, etc.)
+- **Configuration references**: Packages referenced in config files (tsconfig paths, jest moduleNameMapper, eslint.config.mjs, etc.) — linting packages like `eslint`, `@eslint/js`, and `typescript-eslint` are used via their config files, not via `import` statements in source code
 - **Template/asset files**: HTML, CSS, image files that may be loaded by bundlers
 - **Peer dependencies**: Packages that are expected to be provided by the consuming project
+- **Frontmatter/markdown parsers**: Packages like `gray-matter` used to parse `.md` files with YAML frontmatter at runtime
+
+**Mandatory subprocess check before flagging any production dependency as unused**: Search the provided source files for the package's binary name or CLI command (often different from the npm package name). Examples:
+- `dependency-cruiser` package → binary is `depcruise` → search source files for `depcruise`, `dependency-cruiser`, or `node_modules/.bin/depcruise`. If found in binary path arrays or subprocess calls, do NOT flag.
+- `eslint` → used via config files, not imported — do NOT flag if `eslint.config.*` exists.
+- `typescript-eslint` and `@eslint/js` → ESLint plugin packages used only in config — do NOT flag.
+- Any package whose name appears in npm scripts as a command should not be flagged as unused.
+
+If you cannot inspect the source files directly, err on the side of NOT flagging production dependencies that are CLI tools (have a `bin` field, are commonly used as CLIs).
 
 ## Severity Guidelines
 

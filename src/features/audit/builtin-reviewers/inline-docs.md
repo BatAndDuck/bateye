@@ -60,6 +60,9 @@ Focus your review on:
 - Missing documentation on constructor parameters for classes where the constructor accepts complex options objects
 
 Requirements:
-- Be selective. Do not report every exported function by default; focus on public APIs, non-obvious behavior, and complex logic.
-- Missing JSDoc on an otherwise obvious exported function is usually **medium** at most, and often **low** if the signature is self-explanatory.
-- Reserve **high** or **critical** only for documentation gaps that create a realistic risk of misuse, incorrect integration, or unsafe behavior.
+- Be very selective. Only report findings where the absence of documentation creates a realistic risk of misuse, incorrect integration, or unsafe behavior.
+- Missing JSDoc on an otherwise obvious exported function is usually **low** or not worth reporting at all if the name and type signature are self-explanatory.
+- Reserve **medium** for complex functions where incorrect usage could cause real problems. Reserve **high** or **critical** only for documentation gaps in security-critical or data-loss-risk code.
+- **Project type awareness**: If the project is a CLI tool, application, or internal module (not a published npm/pip/gem library with external users), JSDoc requirements are significantly lower. For such projects, only flag: (1) complex algorithms or non-obvious design decisions, (2) functions with subtle side effects or error conditions not visible in the type signature, (3) configuration types where incorrect values could cause failures. Do NOT flag simple exported types, CRUD functions, utility helpers, or getters/setters for missing JSDoc.
+- Do not report a finding for every exported type or function. If you have more than 5–8 findings for a reviewer, you are being too aggressive — apply stricter filtering and keep only the most impactful ones.
+- Self-explanatory names like `loadConfig`, `saveConfig`, `resolveApiKey`, `isGitRepo` do not need JSDoc unless their behavior is non-obvious from the name.
