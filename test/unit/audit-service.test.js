@@ -20,9 +20,18 @@ function makeRepo() {
   return repoPath;
 }
 
+function setApiKey(value) {
+  const original = process.env.CODE_OWL_LLM_MODEL_API_KEY;
+  process.env.CODE_OWL_LLM_MODEL_API_KEY = value;
+  return () => {
+    if (original === undefined) delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
+    else process.env.CODE_OWL_LLM_MODEL_API_KEY = original;
+  };
+}
+
 test('runAudit throws when a reviewer runtime call fails', async () => {
   const repoPath = makeRepo();
-  process.env.CODE_OWL_LLM_MODEL_API_KEY = 'test-api-key';
+  const restoreApiKey = setApiKey('test-api-key');
 
   try {
     await assert.rejects(
@@ -45,13 +54,13 @@ test('runAudit throws when a reviewer runtime call fails', async () => {
       /All reviewers failed/,
     );
   } finally {
-    delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
+    restoreApiKey();
   }
 });
 
 test('runAudit runs reviewers concurrently with a cap of 10', async () => {
   const repoPath = makeRepo();
-  process.env.CODE_OWL_LLM_MODEL_API_KEY = 'test-api-key';
+  const restoreApiKey = setApiKey('test-api-key');
   fs.mkdirSync(path.join(repoPath, '.codeowl', 'reviewers'), { recursive: true });
 
   for (let i = 0; i < 12; i++) {
@@ -102,13 +111,13 @@ Check reviewer ${i}.
     assert.equal(result.reviewerResults.length, 12);
     assert.equal(maxActiveRuns, MAX_CONCURRENT_AUDIT_REVIEWERS);
   } finally {
-    delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
+    restoreApiKey();
   }
 });
 
 test('runAudit drops findings that point at generated artifacts', async () => {
   const repoPath = makeRepo();
-  process.env.CODE_OWL_LLM_MODEL_API_KEY = 'test-api-key';
+  const restoreApiKey = setApiKey('test-api-key');
   fs.mkdirSync(path.join(repoPath, '.codeowl', 'reviewers'), { recursive: true });
   fs.writeFileSync(
     path.join(repoPath, '.codeowl', 'reviewers', 'generated-artifact.md'),
@@ -164,13 +173,13 @@ Check generated files.
 
     assert.equal(result.reviewerResults[0].findings.length, 0);
   } finally {
-    delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
+    restoreApiKey();
   }
 });
 
 test('runAudit drops dependency-placement findings when the package is referenced by source code', async () => {
   const repoPath = makeRepo();
-  process.env.CODE_OWL_LLM_MODEL_API_KEY = 'test-api-key';
+  const restoreApiKey = setApiKey('test-api-key');
   fs.writeFileSync(path.join(repoPath, 'src', 'index.ts'), 'export const tool = "dependency-cruiser";\n');
   fs.mkdirSync(path.join(repoPath, '.codeowl', 'reviewers'), { recursive: true });
   fs.writeFileSync(
@@ -228,13 +237,13 @@ Check dependency placement.
 
     assert.equal(result.reviewerResults[0].findings.length, 0);
   } finally {
-    delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
+    restoreApiKey();
   }
 });
 
 test('runAudit skips failed reviewers when at least one reviewer succeeds', async () => {
   const repoPath = makeRepo();
-  process.env.CODE_OWL_LLM_MODEL_API_KEY = 'test-api-key';
+  const restoreApiKey = setApiKey('test-api-key');
   fs.mkdirSync(path.join(repoPath, '.codeowl', 'reviewers'), { recursive: true });
 
   for (const id of ['ok-reviewer', 'broken-reviewer']) {
@@ -280,6 +289,6 @@ Check reviewer ${id}.
     assert.equal(result.reviewerResults.length, 1);
     assert.equal(result.reviewerResults[0].reviewerId, 'ok-reviewer');
   } finally {
-    delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
+    restoreApiKey();
   }
 });

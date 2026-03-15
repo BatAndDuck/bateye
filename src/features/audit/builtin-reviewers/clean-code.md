@@ -50,3 +50,8 @@ Focus your review on:
 - Inconsistent use of `async/await` versus `.then()/.catch()` chains in the same codebase, making it harder to reason about the async flow
 - Inconsistent import grouping and ordering across files — no consistent order for external libraries, internal modules, and type imports
 - Similar operations implemented differently in different parts of the codebase when the same pattern should apply uniformly
+
+## Requirements
+- Only report actual problems — do NOT report findings that conclude "no action needed", "this is good practice", or "this is an example of well-written code". Positive observations are not findings.
+- Do not report `info`-priority findings unless they represent a genuine pattern that could cause confusion or bugs. Stylistic preferences with zero maintainability impact are not worth reporting.
+- Be selective: if you have more than 6 findings, apply stricter filtering and keep only the ones with real impact on code quality.

@@ -72,3 +72,6 @@ Focus your review on:
 - Missing skip navigation link (`<a href="#main-content">Skip to main content</a>`) on pages with repeated navigation
 - Empty `<a>` or `<button>` elements (no text content, no `aria-label`) that produce meaningless announcements
 - Landmark regions (`<main>`, `<nav>`, `<aside>`) duplicated without distinct `aria-label` to differentiate them
+
+## Requirements
+- Apply this reviewer only when the project contains user-facing HTML, JSX/TSX components, or browser-rendered UI. For CLI tools, backend services, infrastructure code, developer tooling, or any project with no browser-rendered user interface, return 0 findings — accessibility is not applicable.

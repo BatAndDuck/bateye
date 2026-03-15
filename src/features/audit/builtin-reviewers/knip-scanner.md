@@ -66,3 +66,4 @@ When in doubt about a production dependency, do NOT flag it. A false negative (m
 - For unused dependencies, name the package and recommend removal command
 - Point filePath to the relevant file (the unused file, or package.json for deps)
 - If Knip found nothing or all results are false positives, return an empty findings array
+- If the tool output is empty or contains an error message (e.g., module load error, configuration error), return 0 findings — do NOT create a finding about Knip failing to run. Tool execution failures are not code quality issues.

@@ -59,3 +59,7 @@ Focus your review on:
 ## Viewport Configuration
 - Missing `<meta name="viewport" content="width=device-width, initial-scale=1">` in the HTML `<head>` — without this, mobile browsers render the page at a desktop width and scale it down
 - `user-scalable=no` or `maximum-scale=1` in the viewport meta tag — these prevent users from zooming, which is an accessibility violation and a usability regression on mobile
+
+## Requirements
+- Apply this reviewer only when the project contains user-facing web UI, mobile UI, or HTML templates rendered in a browser. For CLI tools, backend services, infrastructure code, developer tooling, or projects with no browser-rendered UI, return 0 findings — responsive design is not applicable.
+- If the only HTML files are internal tooling reports or offline documents (not served to end users), they do not require responsive design treatment.

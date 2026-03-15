@@ -48,3 +48,6 @@ Requirements:
 - File size alone is usually **medium** at most. Reserve **high** or **critical** for structural issues with a concrete failure mode, severe navigability break, or repeated coupling evidence.
 - Do not report missing imports or unresolved symbols unless the analyzed file directly shows an undefined reference that is not defined locally, imported, or provided by obvious language/runtime mechanisms.
 - Prefer findings about structural consequences over stylistic preferences. If a pattern is consistent and functional, return no finding unless it creates a real maintenance problem.
+- Do not flag findings with confidence below 0.7 — structural assessments with low confidence are likely false positives.
+- Do not flag architectural patterns (e.g., command layer, delegation to service layer, thin wrapper functions) as problematic unless they demonstrably cause real maintenance issues. These are standard patterns that different codebases use legitimately.
+- Large files with multiple responsibilities are at most **medium**. "God class/file" findings are only **high** when there is concrete evidence of coupling failures or when the file is actively preventing testing or deployment.

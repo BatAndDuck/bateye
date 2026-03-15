@@ -27,10 +27,13 @@ Focus your review on:
 - Packages added but never actually used in the codebase
 
 Requirements:
+- **Score consistency**: Your score MUST reflect your findings. If you return 0 findings, your score MUST be 85 or higher. Never assign a score below 80 when you have no findings — that is contradictory. Only assign low scores when you have concrete filed findings to back them up.
 - Treat a package as a mistaken production dependency only when the repository shows it is not required by shipped runtime code, CLI execution paths, optional runtime features, or generated artifacts that are intentionally committed.
 - If the package is referenced by source files under `src/`, runtime command execution, or a production feature path, do not flag it as a devDependency mistake.
+- **CLI subprocess tools**: If a package ships a CLI binary that is called via `execa`, `child_process.spawn`, or similar at runtime, it is correctly in production dependencies even if it looks like a dev tool (e.g., `dependency-cruiser`, `eslint` used as CLI scanners at runtime).
 - Prefer "unused dependency" findings only when you can find no meaningful source usage at all.
 - Do not treat multiple provider SDKs or a consolidated SDK as redundant by default in configurable tooling. Only report replacement opportunities when the repository evidence shows a narrower package would satisfy the actual imported surface with low migration risk.
+- **Lockfile transitive dependencies**: Do NOT flag packages found in `package-lock.json` or `yarn.lock` but absent from `package.json` — transitive dependencies are expected and managed automatically. Only analyze direct dependencies declared in `package.json`.
 
 ## Bundle Impact
 - Heavy transitive dependencies pulled in by a small utility package

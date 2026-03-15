@@ -44,3 +44,10 @@ Focus your review on:
 - Commented-out import statements left at the top of files after the usage was removed
 - Inline explanatory comments describing what the original code did that remain after the code itself was replaced with a different approach
 - Debug `console.log`, `print`, or `fmt.Println` statements commented out rather than deleted — they should be removed if they were temporary debugging aids
+
+## Requirements
+- Before flagging an import as unused, verify it is not referenced **anywhere** in the file — including late in the file, in function bodies, or in calls to external APIs. You may only see a portion of large files; do NOT flag an import as unused unless you have high confidence it is truly unreferenced throughout the entire file.
+- Before flagging a constant or variable as unused, confirm it is not referenced in error messages, template strings, indirect usage (e.g., `NAMES.join(', ')`), or passed to other functions.
+- **Exported functions are not dead code unless you verify they are unused across the ENTIRE codebase**: An exported function, class, or constant is only dead if NO other file imports it. You typically see only a subset of the codebase. If you cannot verify all import sites, do NOT flag exported symbols as unused — assume they are imported elsewhere. This is especially important for utility files, helpers, and runtime modules.
+- **Private functions that call each other**: If a function is a module-private (non-exported) helper, verify it is not called by ANY other function in the same file before flagging it. Local call graphs can be hard to trace in large files.
+- Do not report findings with confidence below 0.7 — low-confidence dead code reports cause false positives that are worse than the dead code itself.

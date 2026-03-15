@@ -40,7 +40,8 @@ Analyze the outdated dependencies and prioritize which ones need attention based
 
 ## Severity Guidelines
 
-- **high**: Major version gap (2+ major versions behind) in a production dependency, especially security-related
+- **critical**: A package with a **confirmed, specific CVE** (e.g., CVE-2023-12345) in the installed version where the fix is in a newer version. Never use critical for version gaps alone.
+- **high**: Major version gap (2+ major versions behind) in a production dependency, especially security-related. Do NOT use **critical** for version gaps without a known CVE — version gaps alone are **high** at most.
 - **medium**: 1 major version behind in a production dependency, or security-relevant package with significant patches available
 - **low**: Multiple minor versions behind in a production dependency
 - **info**: DevDependency update available, or minor version lag in a stable package

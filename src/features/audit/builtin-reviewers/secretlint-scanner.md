@@ -7,7 +7,7 @@ mode: both
 category: security
 tool:
   command: npx
-  args: ["secretlint", "--format", "json", "src/**/*", ".env*", "*.json", "*.yaml", "*.yml"]
+  args: ["--yes", "secretlint", "--format", "json", "src/**/*", ".env*", "*.json", "*.yaml", "*.yml"]
   targeting: file
   fileArgs: true
   timeout: 60000

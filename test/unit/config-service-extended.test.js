@@ -165,11 +165,17 @@ test('resolveAuthEnvName returns VERCEL_OIDC_TOKEN for Vercel transport', () => 
 });
 
 test('resolveApiKey throws when required environment variable is not set', () => {
+  const original = process.env.CODE_OWL_LLM_MODEL_API_KEY;
   delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
-  assert.throws(
-    () => resolveApiKey(),
-    /CODE_OWL_LLM_MODEL_API_KEY/,
-  );
+  try {
+    assert.throws(
+      () => resolveApiKey(),
+      /CODE_OWL_LLM_MODEL_API_KEY/,
+    );
+  } finally {
+    if (original === undefined) delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
+    else process.env.CODE_OWL_LLM_MODEL_API_KEY = original;
+  }
 });
 
 // setConfigField

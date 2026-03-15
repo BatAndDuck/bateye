@@ -2,6 +2,9 @@
   "name": "codeowl",
   "version": "0.1.0",
   "description": "AI-powered code analysis CLI built on OpenCode",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "main": "dist/index.js",
   "bin": {
     "codeowl": "dist/index.js"

@@ -12,6 +12,8 @@ codeowl models anthropic   # List Anthropic models
 codeowl config show        # Show current config
 codeowl config set model anthropic/claude-sonnet-4-5
 
+codeowl reviewers                         # List all available reviewers
+
 codeowl audit                             # Full codebase audit (all reviewers)
 codeowl audit --output ./report.json      # Custom output path
 codeowl audit --reviewers security-api    # Specific reviewers only
@@ -88,6 +90,18 @@ For Vercel AI Gateway, configure a Vercel-routed model and provide `VERCEL_OIDC_
   "$schema": "./node_modules/codeowl/schemas/codeowl-config.schema.json",
   "model": "vercel/minimax/minimax-m2.5",
   "exclude": ["generated", "vendor"]
+}
+```
+
+To disable specific reviewers per mode (useful for UI-only or backend-only repos):
+
+```json
+{
+  "model": "anthropic/claude-sonnet-4-5",
+  "disabledReviewers": {
+    "audit": ["responsiveness", "accessibility", "i18n"],
+    "prReview": ["inline-docs"]
+  }
 }
 ```
 
@@ -220,9 +234,13 @@ Run `codeowl models` to list available models for the configured provider, or `c
 | `CODE_OWL_LLM_MODEL_API_KEY` | API key for Anthropic, OpenAI, OpenRouter, or Google |
 | `VERCEL_OIDC_TOKEN` | OIDC token for Vercel AI Gateway models |
 | `AI_GATEWAY_API_KEY` | Alternative API key for Vercel AI Gateway |
+| `AZURE_RESOURCE_NAME` | Azure OpenAI resource name (required for `azure/...` models) |
 | `GITHUB_TOKEN` | GitHub token for posting PR comments during local `pr-review --github` runs |
 | `GITHUB_REPOSITORY` | Repository slug in `owner/repo` format for local GitHub PR review |
 | `PR_NUMBER` | Pull request number for local GitHub PR review |
+| `CODEOWL_RUNTIME` | Set to `mock` to use fixture-based responses instead of live API calls (development) |
+| `CODEOWL_MOCK_RUNTIME_FIXTURES` | Path to JSON fixtures file (required when `CODEOWL_RUNTIME=mock`) |
+| `CODEOWL_MOCK_RUNTIME_LOG` | Path to log file for recording mock runtime interactions (development) |
 
 The `apiBaseUrl` config field can point to any OpenAI-compatible gateway endpoint.
 
@@ -248,7 +266,7 @@ codeowl audit --reviewers code-quality
 
 ```bash
 codeowl --version        # Check installed version
-npm update -g codeowl   # Upgrade to latest
+npm install -g codeowl@latest   # Upgrade to latest
 ```
 
 ## Troubleshooting
@@ -281,4 +299,14 @@ npm link            # Install as global `codeowl` command
 npm run test:unit   # Fast verification for source changes
 npm run test        # Unit + integration tests
 ```
+
+### Mock Runtime
+
+For integration tests and offline development, CodeOwl includes a fixture-based mock runtime that replays pre-recorded AI responses without making live API calls.
+
+| Variable | Description |
+|---|---|
+| `CODEOWL_RUNTIME=mock` | Switch to the mock runtime |
+| `CODEOWL_MOCK_RUNTIME_FIXTURES` | Path to the JSON fixtures file (required when `CODEOWL_RUNTIME=mock`) |
+| `CODEOWL_MOCK_RUNTIME_LOG` | Optional path to log recorded interactions for fixture generation |
 

@@ -45,3 +45,8 @@ Focus your review on:
 - Test description doesn't match what the test actually verifies
 - Setup code duplicated across many tests instead of using beforeEach/fixtures
 - Tests so tightly coupled to implementation they break on any refactor
+
+## Requirements
+- Before flagging environment variable cleanup as a vulnerability, verify that the test does NOT already save the original value before modifying it. A test that saves `const original = process.env.X` before setting `process.env.X = ...` and restores it in `finally` is correctly implemented — do NOT flag it.
+- Only flag environment variable issues when the test genuinely fails to restore the original value (i.e., it sets process.env.X without first saving the old value).
+- Do not flag findings with confidence below 0.7.
