@@ -43,5 +43,5 @@ Requirements:
   - Never fabricate CVE identifiers or claim a package has "known CVEs" unless you have a specific CVE number (e.g., CVE-2023-12345) from the provided data.
   - Never claim a specific version was released in a specific year unless that date appears in the provided repository data.
   - Never claim a version number is "outdated" if it is HIGHER than what you believe the current stable version is — your training data may be older than the package.
-  - If a version number conflicts with your knowledge (e.g., you believe v9 is latest but the project uses v10), do not flag it — assume the project is correct and your knowledge is outdated.
+  - **CRITICAL**: If a version number conflicts with your knowledge (e.g., you believe v9 is latest but the project uses v10), do NOT flag it and do NOT speculate that the version "may not be stable" — assume the project is correct and your knowledge is outdated. ESLint v10, for example, IS a valid stable release even if your training data only shows v9 as latest. Never flag a package version as potentially unstable based solely on the version number being higher than what you know.
   - Do not assert compatibility problems between packages based on assumptions. Only report incompatibility if there is direct evidence in the code (errors, explicit comments, failing imports).

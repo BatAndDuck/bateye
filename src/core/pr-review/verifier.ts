@@ -15,7 +15,7 @@ const SPECULATIVE_PATTERNS = /\b(may|might|could|likely|possibly|perhaps|appears
 
 function normalize(s: string): string {
   return s
-    .replace(/^\s*[+\-]\s*/, '')
+    .replace(/^\s*[+-]\s*/, '')
     .trim()
     .replace(/\s+/g, ' ')
     .toLowerCase();
