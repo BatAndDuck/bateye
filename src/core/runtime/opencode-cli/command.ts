@@ -64,21 +64,21 @@ export function buildOpenCodeRunArguments(
   promptFile: string,
 ): string[] {
   const args = [...invocation.args, 'run'];
-
-  if (options.model?.trim()) {
-    args.push('--model', options.model.trim());
-  }
+  const modelArg = options.model?.trim();
 
   if (fullPrompt.length <= MAX_INLINE_OPEN_CODE_PROMPT_CHARS) {
+    if (modelArg) {
+      args.push('--model', modelArg);
+    }
     args.push('--', fullPrompt);
     return args;
   }
 
+  args.push(OPEN_CODE_PROMPT_ATTACHMENT_MESSAGE);
+  if (modelArg) {
+    args.push('--model', modelArg);
+  }
   args.push('--file', promptFile);
-
-  // `--file` is an array argument in OpenCode, so `--` is required to terminate
-  // flag parsing before the positional message.
-  args.push('--', OPEN_CODE_PROMPT_ATTACHMENT_MESSAGE);
 
   return args;
 }
