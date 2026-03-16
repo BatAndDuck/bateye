@@ -44,6 +44,13 @@ type OpenCodeMessageResponse = {
         message?: string;
       };
     };
+    /** Some OpenCode providers report cumulative session token usage here */
+    usage?: {
+      inputTokens?: number;
+      outputTokens?: number;
+      input_tokens?: number;
+      output_tokens?: number;
+    };
   };
   parts: OpenCodeMessagePart[];
 };
@@ -51,6 +58,42 @@ type OpenCodeMessageResponse = {
 let activeServerPromise: Promise<OpenCodeServerHandle> | null = null;
 let activeServerSignature: string | null = null;
 let shutdownHooksRegistered = false;
+
+/**
+ * Attempts to extract cumulative token usage from an OpenCode message response.
+ * OpenCode may include usage in `info.usage` or in parts with type `step-finish`.
+ * Returns null if no actual usage data is available.
+ */
+function extractActualUsage(response: OpenCodeMessageResponse): { inputTokens: number; outputTokens: number } | null {
+  // Check info-level usage (some providers expose this)
+  const infoUsage = response.info?.usage;
+  if (infoUsage) {
+    const input = infoUsage.inputTokens ?? infoUsage.input_tokens;
+    const output = infoUsage.outputTokens ?? infoUsage.output_tokens;
+    if (typeof input === 'number' && typeof output === 'number' && (input > 0 || output > 0)) {
+      return { inputTokens: input, outputTokens: output };
+    }
+  }
+
+  // Check parts for step-finish or usage-report parts
+  let totalInput = 0;
+  let totalOutput = 0;
+  let found = false;
+  for (const part of response.parts) {
+    const p = part as Record<string, unknown>;
+    // step-finish parts carry per-turn usage in some providers
+    if (p.type === 'step-finish' || p.type === 'usage') {
+      const usage = p.usage as Record<string, unknown> | undefined;
+      if (usage) {
+        const input = (usage.inputTokens ?? usage.input_tokens) as number | undefined;
+        const output = (usage.outputTokens ?? usage.output_tokens) as number | undefined;
+        if (typeof input === 'number') { totalInput += input; found = true; }
+        if (typeof output === 'number') { totalOutput += output; found = true; }
+      }
+    }
+  }
+  return found ? { inputTokens: totalInput, outputTokens: totalOutput } : null;
+}
 
 function extractJson(rawText: string): string {
   const jsonMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/) ||
@@ -558,7 +601,8 @@ export class OpenCodeCLIRuntime implements IRuntime {
     const estimatedInputTokens = Math.ceil((options.systemPrompt.length + options.userMessage.length) / 4);
     const callId = `${target.transport}/${target.modelId}`;
 
-    console.error(`[opencode] Starting call: model=${callId}, systemPrompt=${options.systemPrompt.length} chars, userMessage=${options.userMessage.length} chars, estInputTokens=~${estimatedInputTokens}, timeout=${Math.round(timeoutMs / 1000)}s`);
+    const labelTag = options.callLabel ? ` [${options.callLabel}]` : '';
+    console.error(`[opencode]${labelTag} Starting call: model=${callId}, systemPrompt=${options.systemPrompt.length} chars, userMessage=${options.userMessage.length} chars, estInputTokens=~${estimatedInputTokens}, timeout=${Math.round(timeoutMs / 1000)}s`);
 
     for (let attempt = 0; attempt < MAX_STRUCTURED_OUTPUT_ATTEMPTS; attempt++) {
       let sessionID: string | undefined;
@@ -620,15 +664,22 @@ export class OpenCodeCLIRuntime implements IRuntime {
         const normalized = repairReviewerPayload(parsed);
         const validated = schema.parse(normalized);
 
-        const estimatedOutputTokens = Math.ceil(serializedResponse.length / 4);
-        const tokensUsed: TokenUsage = {
-          inputTokens: estimatedInputTokens,
-          outputTokens: estimatedOutputTokens,
-          estimated: true,
-        };
-
         const durationMs = Date.now() - start;
-        console.error(`[opencode] ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ~${estimatedInputTokens} in + ~${estimatedOutputTokens} out (estimated), attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}`);
+
+        // Prefer actual usage reported by OpenCode/provider over our estimates.
+        // NOTE: For agentic sessions the estimate is FIRST-TURN ONLY and wildly low —
+        // actual input tokens are 5-20× higher due to re-sending the full conversation
+        // history on every tool call turn. If actualUsage is null, log a clear warning.
+        const actualUsage = extractActualUsage(response);
+        const estimatedOutputTokens = Math.ceil(serializedResponse.length / 4);
+        let tokensUsed: TokenUsage;
+        if (actualUsage) {
+          tokensUsed = { inputTokens: actualUsage.inputTokens, outputTokens: actualUsage.outputTokens, estimated: false };
+          console.error(`[opencode]${labelTag} ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ${actualUsage.inputTokens} in + ${actualUsage.outputTokens} out (actual), attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}`);
+        } else {
+          tokensUsed = { inputTokens: estimatedInputTokens, outputTokens: estimatedOutputTokens, estimated: true };
+          console.error(`[opencode]${labelTag} ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ~${estimatedInputTokens} in + ~${estimatedOutputTokens} out (⚠ FIRST-TURN ESTIMATE ONLY — agentic turns not counted), attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}`);
+        }
 
         return {
           data: validated,

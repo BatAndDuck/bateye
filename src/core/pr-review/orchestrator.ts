@@ -105,7 +105,7 @@ export async function selectReviewers(
 
   try {
     const result = await runtime.run<OrchestratorResult>(
-      { systemPrompt, userMessage, model, apiKey, transport, apiBaseUrl, maxTokens: 2048, temperature: 0 },
+      { systemPrompt, userMessage, model, apiKey, transport, apiBaseUrl, maxTokens: 2048, temperature: 0, callLabel: 'orchestrator' },
       orchestratorResultSchema
     );
     return {

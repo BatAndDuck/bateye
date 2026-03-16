@@ -11,6 +11,8 @@ export interface RunOptions {
   apiBaseUrl?: string; // Override for OpenAI-compatible gateways
   maxTokens?: number;
   temperature?: number;
+  /** Human-readable label for diagnostics (e.g. reviewer name). Shown in runtime log lines. */
+  callLabel?: string;
 }
 
 export interface AgenticPRReviewOptions extends RunOptions {

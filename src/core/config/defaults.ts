@@ -48,8 +48,13 @@ export const MAX_PR_REVIEWER_FILES_TO_INSPECT = 20;
 export const MAX_PR_FINDING_SUPPORT_FILES = 5;
 /** Maximum characters of current file content to seed into PR review prompts. */
 export const MAX_PR_CURRENT_FILE_CHARS = 4_000;
-/** Maximum total characters of seeded current file context for PR review prompts. */
-export const MAX_PR_CURRENT_CONTEXT_CHARS = 80_000;
+/**
+ * Maximum total characters of seeded current file context for PR review prompts.
+ * Kept intentionally low because agentic reviewers can read full files on demand.
+ * The seeded context is a convenience to give the reviewer an overview, not a substitute
+ * for filesystem access. Previous value of 80,000 was the main source of token bloat.
+ */
+export const MAX_PR_CURRENT_CONTEXT_CHARS = 20_000;
 
 /** Default timeout for external scanning tools (ms) */
 export const DEFAULT_TOOL_TIMEOUT_MS = 60_000;

@@ -41,7 +41,7 @@ function addTokens(a: TokenUsage, b: TokenUsage): TokenUsage {
 
 function formatTokenSummary(usage: TokenUsage): string {
   const total = usage.inputTokens + usage.outputTokens;
-  const suffix = usage.estimated ? ' (estimated)' : '';
+  const suffix = usage.estimated ? ' (est)' : ' (actual)';
   return `${total.toLocaleString()} tokens (${usage.inputTokens.toLocaleString()} in + ${usage.outputTokens.toLocaleString()} out)${suffix}`;
 }
 
@@ -368,10 +368,19 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     hasGrandTotalData = true;
   }
   if (hasGrandTotalData) {
-    log(`[token-diag] ═══ GRAND TOTAL: ${formatTokenSummary(grandTotal)} ═══`);
+    const reviewerTokensAreEstimated = hasTokenData && reviewerTokenTotal.estimated;
+    const reviewerSuffix = reviewerTokensAreEstimated
+      ? ' ⚠ FIRST-TURN ESTIMATE — actual agentic usage is 5-20× higher'
+      : '';
+    log(`[token-diag] ═══ GRAND TOTAL: ${formatTokenSummary(grandTotal)}${reviewerTokensAreEstimated ? ' (⚠ UNDERESTIMATED — see reviewers line)' : ''} ═══`);
     log(`[token-diag]   orchestrator: ${orchestratorResult.tokensUsed ? formatTokenSummary(orchestratorResult.tokensUsed) : 'n/a'}`);
-    log(`[token-diag]   reviewers (${selectedReviewers.length}x): ${hasTokenData ? formatTokenSummary(reviewerTokenTotal) : 'n/a'}`);
+    log(`[token-diag]   reviewers (${selectedReviewers.length}x): ${hasTokenData ? formatTokenSummary(reviewerTokenTotal) + reviewerSuffix : 'n/a'}`);
     log(`[token-diag]   semantic verification: ${semanticTokens ? formatTokenSummary(semanticTokens) : 'skipped (high-confidence)'}`);
+    if (reviewerTokensAreEstimated) {
+      log(`[token-diag] ⚠ Reviewer token counts reflect the initial prompt size only. OpenCode does not`);
+      log(`[token-diag]   expose cumulative session usage — each tool call re-sends the full conversation`);
+      log(`[token-diag]   history, so true input tokens per reviewer ≈ initial_tokens × number_of_turns.`);
+    }
   }
 
   // Degrade on error-severity issues, non-transient warnings (tool failures etc.),
@@ -559,6 +568,7 @@ async function runPRReviewer(
         maxTokens: 8096,
         temperature: 0,
         timeoutMs: MAX_PR_REVIEWER_TIMEOUT_MS,
+        callLabel: `reviewer:${reviewer.name}`,
       },
       prReviewerAnalysisSchema,
     );

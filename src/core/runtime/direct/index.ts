@@ -100,7 +100,8 @@ async function runWithAnthropic<T>(
   const start = Date.now();
   const estInputTokens = Math.ceil((options.systemPrompt.length + options.userMessage.length) / 4);
 
-  console.error(`[direct-anthropic] Starting call: model=${modelId}, systemPrompt=${options.systemPrompt.length} chars, userMessage=${options.userMessage.length} chars, estInputTokens=~${estInputTokens}`);
+  const labelTag = options.callLabel ? ` [${options.callLabel}]` : '';
+  console.error(`[direct-anthropic]${labelTag} Starting call: model=${modelId}, systemPrompt=${options.systemPrompt.length} chars, userMessage=${options.userMessage.length} chars, estInputTokens=~${estInputTokens}`);
 
   let lastError: Error | null = null;
   let lastRawJson: string | null = null;
@@ -308,7 +309,8 @@ async function runWithOpenAI<T>(
   const estInputTokens = Math.ceil((options.systemPrompt.length + options.userMessage.length) / 4);
   const label = baseURL ? `openai-compat(${baseURL})` : 'openai';
 
-  console.error(`[direct-${label}] Starting call: model=${modelId}, systemPrompt=${options.systemPrompt.length} chars, userMessage=${options.userMessage.length} chars, estInputTokens=~${estInputTokens}`);
+  const labelTag = options.callLabel ? ` [${options.callLabel}]` : '';
+  console.error(`[direct-${label}]${labelTag} Starting call: model=${modelId}, systemPrompt=${options.systemPrompt.length} chars, userMessage=${options.userMessage.length} chars, estInputTokens=~${estInputTokens}`);
 
   let lastError: Error | null = null;
   let lastRawJson: string | null = null;

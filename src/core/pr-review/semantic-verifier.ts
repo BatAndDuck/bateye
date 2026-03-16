@@ -75,6 +75,7 @@ async function verifyBatch(
         maxTokens,
         temperature: 0,
         cwd: options.repoPath,
+        callLabel: 'semantic-verifier',
       },
       prFindingBatchVerificationSchema,
     );
