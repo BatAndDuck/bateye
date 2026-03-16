@@ -3,7 +3,7 @@ import OpenAI, { AzureOpenAI } from 'openai';
 import * as fs from 'fs';
 import * as path from 'path';
 import { z } from 'zod';
-import { AgenticPRReviewOptions, IRuntime, RunOptions, RunResult, normalizeTransport, resolveModelTarget } from '../interface';
+import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, normalizeTransport, resolveModelTarget } from '../interface';
 
 const MAX_RETRIES = 3;
 const VERCEL_AI_GATEWAY_BASE_URL = 'https://ai-gateway.vercel.sh/v1';
@@ -400,9 +400,9 @@ export class DirectAIRuntime implements IRuntime {
     return true; // Direct runtime is always available
   }
 
-  async runAgenticPRReview<T>(_options: AgenticPRReviewOptions, _schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>> {
+  async runAgenticReview<T>(_options: AgenticRepositoryReviewOptions, _schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>> {
     throw new Error(
-      'Agentic PR review requires the OpenCode CLI runtime or CODEOWL_RUNTIME=mock. '
+      'Agentic repository review requires the OpenCode CLI runtime or CODEOWL_RUNTIME=mock. '
       + 'The direct SDK runtime cannot inspect the repository before reporting findings.'
     );
   }

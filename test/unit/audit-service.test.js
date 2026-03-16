@@ -39,8 +39,11 @@ test('runAudit throws when a reviewer runtime call fails', async () => {
         { repoPath },
         {
           getRuntime: async () => ({
-            async run() {
+            async runAgenticReview() {
               throw new Error('401 Error verifying OIDC token');
+            },
+            async run() {
+              throw new Error('orchestrator runtime should not be used in this test');
             },
             async listModels() {
               return [];
@@ -84,7 +87,7 @@ Check reviewer ${i}.
       { repoPath, reviewerIds: Array.from({ length: 12 }, (_, index) => `reviewer-${index}`) },
       {
         getRuntime: async () => ({
-          async run(_options, schema) {
+          async runAgenticReview(_options, schema) {
             activeRuns += 1;
             maxActiveRuns = Math.max(maxActiveRuns, activeRuns);
             const CONCURRENCY_TEST_DELAY_MS = 25; // small delay to allow concurrent reviewers to interleave
@@ -97,6 +100,9 @@ Check reviewer ${i}.
               durationMs: 0,
               rawResponse: '',
             };
+          },
+          async run() {
+            throw new Error('orchestrator runtime should not be used in this test');
           },
           async listModels() {
             return [];
@@ -135,7 +141,7 @@ Check generated files.
       { repoPath, reviewerIds: ['generated-artifact'] },
       {
         getRuntime: async () => ({
-          async run(_options, schema) {
+          async runAgenticReview(_options, schema) {
             return {
               data: schema.parse({
                 score: 80,
@@ -160,6 +166,9 @@ Check generated files.
               durationMs: 0,
               rawResponse: '',
             };
+          },
+          async run() {
+            throw new Error('orchestrator runtime should not be used in this test');
           },
           async listModels() {
             return [];
@@ -199,7 +208,7 @@ Check dependency placement.
       { repoPath, reviewerIds: ['dependency-noise'] },
       {
         getRuntime: async () => ({
-          async run(_options, schema) {
+          async runAgenticReview(_options, schema) {
             return {
               data: schema.parse({
                 score: 70,
@@ -224,6 +233,9 @@ Check dependency placement.
               durationMs: 0,
               rawResponse: '',
             };
+          },
+          async run() {
+            throw new Error('orchestrator runtime should not be used in this test');
           },
           async listModels() {
             return [];
@@ -264,7 +276,7 @@ Check reviewer ${id}.
       { repoPath, reviewerIds: ['ok-reviewer', 'broken-reviewer'] },
       {
         getRuntime: async () => ({
-          async run(options, schema) {
+          async runAgenticReview(options, schema) {
             if (options.systemPrompt.includes('broken-reviewer')) {
               throw new Error('schema mismatch');
             }
@@ -275,6 +287,9 @@ Check reviewer ${id}.
               durationMs: 0,
               rawResponse: '',
             };
+          },
+          async run() {
+            throw new Error('orchestrator runtime should not be used in this test');
           },
           async listModels() {
             return [];

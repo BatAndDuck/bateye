@@ -206,8 +206,8 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
 
   const runtimeLog = JSON.parse(fs.readFileSync(logPath, 'utf-8'));
   assert.equal(runtimeLog.filter(entry => entry.type === 'run').length, 2);
-  assert.equal(runtimeLog.filter(entry => entry.type === 'runAgenticPRReview').length, 2);
-  assert.equal(runtimeLog.find(entry => entry.type === 'runAgenticPRReview').repoPath, repoPath);
+  assert.equal(runtimeLog.filter(entry => entry.type === 'runAgenticReview').length, 2);
+  assert.equal(runtimeLog.find(entry => entry.type === 'runAgenticReview').repoPath, repoPath);
 });
 
 test('pr-review command fails when there are no changed files between the requested refs', () => {

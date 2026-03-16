@@ -70,6 +70,12 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      - name: Install OpenCode CLI
+        run: npm install --global opencode-ai
+
+      - name: Verify OpenCode CLI
+        run: opencode --version
+
       # Build and link from source so we test the exact code in this PR,
       # not the last published npm version.
       - name: Install dependencies

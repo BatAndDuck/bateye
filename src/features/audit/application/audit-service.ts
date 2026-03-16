@@ -14,10 +14,11 @@ import {
   MAX_CHARS_PER_REVIEWER_FILE,
   MAX_CONCURRENT_AUDIT_REVIEWERS,
   MAX_AUDIT_REVIEWER_TOKENS,
+  MAX_AUDIT_REVIEWER_TIMEOUT_MS,
 } from '../../../core/config/defaults';
 import { ensureDir, writeAuditResult } from '../../../core/output/writer';
 import { IRuntime } from '../../../core/runtime/interface';
-import { getRuntime } from '../../../core/runtime/factory';
+import { getAuditRuntime } from '../../../core/runtime/factory';
 import { resolveApiKey, resolveConfig } from '../../config/application/config-service';
 import { loadReviewersForMode } from '../../reviewers/application/reviewer-registry';
 import { selectAuditReviewers } from './audit-orchestrator';
@@ -34,7 +35,7 @@ export interface AuditDependencies {
 }
 
 const defaultDependencies: AuditDependencies = {
-  getRuntime,
+  getRuntime: getAuditRuntime,
 };
 
 /** Run a full repository audit and write the resulting report to disk. */
@@ -181,6 +182,7 @@ async function runSingleReviewer(
   const scopedFiles = scopeFilesForReviewer(index, reviewer.scopeHints);
   const filesContext = formatFilesForContext(scopedFiles, MAX_FILES_FOR_REVIEWER_CONTEXT, MAX_CHARS_PER_REVIEWER_FILE);
   const model = reviewer.model || config.model;
+  const seedFiles = scopedFiles.slice(0, MAX_FILES_FOR_REVIEWER_CONTEXT).map(file => file.relativePath);
 
   // Run external tool if configured
   let toolContext: string | undefined;
@@ -210,21 +212,26 @@ async function runSingleReviewer(
   const userMessage = buildAuditUserMessage(filesContext, index.totalFiles, scopedFiles.length, toolContext);
 
   let analysis: ReviewerAnalysis;
+  let runtimeType: import('../../../types/index').RuntimeType;
 
   try {
-    const result = await runtime.run<ReviewerAnalysis>(
+    const result = await runtime.runAgenticReview<ReviewerAnalysis>(
       {
         systemPrompt,
         userMessage,
         model,
         apiKey,
+        repoPath: index.repoPath,
+        initialFiles: seedFiles,
         transport: config.transport,
         apiBaseUrl: config.apiBaseUrl,
         maxTokens: MAX_AUDIT_REVIEWER_TOKENS,
+        timeoutMs: MAX_AUDIT_REVIEWER_TIMEOUT_MS,
       },
       reviewerAnalysisSchema,
     );
     analysis = result.data;
+    runtimeType = result.runtime;
   } catch (err) {
     throw new Error(`Reviewer ${reviewer.id} failed: ${(err as Error).message}`, { cause: err });
   }
@@ -244,7 +251,7 @@ async function runSingleReviewer(
     findings,
     execution: {
       model,
-      runtime: 'sdk',
+      runtime: runtimeType,
       durationMs: Date.now() - start,
       scopedFiles: scopedFiles.length,
       totalRepoFilesSeen: index.totalFiles,

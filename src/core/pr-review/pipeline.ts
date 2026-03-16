@@ -396,14 +396,14 @@ async function runPRReviewer(
 
   try {
     log(`  Running reviewer: ${reviewer.name}...`);
-    const runResult = await runtime.runAgenticPRReview<PRReviewerAnalysis>(
+    const runResult = await runtime.runAgenticReview<PRReviewerAnalysis>(
       {
         systemPrompt,
         userMessage,
         model: reviewer.model || model,
         apiKey,
         repoPath,
-        changedFiles: currentDiffFiles,
+        initialFiles: currentDiffFiles,
         transport,
         apiBaseUrl,
         maxTokens: 8096,

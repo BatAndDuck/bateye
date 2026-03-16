@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import { z } from 'zod';
-import { AgenticPRReviewOptions, IRuntime, RunOptions, RunResult } from '../../../core/runtime/interface';
+import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult } from '../../../core/runtime/interface';
 
 type MockRuntimeFixtures = {
   runs: Array<{
@@ -69,19 +69,19 @@ export class MockRuntime implements IRuntime {
     };
   }
 
-  async runAgenticPRReview<T>(options: AgenticPRReviewOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>> {
+  async runAgenticReview<T>(options: AgenticRepositoryReviewOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>> {
     const fixtures = readFixtures();
     const next = fixtures.agenticRuns?.shift();
     if (!next) {
-      throw new Error('No mock runtime response remaining for runAgenticPRReview()');
+      throw new Error('No mock runtime response remaining for runAgenticReview()');
     }
 
     writeFixtures(fixtures);
     appendLog({
-      type: 'runAgenticPRReview',
+      type: 'runAgenticReview',
       model: options.model,
       repoPath: options.repoPath,
-      changedFiles: options.changedFiles,
+      initialFiles: options.initialFiles || [],
       promptPreview: options.systemPrompt.slice(0, 80),
     });
 

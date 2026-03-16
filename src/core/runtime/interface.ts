@@ -19,6 +19,12 @@ export interface AgenticPRReviewOptions extends RunOptions {
   timeoutMs?: number;
 }
 
+export interface AgenticRepositoryReviewOptions extends RunOptions {
+  repoPath: string;
+  initialFiles?: string[];
+  timeoutMs?: number;
+}
+
 /** Result wrapper returned by IRuntime.run, including parsed data and execution metadata */
 export interface RunResult<T> {
   data: T;
@@ -34,7 +40,7 @@ export interface RunResult<T> {
  */
 export interface IRuntime {
   run<T>(options: RunOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>>;
-  runAgenticPRReview<T>(options: AgenticPRReviewOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>>;
+  runAgenticReview<T>(options: AgenticRepositoryReviewOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>>;
   listModels(provider: string, apiKey: string, apiBaseUrl?: string): Promise<string[]>;
   isAvailable(): Promise<boolean>;
 }

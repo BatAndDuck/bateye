@@ -32,7 +32,8 @@ test('audit command uses built-in reviewers and reaches the mocked runtime', () 
           ],
         },
       },
-      // Subsequent calls: one per reviewer
+    ],
+    agenticRuns: [
       { data: { score: 90, summary: 'solid', findings: [] } },
       { data: { score: 80, summary: 'documented', findings: [] } },
       { data: { score: 70, summary: 'secure enough', findings: [] } },
@@ -59,8 +60,9 @@ test('audit command uses built-in reviewers and reaches the mocked runtime', () 
   assert.equal(report.reviewerResults.length, 3);
 
   const log = JSON.parse(fs.readFileSync(logPath, 'utf-8'));
-  // 1 orchestrator call + 3 reviewer calls = 4 total run() invocations
-  assert.equal(log.filter(entry => entry.type === 'run').length, 4);
+  assert.equal(log.filter(entry => entry.type === 'run').length, 1);
+  assert.equal(log.filter(entry => entry.type === 'runAgenticReview').length, 3);
+  assert.equal(log.find(entry => entry.type === 'runAgenticReview').repoPath, repoPath);
 });
 
 test('audit command runs a custom tool-backed reviewer end to end', () => {
@@ -101,7 +103,8 @@ process.stdout.write('AUDIT TOOL OK\\nsecret-pattern-detected');
   const logPath = path.join(repoPath, 'mock-runtime-log.json');
   const reportPath = path.join(repoPath, 'custom-audit-report.json');
   writeJson(fixturePath, {
-    runs: [
+    runs: [],
+    agenticRuns: [
       {
         data: {
           score: 65,
@@ -153,7 +156,9 @@ process.stdout.write('AUDIT TOOL OK\\nsecret-pattern-detected');
   assert.deepEqual(toolLog.args, ['audit-tool-log.json']);
 
   const runtimeLog = JSON.parse(fs.readFileSync(logPath, 'utf-8'));
-  assert.equal(runtimeLog.filter(entry => entry.type === 'run').length, 1);
+  assert.equal(runtimeLog.filter(entry => entry.type === 'run').length, 0);
+  assert.equal(runtimeLog.filter(entry => entry.type === 'runAgenticReview').length, 1);
+  assert.equal(runtimeLog.find(entry => entry.type === 'runAgenticReview').repoPath, repoPath);
 });
 
 test('audit command deduplicates overlapping findings across reviewers', () => {
@@ -186,7 +191,8 @@ Look for duplicated code-quality findings only.
 
   const fixturePath = path.join(repoPath, 'mock-runtime.json');
   writeJson(fixturePath, {
-    runs: [
+    runs: [],
+    agenticRuns: [
       {
         data: {
           score: 72,
@@ -252,4 +258,29 @@ Look for duplicated code-quality findings only.
   assert.equal(totalFindings, 1);
   assert.equal(report.reviewerResults.find(reviewer => reviewer.reviewerId === 'dup-a').findings.length, 1);
   assert.equal(report.reviewerResults.find(reviewer => reviewer.reviewerId === 'dup-b').findings.length, 0);
+});
+
+test('audit command fails clearly when non-agentic direct runtime is requested', () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-audit-direct-runtime-'));
+  fs.mkdirSync(path.join(repoPath, '.git'));
+  fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(repoPath, 'src', 'index.ts'), 'export const changed = true;\n');
+
+  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+    model: 'anthropic/mock-model',
+    exclude: [],
+  });
+
+  const result = spawnSync('node', ['dist/index.js', 'audit', '--cwd', repoPath], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
+      CODEOWL_RUNTIME: 'direct',
+    },
+    encoding: 'utf-8',
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stdout + result.stderr, /Agentic audit cannot use CODEOWL_RUNTIME=direct/);
 });

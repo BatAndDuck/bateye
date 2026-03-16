@@ -7,6 +7,7 @@ export type RuntimePreference = 'direct' | 'opencode-cli' | 'mock' | 'auto';
 
 let runtimeInstance: IRuntime | null = null;
 let prReviewRuntimeInstance: IRuntime | null = null;
+let auditRuntimeInstance: IRuntime | null = null;
 
 export async function createRuntime(preference: RuntimePreference = 'auto'): Promise<IRuntime> {
   const effectivePreference = preference === 'auto' && process.env.CODEOWL_RUNTIME === 'mock'
@@ -38,13 +39,21 @@ export async function getRuntime(): Promise<IRuntime> {
 }
 
 export async function createPRReviewRuntime(): Promise<IRuntime> {
+  return createAgenticRuntime('PR review');
+}
+
+export async function createAuditRuntime(): Promise<IRuntime> {
+  return createAgenticRuntime('audit');
+}
+
+async function createAgenticRuntime(modeLabel: string): Promise<IRuntime> {
   if (process.env.CODEOWL_RUNTIME === 'mock') {
     return new MockRuntime();
   }
 
   if (process.env.CODEOWL_RUNTIME === 'direct') {
     throw new Error(
-      'Agentic PR review cannot use CODEOWL_RUNTIME=direct. '
+      `Agentic ${modeLabel} cannot use CODEOWL_RUNTIME=direct. `
       + 'Use the OpenCode CLI runtime or CODEOWL_RUNTIME=mock.'
     );
   }
@@ -55,7 +64,7 @@ export async function createPRReviewRuntime(): Promise<IRuntime> {
   }
 
   throw new Error(
-    'Agentic PR review requires the OpenCode CLI runtime or CODEOWL_RUNTIME=mock. '
+    `Agentic ${modeLabel} requires the OpenCode CLI runtime or CODEOWL_RUNTIME=mock. `
     + 'Install OpenCode with: npm i -g opencode-ai'
   );
 }
@@ -67,7 +76,15 @@ export async function getPRReviewRuntime(): Promise<IRuntime> {
   return prReviewRuntimeInstance;
 }
 
+export async function getAuditRuntime(): Promise<IRuntime> {
+  if (!auditRuntimeInstance) {
+    auditRuntimeInstance = await createAuditRuntime();
+  }
+  return auditRuntimeInstance;
+}
+
 export function resetRuntime(): void {
   runtimeInstance = null;
   prReviewRuntimeInstance = null;
+  auditRuntimeInstance = null;
 }

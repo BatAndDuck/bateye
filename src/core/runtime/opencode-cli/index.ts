@@ -3,7 +3,7 @@ import { z } from 'zod';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { AgenticPRReviewOptions, IRuntime, RunOptions, RunResult } from '../interface';
+import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult } from '../interface';
 
 function extractJson(rawText: string): string {
   const jsonMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/) ||
@@ -25,7 +25,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
     return this.executePrompt(options, schema, options.cwd || process.cwd(), 120000);
   }
 
-  async runAgenticPRReview<T>(options: AgenticPRReviewOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>> {
+  async runAgenticReview<T>(options: AgenticRepositoryReviewOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>> {
     return this.executePrompt(options, schema, options.repoPath, options.timeoutMs || 150000);
   }
 
