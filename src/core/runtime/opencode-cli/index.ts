@@ -22,12 +22,18 @@ type OpenCodeMessagePart =
 type OpenCodeMessageResponse = {
   info: {
     structured?: unknown;
+    error?: {
+      data?: {
+        message?: string;
+      };
+    };
   };
   parts: OpenCodeMessagePart[];
 };
 
 let activeServerPromise: Promise<OpenCodeServerHandle> | null = null;
 let activeServerSignature: string | null = null;
+let shutdownHooksRegistered = false;
 
 function extractJson(rawText: string): string {
   const jsonMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/) ||
@@ -96,13 +102,12 @@ async function waitForServerReady(
   url: string,
   child: ReturnType<typeof spawn>,
   timeoutMs: number,
-  stderrLines: string[],
 ): Promise<void> {
   const start = Date.now();
 
   while (Date.now() - start < timeoutMs) {
     if (child.exitCode !== null) {
-      throw new Error(`OpenCode server exited early${stderrLines.length > 0 ? `: ${stderrLines.join('\n')}` : '.'}`);
+      throw new Error(`OpenCode server exited early with code ${child.exitCode}.`);
     }
 
     try {
@@ -123,34 +128,27 @@ async function waitForServerReady(
 async function startServer(env: NodeJS.ProcessEnv, readinessTimeoutMs = 30_000): Promise<OpenCodeServerHandle> {
   const port = await findAvailablePort();
   const invocation = resolveOpenCodeInvocation();
-  const stderrLines: string[] = [];
-  const stdoutLines: string[] = [];
   const child = spawn(
     invocation.command,
     [...invocation.args, 'serve', '--hostname=127.0.0.1', `--port=${port}`],
     {
       cwd: process.cwd(),
       env,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: 'ignore',
       windowsHide: true,
     },
   );
 
-  child.stdout?.on('data', chunk => {
-    stdoutLines.push(String(chunk));
-  });
-  child.stderr?.on('data', chunk => {
-    stderrLines.push(String(chunk));
-  });
-
   const url = `http://127.0.0.1:${port}`;
 
   try {
-    await waitForServerReady(url, child, readinessTimeoutMs, [...stdoutLines, ...stderrLines]);
+    await waitForServerReady(url, child, readinessTimeoutMs);
   } catch (err) {
     child.kill();
     throw err;
   }
+
+  child.unref();
 
   return {
     url,
@@ -164,7 +162,41 @@ async function startServer(env: NodeJS.ProcessEnv, readinessTimeoutMs = 30_000):
   };
 }
 
+async function closeActiveServer(): Promise<void> {
+  if (!activeServerPromise) {
+    return;
+  }
+
+  try {
+    const server = await activeServerPromise;
+    server.close();
+  } catch {
+    // Ignore shutdown-time cleanup errors.
+  } finally {
+    activeServerPromise = null;
+    activeServerSignature = null;
+  }
+}
+
+function registerShutdownHooks(): void {
+  if (shutdownHooksRegistered) {
+    return;
+  }
+
+  shutdownHooksRegistered = true;
+
+  const close = () => {
+    void closeActiveServer();
+  };
+
+  process.once('beforeExit', close);
+  process.once('exit', close);
+  process.once('SIGINT', close);
+  process.once('SIGTERM', close);
+}
+
 async function getServer(options: Pick<RunOptions, 'apiKey' | 'apiBaseUrl' | 'model' | 'transport'>): Promise<OpenCodeServerHandle> {
+  registerShutdownHooks();
   const env = buildOpenCodeEnvironment(process.env, options);
   const envSignature = buildEnvSignature(env);
 
@@ -173,15 +205,7 @@ async function getServer(options: Pick<RunOptions, 'apiKey' | 'apiBaseUrl' | 'mo
   }
 
   if (activeServerPromise && activeServerSignature !== envSignature) {
-    try {
-      const previous = await activeServerPromise;
-      previous.close();
-    } catch {
-      // The previous server failed to start; replace it below.
-    } finally {
-      activeServerPromise = null;
-      activeServerSignature = null;
-    }
+    await closeActiveServer();
   }
 
   activeServerSignature = envSignature;
@@ -252,10 +276,23 @@ export class OpenCodeCLIRuntime implements IRuntime {
             providerID: target.transport,
             modelID: target.modelId,
           },
+          format: {
+            type: 'json_schema',
+            name: 'CodeOwlResponse',
+            schema: {
+              type: 'object',
+              additionalProperties: true,
+            },
+          },
           system: options.systemPrompt,
           parts: [{ type: 'text', text: options.userMessage }],
         }),
       }, timeoutMs);
+
+      const providerError = response.info.error?.data?.message;
+      if (providerError) {
+        throw new Error(providerError);
+      }
 
       const rawText = response.parts
         .filter((part): part is { type: 'text'; text: string } => part.type === 'text' && typeof part.text === 'string')

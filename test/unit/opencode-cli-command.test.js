@@ -53,7 +53,7 @@ test('resolveOpenCodeInvocation prefers the bundled opencode-ai dependency', () 
   assert.equal(fs.existsSync(invocation.args[0]), true);
 });
 
-test('buildOpenCodeRunArguments uses supported file-attachment syntax with a message separator', () => {
+test('buildOpenCodeRunArguments uses supported file-attachment syntax with a leading message', () => {
   const args = buildOpenCodeRunArguments(
     { command: process.execPath, args: ['opencode'], source: 'bundled' },
     { model: 'anthropic/claude-sonnet-4-5' },
@@ -64,12 +64,11 @@ test('buildOpenCodeRunArguments uses supported file-attachment syntax with a mes
   assert.deepEqual(args, [
     'opencode',
     'run',
+    OPEN_CODE_PROMPT_ATTACHMENT_MESSAGE,
     '--model',
     'anthropic/claude-sonnet-4-5',
     '--file',
     'C:\\temp\\prompt.txt',
-    '--',
-    OPEN_CODE_PROMPT_ATTACHMENT_MESSAGE,
   ]);
   assert.equal(args.includes('--no-interactive'), false);
 });
