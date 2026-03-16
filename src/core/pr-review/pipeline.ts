@@ -246,7 +246,12 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
         if (approved) {
           result.autoApproved = true;
         } else {
-          log('⚠️  Auto-approve failed. To fix: go to GitHub repo Settings → General → "Allow GitHub Actions to create and approve pull requests" and enable it.');
+          const failMsg = '⚠️  Auto-approve failed — enable **Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests"** in this repository.';
+          log(failMsg);
+          // Surface the failure in the status comment so it's visible on the PR
+          await platform.updateStatusComment(
+            `<!-- codeowl-status -->\n🦉 **CodeOwl** review complete — ${postedFindings.length} findings posted.\n\n${failMsg}`
+          );
         }
       } else {
         log(`Auto-approve skipped — findings exceed "${maxSev}" threshold.`);

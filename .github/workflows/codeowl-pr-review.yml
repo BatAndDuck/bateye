@@ -8,7 +8,9 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: write   # Required for posting PR comments and (optionally) auto-approving
+  # Note: for auto-approve to work, also enable:
+  # Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests"
 
 jobs:
   codeowl-review:
