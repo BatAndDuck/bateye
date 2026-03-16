@@ -2150,10 +2150,12 @@ function detectContainerDirUnits(repoPath: string, index: RepoIndex): Architectu
           try {
             return fs.statSync(path.join(patternDir, e)).isDirectory();
           } catch {
+            // Ignore entries that disappear or become unreadable during discovery.
             return false;
           }
         });
     } catch {
+      // Container directory discovery is best-effort; skip unreadable roots and continue.
       continue;
     }
     for (const subdir of subdirs) {

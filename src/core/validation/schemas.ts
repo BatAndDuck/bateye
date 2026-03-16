@@ -50,6 +50,8 @@ const reviewerFindingSchema = withValidLineRange(findingRangeFields);
 const prReviewerFindingSchema = withValidLineRange({
   ...findingRangeFields,
   codeQuote: z.string().min(1),
+  verificationTrail: z.array(z.string()).min(1).max(5),
+  searchedFor: z.array(z.string()).max(5).optional(),
 });
 
 export const reviewerResultSchema = z.object({
@@ -160,8 +162,15 @@ export const prReviewerAnalysisSchema = z.object({
   findings: z.array(prReviewerFindingSchema),
 });
 
+export const prFindingVerificationSchema = z.object({
+  supported: z.boolean(),
+  reason: z.string(),
+  counterEvidence: z.array(z.string()).default([]),
+});
+
 export type ReviewerAnalysis = z.infer<typeof reviewerAnalysisSchema>;
 export type PRReviewerAnalysis = z.infer<typeof prReviewerAnalysisSchema>;
+export type PRFindingVerification = z.infer<typeof prFindingVerificationSchema>;
 export type OrchestratorAnalysis = z.infer<typeof orchestratorResultSchema>;
 export type SystemSynthesis = z.infer<typeof systemSynthesisSchema>;
 export type ServiceDoc = z.infer<typeof serviceDesignDocSchema>;

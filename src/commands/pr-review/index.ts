@@ -52,9 +52,16 @@ function printPRReviewSummary(result: PRReviewResult): void {
   console.log(chalk.cyan('─'.repeat(50)));
   console.log();
   console.log(chalk.gray('  Reviewers run:'), result.selectedReviewers.map(r => r.reviewerId).join(', '));
-  console.log(chalk.gray('  Total findings:'), result.findings.length);
-  if (result.rejectedFindings && result.rejectedFindings > 0) {
-    console.log(chalk.gray('  Rejected (unverified):'), result.rejectedFindings);
+  if (result.verificationStats) {
+    console.log(chalk.gray('  Raw findings:'), result.verificationStats.rawFindings);
+    console.log(chalk.gray('  Rejected (deterministic):'), result.verificationStats.deterministicRejected);
+    console.log(chalk.gray('  Rejected (semantic):'), result.verificationStats.semanticRejected);
+    console.log(chalk.gray('  Final findings:'), result.verificationStats.finalFindings);
+  } else {
+    console.log(chalk.gray('  Total findings:'), result.findings.length);
+    if (result.rejectedFindings && result.rejectedFindings > 0) {
+      console.log(chalk.gray('  Rejected (unverified):'), result.rejectedFindings);
+    }
   }
   console.log();
 

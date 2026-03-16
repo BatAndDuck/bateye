@@ -26,6 +26,8 @@ export type Finding = {
 /** A PR review finding that extends Finding with a mandatory verbatim code quote for inline commenting */
 export type PRFinding = Finding & {
   codeQuote: string;
+  verificationTrail: string[];
+  searchedFor?: string[];
 };
 
 /** The full output from a single reviewer, including score, summary, and all findings */
@@ -72,6 +74,12 @@ export type PRReviewResult = {
   summary: string;
   findings: PRFinding[];
   rejectedFindings?: number;
+  verificationStats?: {
+    rawFindings: number;
+    deterministicRejected: number;
+    semanticRejected: number;
+    finalFindings: number;
+  };
   generatedAt: string;
   autoApproved?: boolean;
 };

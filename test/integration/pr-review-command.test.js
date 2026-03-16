@@ -6,7 +6,18 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { commitAll, initGitRepo, runOk, writeJson, writeText } = require('./helpers');
 
-test('pr-review command analyzes a real git diff, runs file tools, and writes the final report', () => {
+function runPRReview(args, env) {
+  return spawnSync('node', ['dist/index.js', 'pr-review', ...args], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      ...env,
+    },
+    encoding: 'utf-8',
+  });
+}
+
+test('pr-review command runs agentic reviewers, semantically verifies findings, and writes the final report', () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-int-'));
   initGitRepo(repoPath);
 
@@ -29,7 +40,7 @@ tool:
   fileArgs: true
   optional: false
 ---
-Report only concrete security problems visible in the diff.
+Report only concrete security problems after investigating the current repository state.
 `);
 
   writeText(path.join(repoPath, '.codeowl', 'reviewers', 'pr-follow-up.md'), `---
@@ -38,7 +49,7 @@ name: PR Follow-up Reviewer
 mode: pr-review
 category: code-quality
 ---
-Report only concrete code quality problems visible in the diff.
+Report only concrete code quality problems after investigating the current repository state.
 `);
 
   writeText(path.join(repoPath, 'scripts', 'pr-tool.cjs'), `const fs = require('node:fs');
@@ -79,20 +90,31 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
       },
       {
         data: {
+          supported: true,
+          reason: 'The finding is supported by the current file content and anchored to changed code.',
+          counterEvidence: [],
+        },
+      },
+    ],
+    agenticRuns: [
+      {
+        data: {
           score: 70,
           summary: 'One concrete issue found in the new normalization flow.',
           findings: [
             {
               id: 'PR_TOOL_PR_1',
               title: 'Normalized input is returned without escaping',
-              description: 'The new code returns the trimmed user input directly from the diffed line.',
+              description: 'The current file returns the trimmed user input directly from the changed line.',
               priority: 'high',
               confidence: 0.94,
               filePath: 'src/service.ts',
               startLine: 2,
               endLine: 2,
               codeQuote: '  const normalized = name.trim();',
-              evidence: ['const normalized = name.trim();'],
+              evidence: ['src/service.ts returns the normalized input directly from the changed block.'],
+              verificationTrail: ['file:src/service.ts', 'search:normalized'],
+              searchedFor: ['escaping', 'validation'],
               recommendation: 'Escape or validate the normalized value before returning it.',
               tags: ['security'],
             },
@@ -107,28 +129,32 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
             {
               id: 'PR_FOLLOW_UP_PR_1',
               title: 'Trimmed value still flows straight to the return path',
-              description: 'The diff shows the normalized input being returned without any additional validation.',
+              description: 'The current file returns the normalized input without any additional validation.',
               priority: 'high',
               confidence: 0.9,
               filePath: 'src/service.ts',
               startLine: 2,
               endLine: 2,
               codeQuote: '  const normalized = name.trim();',
-              evidence: ['const normalized = name.trim();'],
+              evidence: ['src/service.ts returns the normalized input immediately after assigning it.'],
+              verificationTrail: ['file:src/service.ts', 'search:return normalized'],
+              searchedFor: ['validation'],
               recommendation: 'Introduce validation before the value reaches the return statement.',
               tags: ['code-quality'],
             },
             {
               id: 'PR_FOLLOW_UP_PR_2',
               title: 'Reviewer referenced a file outside the diff',
-              description: 'This intentionally invalid finding should be rejected by verification.',
+              description: 'This intentionally invalid finding should be rejected by deterministic verification.',
               priority: 'medium',
               confidence: 0.88,
               filePath: 'src/other.ts',
               startLine: 1,
               endLine: 1,
               codeQuote: 'export const missing = true;',
-              evidence: ['export const missing = true;'],
+              evidence: ['src/other.ts is outside the diff.'],
+              verificationTrail: ['file:src/other.ts'],
+              searchedFor: ['src/other.ts'],
               recommendation: 'Ignore this finding because it is outside the diff.',
               tags: ['test'],
             },
@@ -138,16 +164,11 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
     ],
   });
 
-  const result = spawnSync('node', ['dist/index.js', 'pr-review', '--cwd', repoPath, '--base', 'main', '--dry-run'], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
-      CODEOWL_RUNTIME: 'mock',
-      CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
-      CODEOWL_MOCK_RUNTIME_LOG: logPath,
-    },
-    encoding: 'utf-8',
+  const result = runPRReview(['--cwd', repoPath, '--base', 'main', '--dry-run'], {
+    CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
+    CODEOWL_RUNTIME: 'mock',
+    CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+    CODEOWL_MOCK_RUNTIME_LOG: logPath,
   });
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
@@ -162,23 +183,31 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
   assert.equal(report.selectedReviewers.length, 2);
   assert.equal(report.findings.length, 1);
   assert.equal(report.rejectedFindings, 1);
-  assert.match(report.summary, /Static Analysis Scanners/);
-  assert.match(report.summary, /PR Tool Reviewer/);
-  assert.match(report.summary, /1 findings were filtered out during evidence verification/);
+  assert.deepEqual(report.verificationStats, {
+    rawFindings: 3,
+    deterministicRejected: 1,
+    semanticRejected: 0,
+    finalFindings: 1,
+  });
+  assert.match(report.summary, /Verification/);
+  assert.match(report.summary, /Raw findings \| 3/);
+  assert.match(report.summary, /Rejected \(deterministic\) \| 1/);
 
   const finding = report.findings[0];
   assert.equal(finding.filePath, 'src/service.ts');
   assert.equal(finding.startLine, 2);
+  assert.deepEqual(finding.verificationTrail, ['file:src/service.ts', 'search:normalized']);
+  assert.deepEqual(finding.searchedFor, ['escaping', 'validation']);
   assert.match(finding.reviewerId, /pr-tool/);
   assert.match(finding.reviewerId, /pr-follow-up/);
-  assert.match(finding.reviewerName, /PR Tool Reviewer/);
-  assert.match(finding.reviewerName, /PR Follow-up Reviewer/);
 
   const toolLog = JSON.parse(fs.readFileSync(path.join(repoPath, 'pr-tool-log.json'), 'utf-8'));
   assert.deepEqual(toolLog.files, ['src/service.ts']);
 
   const runtimeLog = JSON.parse(fs.readFileSync(logPath, 'utf-8'));
-  assert.equal(runtimeLog.filter(entry => entry.type === 'run').length, 3);
+  assert.equal(runtimeLog.filter(entry => entry.type === 'run').length, 2);
+  assert.equal(runtimeLog.filter(entry => entry.type === 'runAgenticPRReview').length, 2);
+  assert.equal(runtimeLog.find(entry => entry.type === 'runAgenticPRReview').repoPath, repoPath);
 });
 
 test('pr-review command fails when there are no changed files between the requested refs', () => {
@@ -194,22 +223,317 @@ test('pr-review command fails when there are no changed files between the reques
   commitAll(repoPath, 'base');
 
   const fixturePath = path.join(repoPath, 'mock-runtime.json');
-  writeJson(fixturePath, { runs: [] });
+  writeJson(fixturePath, { runs: [], agenticRuns: [] });
 
-  const result = spawnSync('node', ['dist/index.js', 'pr-review', '--cwd', repoPath, '--base', 'HEAD', '--head', 'HEAD', '--dry-run'], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
-      CODEOWL_RUNTIME: 'mock',
-      CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
-    },
-    encoding: 'utf-8',
+  const result = runPRReview(['--cwd', repoPath, '--base', 'HEAD', '--head', 'HEAD', '--dry-run'], {
+    CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
+    CODEOWL_RUNTIME: 'mock',
+    CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
   });
 
   assert.equal(result.status, 1);
   assert.match(result.stdout + result.stderr, /No changed files found between the specified refs/);
   assert.equal(fs.existsSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json')), false);
+});
+
+test('pr-review command rejects false positives when current code preserves the behavior elsewhere in the file', () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-inline-fp-'));
+  initGitRepo(repoPath);
+
+  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+    model: 'anthropic/mock-model',
+    exclude: [],
+  });
+
+  writeText(path.join(repoPath, '.codeowl', 'reviewers', 'bug-hunter-local.md'), `---
+id: bug-hunter-local
+name: Bug Hunter Local
+mode: pr-review
+category: qa
+---
+Report only concrete bug regressions that still exist in the current repository state.
+`);
+
+  writeText(path.join(repoPath, 'src', 'index.ts'), `function buildExcludePatterns(config) {
+  return ['dist', ...(config.exclude || [])];
+}
+
+export function buildRepoIndex(config) {
+  const excludePatterns = buildExcludePatterns(config);
+  return excludePatterns;
+}
+`);
+  commitAll(repoPath, 'base');
+
+  runOk('git', ['checkout', '-b', 'feature/inline-helper'], { cwd: repoPath });
+  writeText(path.join(repoPath, 'src', 'index.ts'), `export function buildRepoIndex(config) {
+  const excludePatterns = ['dist', ...(config.exclude || [])];
+  return excludePatterns;
+}
+`);
+  commitAll(repoPath, 'feature change');
+
+  const fixturePath = path.join(repoPath, 'mock-runtime.json');
+  writeJson(fixturePath, {
+    runs: [
+      {
+        data: {
+          selectedReviewers: [
+            { reviewerId: 'bug-hunter-local', reason: 'Potential logic regression in config handling.' },
+          ],
+        },
+      },
+      {
+        data: {
+          supported: false,
+          reason: 'The current file still applies config.exclude inline, so the claimed regression does not exist.',
+          counterEvidence: ['const excludePatterns = [\'dist\', ...(config.exclude || [])];'],
+        },
+      },
+    ],
+    agenticRuns: [
+      {
+        data: {
+          score: 55,
+          summary: 'One possible regression found.',
+          findings: [
+            {
+              id: 'BUG_HUNTER_LOCAL_1',
+              title: 'Removed helper breaks config exclude handling',
+              description: 'The helper removal looks like it drops config.exclude support from the current implementation.',
+              priority: 'high',
+              confidence: 0.88,
+              filePath: 'src/index.ts',
+              startLine: 2,
+              endLine: 2,
+              codeQuote: '  const excludePatterns = [\'dist\', ...(config.exclude || [])];',
+              evidence: ['The helper call was removed from src/index.ts.'],
+              verificationTrail: ['file:src/index.ts', 'search:config.exclude'],
+              searchedFor: ['buildExcludePatterns', 'config.exclude'],
+              recommendation: 'Restore the helper or otherwise preserve config.exclude handling.',
+              tags: ['logic'],
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  const result = runPRReview(['--cwd', repoPath, '--base', 'main', '--dry-run'], {
+    CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
+    CODEOWL_RUNTIME: 'mock',
+    CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json'), 'utf-8'));
+  assert.equal(report.findings.length, 0);
+  assert.deepEqual(report.verificationStats, {
+    rawFindings: 1,
+    deterministicRejected: 0,
+    semanticRejected: 1,
+    finalFindings: 0,
+  });
+});
+
+test('pr-review command rejects workflow absence claims when the current workflow already contains the gate', () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-workflow-fp-'));
+  initGitRepo(repoPath);
+
+  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+    model: 'anthropic/mock-model',
+    exclude: [],
+  });
+
+  writeText(path.join(repoPath, '.codeowl', 'reviewers', 'ci-cd-local.md'), `---
+id: ci-cd-local
+name: CI Local
+mode: pr-review
+category: devex
+---
+Report only concrete CI/CD issues confirmed in the current workflow files.
+`);
+
+  writeText(path.join(repoPath, '.github', 'workflows', 'ci.yml'), `name: CI
+on: [pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm test
+`);
+  commitAll(repoPath, 'base');
+
+  runOk('git', ['checkout', '-b', 'feature/workflow-change'], { cwd: repoPath });
+  writeText(path.join(repoPath, '.github', 'workflows', 'ci.yml'), `name: CI
+on: [pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+`);
+  commitAll(repoPath, 'feature change');
+
+  const fixturePath = path.join(repoPath, 'mock-runtime.json');
+  writeJson(fixturePath, {
+    runs: [
+      {
+        data: {
+          selectedReviewers: [
+            { reviewerId: 'ci-cd-local', reason: 'Workflow file changed.' },
+          ],
+        },
+      },
+      {
+        data: {
+          supported: false,
+          reason: 'The current workflow still configures npm cache in actions/setup-node.',
+          counterEvidence: ['cache: \'npm\''],
+        },
+      },
+    ],
+    agenticRuns: [
+      {
+        data: {
+          score: 61,
+          summary: 'One medium severity issue reported.',
+          findings: [
+            {
+              id: 'CI_CD_LOCAL_1',
+              title: 'Workflow no longer caches npm dependencies',
+              description: 'The workflow appears to run npm ci without dependency caching.',
+              priority: 'medium',
+              confidence: 0.84,
+              filePath: '.github/workflows/ci.yml',
+              startLine: 11,
+              endLine: 11,
+              codeQuote: '      - run: npm ci',
+              evidence: ['npm ci runs in the workflow.'],
+              verificationTrail: ['file:.github/workflows/ci.yml', 'search:cache: \'npm\''],
+              searchedFor: ['cache: \'npm\''],
+              recommendation: 'Add npm dependency caching to the workflow.',
+              tags: ['ci'],
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  const result = runPRReview(['--cwd', repoPath, '--base', 'main', '--dry-run'], {
+    CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
+    CODEOWL_RUNTIME: 'mock',
+    CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json'), 'utf-8'));
+  assert.equal(report.findings.length, 0);
+  assert.equal(report.verificationStats.semanticRejected, 1);
+});
+
+test('pr-review command rejects findings anchored only to removed code', () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-removed-code-'));
+  initGitRepo(repoPath);
+
+  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+    model: 'anthropic/mock-model',
+    exclude: [],
+  });
+
+  writeText(path.join(repoPath, '.codeowl', 'reviewers', 'removed-code-reviewer.md'), `---
+id: removed-code-reviewer
+name: Removed Code Reviewer
+mode: pr-review
+category: code-quality
+---
+Report only concrete issues that still exist after investigating the current file.
+`);
+
+  writeText(path.join(repoPath, 'src', 'index.ts'), `export function buildValue() {
+  const legacy = unsafeCall();
+  return legacy;
+}
+`);
+  commitAll(repoPath, 'base');
+
+  runOk('git', ['checkout', '-b', 'feature/remove-legacy'], { cwd: repoPath });
+  writeText(path.join(repoPath, 'src', 'index.ts'), `export function buildValue() {
+  const current = safeCall();
+  return current;
+}
+`);
+  commitAll(repoPath, 'feature change');
+
+  const fixturePath = path.join(repoPath, 'mock-runtime.json');
+  writeJson(fixturePath, {
+    runs: [
+      {
+        data: {
+          selectedReviewers: [
+            { reviewerId: 'removed-code-reviewer', reason: 'Changed function body.' },
+          ],
+        },
+      },
+    ],
+    agenticRuns: [
+      {
+        data: {
+          score: 58,
+          summary: 'One issue reported from removed code.',
+          findings: [
+            {
+              id: 'REMOVED_CODE_REVIEWER_1',
+              title: 'Legacy unsafe call remains in the function',
+              description: 'The function still uses the legacy unsafe call.',
+              priority: 'medium',
+              confidence: 0.86,
+              filePath: 'src/index.ts',
+              startLine: 2,
+              endLine: 2,
+              codeQuote: '  const legacy = unsafeCall();',
+              evidence: ['legacy call still present'],
+              verificationTrail: ['file:src/index.ts'],
+              searchedFor: ['unsafeCall'],
+              recommendation: 'Replace the legacy call with the safe implementation.',
+              tags: ['correctness'],
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  const result = runPRReview(['--cwd', repoPath, '--base', 'main', '--dry-run'], {
+    CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
+    CODEOWL_RUNTIME: 'mock',
+    CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json'), 'utf-8'));
+  assert.equal(report.findings.length, 0);
+  assert.deepEqual(report.verificationStats, {
+    rawFindings: 1,
+    deterministicRejected: 1,
+    semanticRejected: 0,
+    finalFindings: 0,
+  });
 });
 
 test('pr-review command in github mode filters already-posted findings and updates mocked GitHub state', () => {
@@ -233,7 +557,7 @@ name: GitHub Reviewer
 mode: pr-review
 category: code-quality
 ---
-Report only concrete code quality findings visible in the diff.
+Report only concrete code quality findings after investigating the current repository state.
 `);
 
   writeText(path.join(repoPath, 'src', 'service.ts'), `export function buildMessage(name: string) {
@@ -262,20 +586,31 @@ Report only concrete code quality findings visible in the diff.
       },
       {
         data: {
+          supported: true,
+          reason: 'The low-severity issue is supported by the current file content.',
+          counterEvidence: [],
+        },
+      },
+    ],
+    agenticRuns: [
+      {
+        data: {
           score: 92,
           summary: 'Only one low-severity issue found, but it matches an existing comment.',
           findings: [
             {
               id: 'GITHUB_REVIEWER_1',
               title: 'Trimmed input is returned directly',
-              description: 'The diff shows the normalized user input flowing straight to the return statement.',
+              description: 'The current file shows the normalized user input flowing straight to the return statement.',
               priority: 'low',
               confidence: 0.95,
               filePath: 'src/service.ts',
               startLine: 2,
               endLine: 2,
               codeQuote: '  const normalized = name.trim();',
-              evidence: ['const normalized = name.trim();'],
+              evidence: ['src/service.ts returns the normalized input directly.'],
+              verificationTrail: ['file:src/service.ts', 'search:return normalized'],
+              searchedFor: ['validation'],
               recommendation: 'Validate the normalized value before returning it.',
               tags: ['code-quality'],
             },
@@ -343,6 +678,12 @@ Report only concrete code quality findings visible in the diff.
   assert.equal(report.findings.length, 0);
   assert.equal(report.autoApproved, true);
   assert.match(report.summary, /No issues found/);
+  assert.deepEqual(report.verificationStats, {
+    rawFindings: 1,
+    deterministicRejected: 0,
+    semanticRejected: 0,
+    finalFindings: 0,
+  });
 
   const octokitState = JSON.parse(fs.readFileSync(octokitFixturePath, 'utf-8'));
   const actionTypes = octokitState.actions.map(action => action.type);
@@ -353,4 +694,29 @@ Report only concrete code quality findings visible in the diff.
   const updatedSummary = octokitState.issueComments.find(comment => comment.id === 11);
   assert.match(updatedStatus.body, /0 findings posted/);
   assert.match(updatedSummary.body, /No issues found/);
+});
+
+test('pr-review command fails clearly when non-agentic direct runtime is requested', () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-direct-runtime-'));
+  initGitRepo(repoPath);
+
+  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+    model: 'anthropic/mock-model',
+    exclude: [],
+  });
+
+  writeText(path.join(repoPath, 'src', 'service.ts'), `export const changed = true;\n`);
+  commitAll(repoPath, 'base');
+
+  runOk('git', ['checkout', '-b', 'feature/direct-runtime'], { cwd: repoPath });
+  writeText(path.join(repoPath, 'src', 'service.ts'), `export const changed = false;\n`);
+  commitAll(repoPath, 'feature change');
+
+  const result = runPRReview(['--cwd', repoPath, '--base', 'main', '--dry-run'], {
+    CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
+    CODEOWL_RUNTIME: 'direct',
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stdout + result.stderr, /Agentic PR review cannot use CODEOWL_RUNTIME=direct/);
 });

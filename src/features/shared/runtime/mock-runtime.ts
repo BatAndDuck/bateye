@@ -1,9 +1,15 @@
 import * as fs from 'fs';
 import { z } from 'zod';
-import { IRuntime, RunOptions, RunResult } from '../../../core/runtime/interface';
+import { AgenticPRReviewOptions, IRuntime, RunOptions, RunResult } from '../../../core/runtime/interface';
 
 type MockRuntimeFixtures = {
   runs: Array<{
+    data: unknown;
+    model?: string;
+    runtime?: 'sdk' | 'cli';
+    rawResponse?: string;
+  }>;
+  agenticRuns?: Array<{
     data: unknown;
     model?: string;
     runtime?: 'sdk' | 'cli';
@@ -44,7 +50,7 @@ function appendLog(entry: unknown): void {
 }
 
 export class MockRuntime implements IRuntime {
-  async run<T>(options: RunOptions, schema: z.ZodSchema<T>): Promise<RunResult<T>> {
+  async run<T>(options: RunOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>> {
     const fixtures = readFixtures();
     const next = fixtures.runs.shift();
     if (!next) {
@@ -58,6 +64,31 @@ export class MockRuntime implements IRuntime {
       data: schema.parse(next.data),
       model: next.model || options.model,
       runtime: next.runtime || 'sdk',
+      durationMs: 0,
+      rawResponse: next.rawResponse || JSON.stringify(next.data),
+    };
+  }
+
+  async runAgenticPRReview<T>(options: AgenticPRReviewOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>> {
+    const fixtures = readFixtures();
+    const next = fixtures.agenticRuns?.shift();
+    if (!next) {
+      throw new Error('No mock runtime response remaining for runAgenticPRReview()');
+    }
+
+    writeFixtures(fixtures);
+    appendLog({
+      type: 'runAgenticPRReview',
+      model: options.model,
+      repoPath: options.repoPath,
+      changedFiles: options.changedFiles,
+      promptPreview: options.systemPrompt.slice(0, 80),
+    });
+
+    return {
+      data: schema.parse(next.data),
+      model: next.model || options.model,
+      runtime: next.runtime || 'cli',
       durationMs: 0,
       rawResponse: next.rawResponse || JSON.stringify(next.data),
     };
