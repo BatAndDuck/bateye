@@ -260,6 +260,68 @@ Look for duplicated code-quality findings only.
   assert.equal(report.reviewerResults.find(reviewer => reviewer.reviewerId === 'dup-b').findings.length, 0);
 });
 
+test('audit command reports degraded status when review coverage is reduced by tool failures', () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-audit-degraded-int-'));
+  fs.mkdirSync(path.join(repoPath, '.git'));
+  fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(repoPath, 'src', 'index.ts'), 'export const value = 1;\n');
+
+  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+    model: 'anthropic/mock-model',
+    exclude: [],
+  });
+
+  writeText(path.join(repoPath, '.codeowl', 'reviewers', 'degraded-tool.md'), `---
+id: degraded-tool
+name: Degraded Tool Reviewer
+mode: audit
+category: security
+tool:
+  command: node
+  args:
+    - -e
+    - process.exit(2)
+  targeting: project
+  optional: true
+---
+Investigate security issues only.
+`);
+
+  const fixturePath = path.join(repoPath, 'mock-runtime.json');
+  writeJson(fixturePath, {
+    runs: [],
+    agenticRuns: [
+      {
+        data: {
+          score: 88,
+          summary: 'No security issues found.',
+          findings: [],
+        },
+      },
+    ],
+  });
+
+  const result = spawnSync('node', ['dist/index.js', 'audit', '--cwd', repoPath, '--reviewers', 'degraded-tool'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
+      CODEOWL_RUNTIME: 'mock',
+      CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+    },
+    encoding: 'utf-8',
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Status:\s+DEGRADED/);
+  assert.match(result.stdout, /Review issues/);
+
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'audit.json'), 'utf-8'));
+  assert.equal(report.status, 'degraded');
+  assert.equal(report.reviewerResults.length, 1);
+  assert.ok(report.issues.some(issue => issue.code === 'audit-reviewer-tool-error'));
+});
+
 test('audit command fails clearly when non-agentic direct runtime is requested', () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-audit-direct-runtime-'));
   fs.mkdirSync(path.join(repoPath, '.git'));

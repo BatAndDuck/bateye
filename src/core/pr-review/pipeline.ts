@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { PRFinding, PRReviewResult, Reviewer } from '../../types/index';
+import { PRFinding, PRReviewResult, ReviewIssue, Reviewer } from '../../types/index';
 import { resolveConfig, resolveApiKey } from '../config/loader';
 import { loadReviewersForMode } from '../reviewers/loader';
 import { getPRReviewRuntime } from '../runtime/factory';
@@ -10,7 +10,7 @@ import {
   buildPRReviewUserMessage,
   buildPRSummaryPrompt,
 } from '../prompts/pr-review';
-import { getGitDiff, getChangedFiles, getRepoOwnerAndName } from '../git/index';
+import { getGitDiff, getChangedFiles, getCommitSummaries, getRepoOwnerAndName } from '../git/index';
 import { selectReviewers } from './orchestrator';
 import { writePRReviewResult, ensureDir } from '../output/writer';
 import {
@@ -113,6 +113,7 @@ function buildCurrentFileContext(repoPath: string, currentDiffFiles: string[]): 
 export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Promise<PRReviewResult> {
   const { repoPath, onProgress } = options;
   const log = (msg: string) => onProgress?.(msg);
+  const issues: ReviewIssue[] = [];
 
   log('Loading configuration...');
   const config = resolveConfig(repoPath);
@@ -123,7 +124,9 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   log(`Getting diff: ${baseRef}...${headRef}`);
   const rawDiff = await getGitDiff(repoPath, baseRef, headRef);
   const changedFiles = await getChangedFiles(repoPath, baseRef, headRef);
+  const commits = await getCommitSummaries(repoPath, baseRef, headRef);
   log(`Changed files: ${changedFiles.length}`);
+  log(`Commits in review range: ${commits.length}`);
 
   if (changedFiles.length === 0) {
     throw new Error('No changed files found between the specified refs.');
@@ -179,12 +182,14 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   const orchestratorResult = await selectReviewers(
     changedFiles,
     rawDiff,
+    commits,
     reviewers,
     config.model,
     apiKey,
     config.transport,
     config.apiBaseUrl,
   );
+  issues.push(...orchestratorResult.issues);
 
   const selectedReviewerIds = new Set(orchestratorResult.selectedReviewers.map(r => r.reviewerId));
   const selectedReviewers = reviewers.filter(r => selectedReviewerIds.has(r.id));
@@ -212,6 +217,9 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   const toolSummaries = reviewerRunResults
     .filter(r => r.hasTool)
     .map(r => ({ reviewerName: r.reviewerName, toolRan: r.toolRan, findingCount: r.findings.length, error: r.toolError }));
+  for (const reviewerRunResult of reviewerRunResults) {
+    issues.push(...reviewerRunResult.issues);
+  }
   const allFindings = reviewerRunResults.flatMap(r => r.findings);
   log(`Collected ${allFindings.length} raw findings from all reviewers`);
 
@@ -242,6 +250,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     apiBaseUrl: config.apiBaseUrl,
     log,
   });
+  issues.push(...semantic.issues);
   log(`Semantic verification: accepted ${semantic.verified.length}, rejected ${semantic.rejected.length}`);
 
   if (semantic.rejected.length > 0) {
@@ -271,9 +280,11 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     command: 'pr-review',
     baseRef,
     headRef,
+    status: issues.length > 0 ? 'degraded' : 'complete',
     selectedReviewers: orchestratorResult.selectedReviewers,
     summary: '',
     findings: finalFindings,
+    issues,
     rejectedFindings: verificationStats.deterministicRejected + verificationStats.semanticRejected,
     verificationStats,
     generatedAt: new Date().toISOString(),
@@ -294,22 +305,31 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
 
     if (postedFindings.length < finalFindings.length) {
       log(`Warning: ${finalFindings.length - postedFindings.length} comment(s) could not be posted (line not in diff or GitHub API error).`);
+      issues.push({
+        severity: 'warning',
+        code: 'pr-inline-comment-post-failed',
+        message: `${finalFindings.length - postedFindings.length} inline comment(s) could not be posted to GitHub.`,
+        stage: 'publish-comments',
+      });
     }
 
     result.verificationStats = {
       ...verificationStats,
       finalFindings: postedFindings.length,
     };
-    result.summary = buildPRSummaryPrompt(postedFindings, result.verificationStats, toolSummaries);
+    result.status = issues.length > 0 ? 'degraded' : 'complete';
+    result.summary = buildPRSummaryPrompt(postedFindings, result.status, issues, result.verificationStats, toolSummaries);
     result.findings = postedFindings;
 
     log('Updating summary comment...');
     await platform.updateOrCreateSummary(result.summary);
 
-    const statusBody = `<!-- codeowl-status -->\n🦉 **CodeOwl** review complete — ${postedFindings.length} findings posted.`;
+    const statusBody = result.status === 'degraded'
+      ? `<!-- codeowl-status -->\n🦉 **CodeOwl** review completed with warnings — ${postedFindings.length} findings posted.`
+      : `<!-- codeowl-status -->\n🦉 **CodeOwl** review complete — ${postedFindings.length} findings posted.`;
     await platform.updateStatusComment(statusBody);
 
-    if (config.prReview?.autoApprove?.enabled) {
+    if (config.prReview?.autoApprove?.enabled && result.status === 'complete') {
       const maxSev = config.prReview.autoApprove.maxSeverity || 'low';
       const threshold = SEVERITY_ORDER[maxSev] ?? 1;
       const hasBlocker = postedFindings.some(f => SEVERITY_ORDER[f.priority] > threshold);
@@ -331,11 +351,13 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       } else {
         log(`Auto-approve skipped — findings exceed "${maxSev}" threshold.`);
       }
+    } else if (config.prReview?.autoApprove?.enabled && result.status !== 'complete') {
+      log('Auto-approve skipped — review completed with warnings.');
     }
 
     log('✓ GitHub comments posted');
   } else {
-    result.summary = buildPRSummaryPrompt(finalFindings, verificationStats, toolSummaries);
+    result.summary = buildPRSummaryPrompt(finalFindings, result.status, issues, verificationStats, toolSummaries);
   }
 
   const outputPath = path.join(repoPath, PR_REVIEW_OUTPUT_FILE);
@@ -351,6 +373,7 @@ interface PRReviewerRunResult {
   hasTool: boolean;
   toolRan: boolean;
   toolError?: string;
+  issues: ReviewIssue[];
 }
 
 async function runPRReviewer(
@@ -366,6 +389,7 @@ async function runPRReviewer(
   runtime: IRuntime,
   log: (msg: string) => void
 ): Promise<PRReviewerRunResult> {
+  const issues: ReviewIssue[] = [];
   let toolContext: string | undefined;
   let toolRan = false;
   let toolError: string | undefined;
@@ -383,11 +407,27 @@ async function runPRReviewer(
       toolContext = formatToolContext(reviewer.name, toolResult);
     } else if (!reviewer.tool.optional) {
       log(`  ✗ Required tool for ${reviewer.name} failed: ${toolResult.error}`);
-      return { findings: [], reviewerName: reviewer.name, hasTool: true, toolRan: false, toolError: toolResult.error };
+      issues.push({
+        severity: 'warning',
+        code: 'pr-reviewer-required-tool-failed',
+        message: `Required tool for reviewer "${reviewer.name}" failed: ${toolResult.error}`,
+        stage: 'reviewer-tool',
+        reviewerId: reviewer.id,
+        reviewerName: reviewer.name,
+      });
+      return { findings: [], reviewerName: reviewer.name, hasTool: true, toolRan: false, toolError: toolResult.error, issues };
     } else {
       toolError = toolResult.error;
       toolRan = false;
       log(`  ⚠ Tool for ${reviewer.name} failed (continuing investigation): ${toolResult.error}`);
+      issues.push({
+        severity: 'warning',
+        code: 'pr-reviewer-optional-tool-failed',
+        message: `Optional tool for reviewer "${reviewer.name}" failed: ${toolResult.error}`,
+        stage: 'reviewer-tool',
+        reviewerId: reviewer.id,
+        reviewerName: reviewer.name,
+      });
     }
   }
 
@@ -420,10 +460,18 @@ async function runPRReviewer(
     }));
 
     log(`  ✓ ${reviewer.name}: ${findings.length} findings`);
-    return { findings, reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError };
+    return { findings, reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError, issues };
   } catch (err) {
     log(`  ✗ ${reviewer.name} failed: ${(err as Error).message}`);
-    return { findings: [], reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError };
+    issues.push({
+      severity: 'warning',
+      code: 'pr-reviewer-failed',
+      message: `Reviewer "${reviewer.name}" failed: ${(err as Error).message}`,
+      stage: 'run-reviewers',
+      reviewerId: reviewer.id,
+      reviewerName: reviewer.name,
+    });
+    return { findings: [], reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError, issues };
   }
 }
 

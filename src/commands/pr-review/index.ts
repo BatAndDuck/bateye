@@ -51,6 +51,8 @@ function printPRReviewSummary(result: PRReviewResult): void {
   console.log(chalk.white(`  PR Review: ${result.baseRef}...${result.headRef}`));
   console.log(chalk.cyan('─'.repeat(50)));
   console.log();
+  const statusColor = result.status === 'complete' ? chalk.green : chalk.yellow;
+  console.log(chalk.gray('  Status:'), statusColor(result.status.toUpperCase()));
   console.log(chalk.gray('  Reviewers run:'), result.selectedReviewers.map(r => r.reviewerId).join(', '));
   if (result.verificationStats) {
     console.log(chalk.gray('  Raw findings:'), result.verificationStats.rawFindings);
@@ -74,6 +76,17 @@ function printPRReviewSummary(result: PRReviewResult): void {
   if (result.autoApproved) {
     console.log();
     console.log(chalk.green('  ✅ PR auto-approved (no findings above threshold)'));
+  }
+
+  if (result.issues.length > 0) {
+    console.log();
+    console.log(chalk.yellow(`  Review issues (${result.issues.length}):`));
+    for (const issue of result.issues.slice(0, 5)) {
+      console.log(chalk.yellow(`    - ${issue.message}`));
+    }
+    if (result.issues.length > 5) {
+      console.log(chalk.gray(`    ... and ${result.issues.length - 5} more`));
+    }
   }
 
   console.log();

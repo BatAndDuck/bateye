@@ -236,6 +236,144 @@ test('pr-review command fails when there are no changed files between the reques
   assert.equal(fs.existsSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json')), false);
 });
 
+test('pr-review command broadens built-in reviewer coverage when the orchestrator shortlist is too narrow', () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-broad-coverage-'));
+  initGitRepo(repoPath);
+
+  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+    model: 'anthropic/mock-model',
+    exclude: [],
+  });
+
+  writeText(path.join(repoPath, 'src', 'index.ts'), `export function formatName(name: string) {
+  return name.trim();
+}
+`);
+  commitAll(repoPath, 'base');
+
+  runOk('git', ['checkout', '-b', 'feature/wider-review'], { cwd: repoPath });
+  writeText(path.join(repoPath, 'src', 'index.ts'), `export function formatName(name: string) {
+  const normalized = name.trim();
+  return normalized.toUpperCase();
+}
+`);
+  commitAll(repoPath, 'feature change');
+
+  const fixturePath = path.join(repoPath, 'mock-runtime.json');
+  const logPath = path.join(repoPath, 'mock-runtime-log.json');
+  writeJson(fixturePath, {
+    runs: [
+      {
+        data: {
+          selectedReviewers: [
+            { reviewerId: 'bug-hunter', reason: 'Changed TypeScript logic should get a bug pass.' },
+          ],
+        },
+      },
+    ],
+    agenticRuns: [
+      { data: { score: 92, summary: 'No bug issues found.', findings: [] } },
+      { data: { score: 90, summary: 'No code quality issues found.', findings: [] } },
+      { data: { score: 88, summary: 'No complexity issues found.', findings: [] } },
+      { data: { score: 89, summary: 'No test-quality issues found.', findings: [] } },
+    ],
+  });
+
+  const result = runPRReview(['--cwd', repoPath, '--base', 'main', '--dry-run'], {
+    CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
+    CODEOWL_RUNTIME: 'mock',
+    CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+    CODEOWL_MOCK_RUNTIME_LOG: logPath,
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json'), 'utf-8'));
+  const selectedIds = report.selectedReviewers.map(reviewer => reviewer.reviewerId);
+  assert.deepEqual(selectedIds, ['bug-hunter', 'code-quality', 'complexity', 'test-quality']);
+
+  const runtimeLog = JSON.parse(fs.readFileSync(logPath, 'utf-8'));
+  assert.equal(runtimeLog.filter(entry => entry.type === 'runAgenticReview').length, 4);
+});
+
+test('pr-review command reports degraded status when review coverage is reduced by tool failures', () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-degraded-'));
+  initGitRepo(repoPath);
+
+  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+    model: 'anthropic/mock-model',
+    exclude: [],
+  });
+
+  writeText(path.join(repoPath, '.codeowl', 'reviewers', 'failing-tool-reviewer.md'), `---
+id: failing-tool-reviewer
+name: Failing Tool Reviewer
+mode: pr-review
+category: security
+tool:
+  command: node
+  args:
+    - -e
+    - process.exit(2)
+  targeting: project
+  optional: true
+---
+Investigate security issues only.
+`);
+
+  writeText(path.join(repoPath, '.codeowl', 'reviewers', 'plain-reviewer.md'), `---
+id: plain-reviewer
+name: Plain Reviewer
+mode: pr-review
+category: code-quality
+---
+Investigate code quality issues only.
+`);
+
+  writeText(path.join(repoPath, 'src', 'index.ts'), `export const value = 1;
+`);
+  commitAll(repoPath, 'base');
+
+  runOk('git', ['checkout', '-b', 'feature/degraded-review'], { cwd: repoPath });
+  writeText(path.join(repoPath, 'src', 'index.ts'), `export const value = 2;
+`);
+  commitAll(repoPath, 'feature change');
+
+  const fixturePath = path.join(repoPath, 'mock-runtime.json');
+  writeJson(fixturePath, {
+    runs: [
+      {
+        data: {
+          selectedReviewers: [
+            { reviewerId: 'failing-tool-reviewer', reason: 'Security pass.' },
+            { reviewerId: 'plain-reviewer', reason: 'Code quality pass.' },
+          ],
+        },
+      },
+    ],
+    agenticRuns: [
+      { data: { score: 90, summary: 'No security findings.', findings: [] } },
+      { data: { score: 92, summary: 'No code quality findings.', findings: [] } },
+    ],
+  });
+
+  const result = runPRReview(['--cwd', repoPath, '--base', 'main', '--dry-run'], {
+    CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
+    CODEOWL_RUNTIME: 'mock',
+    CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Status:\s+DEGRADED/);
+  assert.match(result.stdout, /Review issues/);
+
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json'), 'utf-8'));
+  assert.equal(report.status, 'degraded');
+  assert.equal(report.findings.length, 0);
+  assert.ok(report.issues.some(issue => issue.code === 'pr-reviewer-optional-tool-failed'));
+  assert.match(report.summary, /Review completed with warnings/);
+});
+
 test('pr-review command rejects false positives when current code preserves the behavior elsewhere in the file', () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-inline-fp-'));
   initGitRepo(repoPath);

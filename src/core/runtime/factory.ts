@@ -5,6 +5,10 @@ import { MockRuntime } from '../../features/shared/runtime/mock-runtime';
 
 export type RuntimePreference = 'direct' | 'opencode-cli' | 'mock' | 'auto';
 
+const OPEN_CODE_RUNTIME_HINT =
+  'Install CodeOwl with its dependencies (`npm install codeowl`, `npm i -g codeowl`, or `npm ci`) '
+  + 'or make `opencode` available on PATH.';
+
 let runtimeInstance: IRuntime | null = null;
 let prReviewRuntimeInstance: IRuntime | null = null;
 let auditRuntimeInstance: IRuntime | null = null;
@@ -21,7 +25,7 @@ export async function createRuntime(preference: RuntimePreference = 'auto'): Pro
   if (effectivePreference === 'opencode-cli') {
     const cli = new OpenCodeCLIRuntime();
     if (await cli.isAvailable()) return cli;
-    throw new Error('OpenCode CLI is not available. Install it with: npm i -g opencode-ai');
+    throw new Error(`OpenCode CLI is not available. ${OPEN_CODE_RUNTIME_HINT}`);
   }
 
   if (effectivePreference === 'direct') {
@@ -65,7 +69,7 @@ async function createAgenticRuntime(modeLabel: string): Promise<IRuntime> {
 
   throw new Error(
     `Agentic ${modeLabel} requires the OpenCode CLI runtime or CODEOWL_RUNTIME=mock. `
-    + 'Install OpenCode with: npm i -g opencode-ai'
+    + OPEN_CODE_RUNTIME_HINT
   );
 }
 

@@ -15,6 +15,7 @@
 - Semgrep SAST scanner no longer shows "Exit code undefined: unknown error" when `semgrep` is not installed — reviewer now runs without tool data instead of being skipped entirely.
 - Secretlint scanner no longer shows "Exit code 2: npm warn exec package not found" — added `--yes` flag for automatic install via `npx`.
 - Test environment variable `CODE_OWL_LLM_MODEL_API_KEY` is now saved and restored in all unit tests, preventing cross-test pollution.
+- Agentic runtimes no longer require a separate global `opencode-ai` install; normal CodeOwl installs now bundle and resolve the OpenCode runtime automatically.
 
 ### Changed
 - Reorganized core workflows into feature-oriented slices for audit, config, reviewers, and system design.

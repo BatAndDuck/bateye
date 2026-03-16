@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { AuditResult, Finding, Reviewer, ReviewerResult } from '../../../types/index';
+import { AuditResult, Finding, ReviewIssue, Reviewer, ReviewerResult } from '../../../types/index';
 import { buildRepoIndex, formatFilesForContext, scopeFilesForReviewer } from '../../../core/indexing/index';
 import { reviewerAnalysisSchema, ReviewerAnalysis } from '../../../core/validation/schemas';
 import { buildAuditSystemPrompt, buildAuditUserMessage } from '../../../core/prompts/audit';
@@ -42,6 +42,7 @@ const defaultDependencies: AuditDependencies = {
 export async function runAudit(options: AuditOptions, dependencies: AuditDependencies = defaultDependencies): Promise<AuditResult> {
   const { repoPath, onProgress } = options;
   const log = (msg: string) => onProgress?.(msg);
+  const issues: ReviewIssue[] = [];
 
   log('Loading configuration...');
   const config = resolveConfig(repoPath);
@@ -49,7 +50,15 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
 
   log('Loading reviewers into the owlery...');
   const { reviewers: allReviewers, warnings } = loadReviewersForMode(repoPath, 'audit', config);
-  warnings.forEach(warning => log(`Warning: ${warning}`));
+  warnings.forEach(warning => {
+    log(`Warning: ${warning}`);
+    issues.push({
+      severity: 'warning',
+      code: 'reviewer-load-warning',
+      message: warning,
+      stage: 'load-reviewers',
+    });
+  });
 
   log('Indexing repository...');
   const index = await buildRepoIndex(repoPath, config);
@@ -78,6 +87,12 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       log(`Orchestrator selected ${activeReviewers.length} reviewer(s): ${activeReviewers.map(r => r.name).join(', ')}`);
     } catch (err) {
       log(`Orchestrator stumbled (${(err as Error).message}); falling back to the full reviewer set.`);
+      issues.push({
+        severity: 'warning',
+        code: 'audit-orchestrator-fallback',
+        message: `Audit orchestrator failed and the full reviewer set was used instead: ${(err as Error).message}`,
+        stage: 'select-reviewers',
+      });
       activeReviewers = allReviewers;
     }
   }
@@ -95,10 +110,28 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       log(`Running reviewer: ${reviewer.name}...`);
       try {
         const result = await runSingleReviewer(reviewer, index, config, apiKey, runtime);
+        if (result.execution.toolError) {
+          issues.push({
+            severity: reviewer.tool?.optional === false ? 'error' : 'warning',
+            code: 'audit-reviewer-tool-error',
+            message: `Tool for reviewer "${reviewer.name}" failed: ${result.execution.toolError}`,
+            stage: 'reviewer-tool',
+            reviewerId: reviewer.id,
+            reviewerName: reviewer.name,
+          });
+        }
         log(`  ✓ ${reviewer.name}: score=${result.score}, findings=${result.findings.length}`);
         return result;
       } catch (err) {
         log(`  Warning: reviewer ${reviewer.name} failed and will be skipped: ${(err as Error).message}`);
+        issues.push({
+          severity: 'warning',
+          code: 'audit-reviewer-failed',
+          message: `Reviewer "${reviewer.name}" failed and was skipped: ${(err as Error).message}`,
+          stage: 'run-reviewers',
+          reviewerId: reviewer.id,
+          reviewerName: reviewer.name,
+        });
         return null;
       }
     },
@@ -129,9 +162,11 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   const result: AuditResult = {
     command: 'audit',
     repoPath: path.resolve(repoPath),
+    status: issues.length > 0 ? 'degraded' : 'complete',
     overallScore,
     summary: buildAuditSummary(overallScore, totalFindings, criticalCount, activeReviewers.length),
     reviewerResults: finalReviewerResults,
+    issues,
     generatedAt: new Date().toISOString(),
   };
 

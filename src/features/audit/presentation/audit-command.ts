@@ -37,6 +37,9 @@ function printAuditSummary(result: AuditResult): void {
   console.log(chalk.white('  Overall Score: ') + chalk.bold(`${result.overallScore}/100`) + ` (${grade} - ${label})`);
   console.log(chalk.cyan('─'.repeat(50)));
   console.log();
+  const statusColor = result.status === 'complete' ? chalk.green : chalk.yellow;
+  console.log(chalk.gray('  Status: ') + statusColor(result.status.toUpperCase()));
+  console.log();
 
   for (const reviewerResult of result.reviewerResults) {
     const icon = reviewerResult.score >= 80 ? '✓' : reviewerResult.score >= 60 ? '⚠' : '✗';
@@ -71,6 +74,15 @@ function printAuditSummary(result: AuditResult): void {
 
   console.log();
   console.log(chalk.gray('  Summary: ') + chalk.white(result.summary));
+  if (result.issues.length > 0) {
+    console.log(chalk.yellow(`  Review issues (${result.issues.length}):`));
+    for (const issue of result.issues.slice(0, 5)) {
+      console.log(chalk.yellow(`    - ${issue.message}`));
+    }
+    if (result.issues.length > 5) {
+      console.log(chalk.gray(`    ... and ${result.issues.length - 5} more`));
+    }
+  }
   console.log(chalk.gray('  Report:  ') + chalk.white(reportPath));
   console.log();
 }

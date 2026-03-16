@@ -4,6 +4,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult } from '../interface';
+import { resolveOpenCodeInvocation } from './command';
 
 function extractJson(rawText: string): string {
   const jsonMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/) ||
@@ -14,7 +15,8 @@ function extractJson(rawText: string): string {
 export class OpenCodeCLIRuntime implements IRuntime {
   async isAvailable(): Promise<boolean> {
     try {
-      await execa('opencode', ['--version']);
+      const invocation = resolveOpenCodeInvocation();
+      await execa(invocation.command, [...invocation.args, '--version']);
       return true;
     } catch {
       return false;
@@ -42,7 +44,8 @@ export class OpenCodeCLIRuntime implements IRuntime {
     fs.writeFileSync(promptFile, fullPrompt, 'utf-8');
 
     try {
-      const result = await execa('opencode', ['run', '--no-interactive', promptFile], {
+      const invocation = resolveOpenCodeInvocation();
+      const result = await execa(invocation.command, [...invocation.args, 'run', '--no-interactive', promptFile], {
         cwd,
         env: { ...process.env },
         timeout: timeoutMs,
@@ -67,7 +70,8 @@ export class OpenCodeCLIRuntime implements IRuntime {
 
   async listModels(_provider: string, _apiKey: string, _apiBaseUrl?: string): Promise<string[]> {
     try {
-      const result = await execa('opencode', ['models', '--json']);
+      const invocation = resolveOpenCodeInvocation();
+      const result = await execa(invocation.command, [...invocation.args, 'models', '--json']);
       const models = JSON.parse(result.stdout);
       return Array.isArray(models) ? models : [];
     } catch {

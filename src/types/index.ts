@@ -4,6 +4,17 @@ export type Priority = "critical" | "high" | "medium" | "low" | "info";
 /** Which runtime implementation was used to execute an AI review */
 export type RuntimeType = "sdk" | "cli";
 
+export type ReviewRunStatus = "complete" | "degraded";
+
+export type ReviewIssue = {
+  severity: "warning" | "error";
+  code: string;
+  message: string;
+  stage?: string;
+  reviewerId?: string;
+  reviewerName?: string;
+};
+
 /** Represents a single finding from a code reviewer */
 export type Finding = {
   id: string;
@@ -56,9 +67,11 @@ export type ReviewerResult = {
 export type AuditResult = {
   command: "audit";
   repoPath: string;
+  status: ReviewRunStatus;
   overallScore: number;
   summary: string;
   reviewerResults: ReviewerResult[];
+  issues: ReviewIssue[];
   generatedAt: string;
 };
 
@@ -67,12 +80,14 @@ export type PRReviewResult = {
   command: "pr-review";
   baseRef: string;
   headRef: string;
+  status: ReviewRunStatus;
   selectedReviewers: {
     reviewerId: string;
     reason: string;
   }[];
   summary: string;
   findings: PRFinding[];
+  issues: ReviewIssue[];
   rejectedFindings?: number;
   verificationStats?: {
     rawFindings: number;

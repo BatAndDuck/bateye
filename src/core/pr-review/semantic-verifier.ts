@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { PRFinding } from '../../types/index';
+import { PRFinding, ReviewIssue } from '../../types/index';
 import { IRuntime } from '../runtime/interface';
 import { PRFindingVerification, prFindingVerificationSchema } from '../validation/schemas';
 import { buildPRFindingVerificationSystemPrompt, buildPRFindingVerificationUserMessage } from '../prompts/pr-review';
@@ -9,6 +9,7 @@ import { collectVerificationTrailFiles, RejectedFinding } from './verifier';
 export interface SemanticVerificationResult {
   verified: PRFinding[];
   rejected: RejectedFinding[];
+  issues: ReviewIssue[];
 }
 
 export interface SemanticVerifierOptions {
@@ -35,6 +36,7 @@ export async function verifyFindingsSemantically(
 ): Promise<SemanticVerificationResult> {
   const verified: PRFinding[] = [];
   const rejected: RejectedFinding[] = [];
+  const issues: ReviewIssue[] = [];
 
   for (const finding of findings) {
     const currentFileContent = readFileContent(options.repoPath, finding.filePath);
@@ -77,6 +79,14 @@ export async function verifyFindingsSemantically(
       }
     } catch (err) {
       options.log?.(`  ✗ Semantic verifier failed for "${finding.title}": ${(err as Error).message}`);
+      issues.push({
+        severity: 'warning',
+        code: 'pr-semantic-verifier-failed',
+        message: `Semantic verifier failed for "${finding.title}": ${(err as Error).message}`,
+        stage: 'semantic-verification',
+        reviewerId: finding.reviewerId,
+        reviewerName: finding.reviewerName,
+      });
       rejected.push({
         finding,
         reason: `Semantic verification failed: ${(err as Error).message}`,
@@ -84,5 +94,5 @@ export async function verifyFindingsSemantically(
     }
   }
 
-  return { verified, rejected };
+  return { verified, rejected, issues };
 }
