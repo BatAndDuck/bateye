@@ -209,7 +209,8 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
   assert.deepEqual(toolLog.files, ['src/service.ts']);
 
   const runtimeLog = JSON.parse(fs.readFileSync(logPath, 'utf-8'));
-  assert.equal(runtimeLog.filter(entry => entry.type === 'run').length, 2);
+  // Only 1 non-agentic run: the orchestrator. Semantic verification is skipped for high-confidence (≥0.85) findings.
+  assert.equal(runtimeLog.filter(entry => entry.type === 'run').length, 1);
   assert.equal(runtimeLog.filter(entry => entry.type === 'runAgenticReview').length, 2);
   assert.equal(runtimeLog.find(entry => entry.type === 'runAgenticReview').repoPath, repoPath);
 });

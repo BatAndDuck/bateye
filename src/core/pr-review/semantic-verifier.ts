@@ -23,7 +23,6 @@ export interface SemanticVerifierOptions {
   apiKey: string;
   transport: string;
   apiBaseUrl?: string;
-  lightModel?: string;
   log?: (message: string) => void;
 }
 
@@ -60,7 +59,7 @@ async function verifyBatch(
   tokensUsed?: TokenUsage;
   error?: string;
 }> {
-  const model = options.lightModel || options.model;
+  const model = options.model;
   // maxTokens scales with batch size: ~400 tokens per finding verdict
   const maxTokens = Math.max(1024, VERIFICATION_BATCH_SIZE * 512);
 
@@ -130,8 +129,7 @@ export async function verifyFindingsSemantically(
     batches.push(findingsWithContext.slice(i, i + VERIFICATION_BATCH_SIZE));
   }
 
-  const model = options.lightModel || options.model;
-  options.log?.(`  Semantic verification: ${findingsWithContext.length} finding(s) in ${batches.length} batch(es) using ${model}`);
+  options.log?.(`  Semantic verification: ${findingsWithContext.length} finding(s) in ${batches.length} batch(es) using ${options.model}`);
 
   // Run all batches in parallel
   const batchResults = await Promise.all(batches.map(batch => verifyBatch(batch, options)));

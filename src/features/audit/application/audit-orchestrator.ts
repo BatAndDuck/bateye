@@ -81,8 +81,6 @@ export interface SelectAuditReviewersOptions {
   index: RepoIndex;
   availableReviewers: Reviewer[];
   model: string;
-  /** Lighter model for this simple selection task. Falls back to model if not set. */
-  lightModel?: string;
   apiKey: string;
   transport?: string;
   apiBaseUrl?: string;
@@ -90,8 +88,7 @@ export interface SelectAuditReviewersOptions {
 
 export async function selectAuditReviewers(options: SelectAuditReviewersOptions): Promise<OrchestratorResult> {
   const { index, availableReviewers, apiKey, transport, apiBaseUrl } = options;
-  // Use lighter model for this simple reviewer-selection task if configured
-  const model = options.lightModel || options.model;
+  const model = options.model;
   const runtime = await getRuntime();
 
   const profile = buildRepoProfile(index);

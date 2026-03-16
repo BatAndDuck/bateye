@@ -102,8 +102,7 @@ jobs:
             mkdir -p .codeowl
             cat > .codeowl/config.json << 'EOF'
           {
-            "model": "anthropic/claude-sonnet-4-5",
-            "lightModel": "anthropic/claude-haiku-4-5-20251001"
+            "model": "anthropic/claude-sonnet-4-5"
           }
           EOF
           fi

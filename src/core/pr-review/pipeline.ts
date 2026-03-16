@@ -205,15 +205,13 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     apiKey,
     config.transport,
     config.apiBaseUrl,
-    config.lightModel !== config.model ? config.lightModel : undefined,
   );
   issues.push(...orchestratorResult.issues);
 
   const selectedReviewerIds = new Set(orchestratorResult.selectedReviewers.map(r => r.reviewerId));
   let selectedReviewers = reviewers.filter(r => selectedReviewerIds.has(r.id));
-  const orchestratorModel = config.lightModel !== config.model ? config.lightModel : config.model;
   if (orchestratorResult.tokensUsed) {
-    log(`[token-diag] Orchestrator (${orchestratorModel}): ${formatTokenSummary(orchestratorResult.tokensUsed)}`);
+    log(`[token-diag] Orchestrator (${config.model}): ${formatTokenSummary(orchestratorResult.tokensUsed)}`);
   }
 
   // Hard cap to prevent cost explosion (e.g. orchestrator fallback or misconfigured reviewers)
@@ -295,43 +293,62 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   const deduped = deduplicateFindings(deterministic.verified);
   log(`After dedup: ${deduped.length} findings (removed ${deterministic.verified.length - deduped.length} duplicates)`);
 
-  log('Running semantic verification...');
-  const semantic = await verifyFindingsSemantically(deduped, {
-    repoPath,
-    runtime,
-    model: config.model,
-    lightModel: config.lightModel !== config.model ? config.lightModel : undefined,
-    apiKey,
-    transport: config.transport,
-    apiBaseUrl: config.apiBaseUrl,
-    log,
-  });
-  issues.push(...semantic.issues);
-  log(`Semantic verification: accepted ${semantic.verified.length}, rejected ${semantic.rejected.length}`);
-  if (semantic.tokensUsed) {
-    log(`[token-diag] Semantic verification (${config.lightModel !== config.model ? config.lightModel : config.model}): ${formatTokenSummary(semantic.tokensUsed)}`);
+  // Cost optimization: skip semantic verification for high-confidence findings that
+  // already passed all deterministic gates. Only send lower-confidence findings to AI.
+  const HIGH_CONFIDENCE_THRESHOLD = 0.92;
+  const highConfidence = deduped.filter(f => f.confidence >= HIGH_CONFIDENCE_THRESHOLD);
+  const needsSemanticCheck = deduped.filter(f => f.confidence < HIGH_CONFIDENCE_THRESHOLD);
+  if (highConfidence.length > 0) {
+    log(`[token-diag] Skipping semantic verification for ${highConfidence.length} high-confidence (≥${HIGH_CONFIDENCE_THRESHOLD}) finding(s) — saves ~${Math.round(highConfidence.length * 800).toLocaleString()} tokens`);
   }
 
-  if (semantic.rejected.length > 0) {
-    for (const rejected of semantic.rejected.slice(0, 5)) {
-      log(`  ✗ Rejected (semantic): "${rejected.finding.title}" — ${rejected.reason}`);
+  let semanticVerified: PRFinding[] = [...highConfidence];
+  let semanticRejectedCount = 0;
+  let semanticTokens: TokenUsage | undefined;
+
+  if (needsSemanticCheck.length > 0) {
+    log(`Running semantic verification on ${needsSemanticCheck.length} finding(s)...`);
+    const semantic = await verifyFindingsSemantically(needsSemanticCheck, {
+      repoPath,
+      runtime,
+      model: config.model,
+      apiKey,
+      transport: config.transport,
+      apiBaseUrl: config.apiBaseUrl,
+      log,
+    });
+    issues.push(...semantic.issues);
+    semanticVerified = [...highConfidence, ...semantic.verified];
+    semanticRejectedCount = semantic.rejected.length;
+    semanticTokens = semantic.tokensUsed;
+    log(`Semantic verification: accepted ${semantic.verified.length}, rejected ${semantic.rejected.length}`);
+    if (semantic.tokensUsed) {
+      log(`[token-diag] Semantic verification (${config.model}): ${formatTokenSummary(semantic.tokensUsed)}`);
     }
-    if (semantic.rejected.length > 5) {
-      log(`  ... and ${semantic.rejected.length - 5} more semantic rejections`);
+
+    if (semantic.rejected.length > 0) {
+      for (const rejected of semantic.rejected.slice(0, 5)) {
+        log(`  ✗ Rejected (semantic): "${rejected.finding.title}" — ${rejected.reason}`);
+      }
+      if (semantic.rejected.length > 5) {
+        log(`  ... and ${semantic.rejected.length - 5} more semantic rejections`);
+      }
     }
+  } else {
+    log('Skipping semantic verification — all findings are high-confidence.');
   }
 
-  let finalFindings = semantic.verified;
+  let finalFindings = semanticVerified;
   if (conversation) {
     log('Filtering already-posted findings...');
-    finalFindings = filterAlreadyPosted(semantic.verified, conversation);
+    finalFindings = filterAlreadyPosted(semanticVerified, conversation);
     log(`After filter: ${finalFindings.length} new findings to post`);
   }
 
   const verificationStats = {
     rawFindings: allFindings.length,
     deterministicRejected: deterministic.rejected.length,
-    semanticRejected: semantic.rejected.length,
+    semanticRejected: semanticRejectedCount,
     finalFindings: finalFindings.length,
   };
 
@@ -346,15 +363,15 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     grandTotal = addTokens(grandTotal, reviewerTokenTotal);
     hasGrandTotalData = true;
   }
-  if (semantic.tokensUsed) {
-    grandTotal = addTokens(grandTotal, semantic.tokensUsed);
+  if (semanticTokens) {
+    grandTotal = addTokens(grandTotal, semanticTokens);
     hasGrandTotalData = true;
   }
   if (hasGrandTotalData) {
     log(`[token-diag] ═══ GRAND TOTAL: ${formatTokenSummary(grandTotal)} ═══`);
     log(`[token-diag]   orchestrator: ${orchestratorResult.tokensUsed ? formatTokenSummary(orchestratorResult.tokensUsed) : 'n/a'}`);
     log(`[token-diag]   reviewers (${selectedReviewers.length}x): ${hasTokenData ? formatTokenSummary(reviewerTokenTotal) : 'n/a'}`);
-    log(`[token-diag]   semantic verification: ${semantic.tokensUsed ? formatTokenSummary(semantic.tokensUsed) : 'n/a'}`);
+    log(`[token-diag]   semantic verification: ${semanticTokens ? formatTokenSummary(semanticTokens) : 'skipped (high-confidence)'}`);
   }
 
   // Degrade on error-severity issues, non-transient warnings (tool failures etc.),

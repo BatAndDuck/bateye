@@ -90,7 +90,6 @@ export async function selectReviewers(
   apiKey: string,
   transport?: string,
   apiBaseUrl?: string,
-  lightModel?: string,
 ): Promise<ReviewerSelectionResult> {
   const runtime = await getRuntime();
 
@@ -103,12 +102,10 @@ export async function selectReviewers(
 
   const systemPrompt = buildOrchestratorSystemPrompt(reviewerDescriptions);
   const userMessage = buildOrchestratorUserMessage(changedFiles, diff, commits);
-  // Orchestrator is a simple JSON selection task — use the lighter model if configured
-  const orchestratorModel = lightModel || model;
 
   try {
     const result = await runtime.run<OrchestratorResult>(
-      { systemPrompt, userMessage, model: orchestratorModel, apiKey, transport, apiBaseUrl, maxTokens: 2048, temperature: 0 },
+      { systemPrompt, userMessage, model, apiKey, transport, apiBaseUrl, maxTokens: 2048, temperature: 0 },
       orchestratorResultSchema
     );
     return {

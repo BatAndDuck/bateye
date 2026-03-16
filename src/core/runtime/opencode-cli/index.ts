@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, TokenUsage, resolveModelTarget } from '../interface';
 import { buildOpenCodeEnvironment, resolveOpenCodeInvocation } from './command';
+import { buildStructureRepairPrompt, formatZodErrors, tryParseAndValidate } from '../structure-repair';
 
 type OpenCodeServerHandle = {
   url: string;
@@ -552,6 +553,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
       'x-opencode-directory': cwd,
     };
     let lastError: unknown;
+    let lastRawJson: string | null = null;
     // Estimate input tokens from prompt character lengths (1 token ≈ 4 chars)
     const estimatedInputTokens = Math.ceil((options.systemPrompt.length + options.userMessage.length) / 4);
     const callId = `${target.transport}/${target.modelId}`;
@@ -568,6 +570,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
         console.error(`[opencode] Retry attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS} for ${callId}: previous error was ${summarizeSdkError(lastError)}`);
       }
 
+      let serializedResponse = '';
       try {
         const session = await this.request<OpenCodeSession>(`${server.url}/session`, {
           method: 'POST',
@@ -607,7 +610,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
           );
         }
 
-        const serializedResponse = serializeOpenCodeResponse(response);
+        serializedResponse = serializeOpenCodeResponse(response);
 
         if (!serializedResponse) {
           throw new Error('OpenCode returned no structured text response for the requested JSON payload.');
@@ -640,13 +643,18 @@ export class OpenCodeCLIRuntime implements IRuntime {
         const durationMs = Date.now() - start;
         const willRetry = shouldRetryStructuredOutput(err, attempt);
 
+        // Track the last raw JSON for AI repair
+        if ((err instanceof z.ZodError || err instanceof SyntaxError) && serializedResponse) {
+          lastRawJson = serializedResponse;
+        }
+
         console.error(`[opencode] ✗ ${callId} failed after ${(durationMs / 1000).toFixed(1)}s (attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}, retry=${willRetry}): ${summarizeSdkError(err)}`);
         if (err instanceof z.ZodError) {
           console.error(`[opencode]   Validation errors: ${formatValidationFeedback(err)}`);
         }
 
         if (!willRetry) {
-          throw new Error(`OpenCode server request failed: ${summarizeSdkError(err)}`, { cause: err });
+          break; // Fall through to AI repair attempt
         }
       } finally {
         if (sessionID) {
@@ -657,6 +665,78 @@ export class OpenCodeCLIRuntime implements IRuntime {
             }, 10_000);
           } catch {
             // Best-effort cleanup; stale sessions should not fail the review run.
+          }
+        }
+      }
+    }
+
+    // AI structure repair: use a targeted call to fix malformed JSON
+    if (lastRawJson) {
+      console.error(`[opencode] Attempting AI structure repair for ${callId}...`);
+      let repairSessionID: string | undefined;
+      try {
+        const repair = buildStructureRepairPrompt(lastRawJson, formatZodErrors(lastError));
+        const repairSession = await this.request<OpenCodeSession>(`${server.url}/session`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ title: 'CodeOwl Structure Repair' }),
+        }, 30_000);
+        repairSessionID = repairSession.id;
+
+        const repairResponse = await this.request<OpenCodeMessageResponse>(`${server.url}/session/${repairSessionID}/message`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            model: {
+              providerID: target.transport,
+              modelID: target.modelId,
+            },
+            format: {
+              type: 'json_schema',
+              name: 'CodeOwlRepair',
+              schema: responseSchema,
+              retryCount: 0,
+            },
+            system: repair.systemPrompt,
+            parts: [{ type: 'text', text: repair.userMessage }],
+          }),
+        }, 60_000);
+
+        const repairSerialized = serializeOpenCodeResponse(repairResponse);
+        if (repairSerialized) {
+          const repairParsed = coerceReviewerPayload(JSON.parse(extractJson(repairSerialized)));
+          const repairNormalized = repairReviewerPayload(repairParsed);
+          const repairResult = tryParseAndValidate(JSON.stringify(repairNormalized), schema);
+          if ('data' in repairResult) {
+            const durationMs = Date.now() - start;
+            const estimatedOutputTokens = Math.ceil(repairSerialized.length / 4);
+            console.error(`[opencode] ✓ AI repair succeeded for ${callId} in ${(durationMs / 1000).toFixed(1)}s`);
+            return {
+              data: repairResult.data,
+              model: options.model,
+              runtime: 'cli',
+              durationMs,
+              rawResponse: repairSerialized,
+              tokensUsed: {
+                inputTokens: Math.ceil((repair.systemPrompt.length + repair.userMessage.length) / 4),
+                outputTokens: estimatedOutputTokens,
+                estimated: true,
+              },
+            };
+          }
+          console.error(`[opencode] ✗ AI repair also failed validation: ${('error' in repairResult ? repairResult.error.message : 'unknown').slice(0, 200)}`);
+        }
+      } catch (repairErr) {
+        console.error(`[opencode] ✗ AI repair call failed: ${(repairErr as Error).message.slice(0, 200)}`);
+      } finally {
+        if (repairSessionID) {
+          try {
+            await this.request<boolean>(`${server.url}/session/${repairSessionID}`, {
+              method: 'DELETE',
+              headers,
+            }, 10_000);
+          } catch {
+            // Best-effort cleanup
           }
         }
       }
