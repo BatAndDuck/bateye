@@ -682,7 +682,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
         (err instanceof Error && (err.message.includes('aborted') || err.name === 'AbortError'))
       ) {
         const seconds = Math.round(timeoutMs / 1000);
-        throw new Error(`Timed out after ${seconds}s`);
+        throw new Error(`Timed out after ${seconds}s`, { cause: err });
       }
       throw err;
     } finally {
