@@ -152,6 +152,7 @@ type RelevantFileSelectionResult = {
 
 type UnitAnalysisResult = {
   service: ServiceDesignDoc;
+  unitDirPath: string;
   seedFiles: string[];
   candidateFiles: string[];
   selectedFiles: string[];
@@ -610,6 +611,7 @@ async function analyzeUnit(
 
   return {
     service,
+    unitDirPath: unit.dirPath,
     seedFiles: selection.seedFiles.map(file => file.relativePath),
     candidateFiles: selection.candidateFiles.map(file => file.relativePath),
     selectedFiles: selection.selectedFiles.map(file => file.relativePath),
@@ -702,9 +704,27 @@ function reconcileServiceConnections(
   const serviceById = new Map(services.map(service => [service.serviceId, service]));
   const serviceIdByFilePath = new Map<string, string>();
 
+  // Build a prefix list sorted longest-first so nested dirs match before parents.
+  const unitPrefixes = unitAnalyses
+    .filter(a => a.unitDirPath && a.unitDirPath !== '.')
+    .map(a => ({ serviceId: a.service.serviceId, prefix: normalizePath(a.unitDirPath) + '/' }))
+    .sort((a, b) => b.prefix.length - a.prefix.length);
+
+  // First pass: assign every file in the repo index to its home service by directory prefix.
+  for (const filePath of filesByPath.keys()) {
+    const normalizedFilePath = normalizePath(filePath) + '/';
+    const match = unitPrefixes.find(p => normalizedFilePath.startsWith(p.prefix));
+    if (match) {
+      serviceIdByFilePath.set(filePath, match.serviceId);
+    }
+  }
+
+  // Second pass: fill in any files not yet assigned (root-level units or unmatched files).
   for (const analysis of unitAnalyses) {
     for (const filePath of analysis.selectedFiles) {
-      serviceIdByFilePath.set(filePath, analysis.service.serviceId);
+      if (!serviceIdByFilePath.has(filePath)) {
+        serviceIdByFilePath.set(filePath, analysis.service.serviceId);
+      }
     }
   }
 
