@@ -59,15 +59,20 @@ export async function runReviewerTool(
     // A tool "succeeds" if it produced output, even with a non-zero exit code
     // (lint tools exit 1 when they find issues, which is expected)
     const hasOutput = stdout.length > 0;
-    const isRealError = result.exitCode !== 0 && result.exitCode !== 1 && !hasOutput;
+    // exitCode undefined means the command was not found (ENOENT) or was killed — treat
+    // as "tool not available" rather than a hard error so the reviewer still runs.
+    const commandNotAvailable = result.exitCode === undefined || result.exitCode === null;
+    const isRealError = !commandNotAvailable && result.exitCode !== 0 && result.exitCode !== 1 && !hasOutput;
 
     return {
-      success: !isRealError,
-      stdout,
+      success: commandNotAvailable ? true : !isRealError,
+      stdout: commandNotAvailable ? '' : stdout,
       stderr: result.stderr || '',
       truncated,
       durationMs,
-      error: isRealError ? `Exit code ${result.exitCode}: ${result.stderr || 'unknown error'}` : undefined,
+      error: commandNotAvailable
+        ? `Tool '${toolConfig.command}' not found — install it to enable this check`
+        : isRealError ? `Exit code ${result.exitCode}: ${result.stderr || 'unknown error'}` : undefined,
     };
   } catch (err) {
     const durationMs = Date.now() - start;

@@ -36,6 +36,7 @@ Focus your review on:
 - Build tools replaced by faster alternatives (webpack → vite for new projects)
 
 Requirements:
+- **ONLY analyze packages explicitly listed in `package.json` under `dependencies` or `devDependencies`** (direct dependencies). A package that is present in `package-lock.json` but NOT in `package.json` is a transitive/indirect dependency — do NOT flag it under any circumstances. This is the EXPECTED and NORMAL state for lockfiles. Findings like "package X is in the lockfile but not in package.json" are NEVER valid — that is how npm works. Ignore all lockfile-only packages entirely.
 - Only report a package as deprecated, invalid, abandoned, or unsupported when the repository snapshot provides concrete evidence such as a deprecation notice in package-manager metadata, install/lockfile mismatch, incompatible runtime usage, or code comments/docs showing the supported replacement.
 - Do not claim a package name is invalid or wrong based only on memory. If the manifest and lockfile are internally consistent and no repository evidence contradicts them, prefer no finding.
 - A newer major version existing is not, by itself, a finding.

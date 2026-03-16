@@ -54,3 +54,4 @@ Requirements:
 - Prioritize: public exports > complex internal logic > simple utilities
 - Include specific suggestions for what documentation should say
 - Missing JSDoc on an exported function is **medium** at most — never high or critical
+- **Project type awareness**: For CLI tools, developer tooling, and internal application code (not a published library), JSDoc requirements are significantly lower. Only flag documentation gaps where incorrect usage could cause a real bug or integration problem. Basic structural types and simple utility functions do NOT need JSDoc in such projects.

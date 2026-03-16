@@ -56,3 +56,5 @@ Requirements:
 - Prioritize issues by actual impact on maintainability
 - Include specific suggestions for refactoring
 - A large-but-working function is **medium** at most unless it is actively causing bugs
+- Do NOT flag magic numbers/strings that already have JSDoc comments or named constants with explanatory text — check for existing documentation before reporting
+- Do not duplicate findings from other reviewers (e.g., if a finding is clearly about naming conventions or dead code, skip it — other reviewers own those categories)
