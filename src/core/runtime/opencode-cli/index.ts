@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import { createServer, AddressInfo } from 'net';
 import { z } from 'zod';
+import { zodToJsonSchema } from 'zod-to-json-schema';
 import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, resolveModelTarget } from '../interface';
 import { buildOpenCodeEnvironment, resolveOpenCodeInvocation } from './command';
 
@@ -11,18 +12,33 @@ type OpenCodeServerHandle = {
   close: () => void;
 };
 
+const MAX_STRUCTURED_OUTPUT_ATTEMPTS = 3;
+const OPEN_CODE_STRUCTURED_OUTPUT_RETRY_COUNT = 4;
+
 type OpenCodeSession = {
   id: string;
 };
 
 type OpenCodeMessagePart =
   | { type: 'text'; text: string }
+  | {
+      type: 'tool';
+      tool?: string;
+      state?: {
+        input?: unknown;
+        metadata?: {
+          valid?: boolean;
+        };
+      };
+    }
   | { type: string; [key: string]: unknown };
 
 type OpenCodeMessageResponse = {
   info: {
     structured?: unknown;
+    structured_output?: unknown;
     error?: {
+      message?: string;
       data?: {
         message?: string;
       };
@@ -62,6 +78,282 @@ function summarizeSdkError(err: unknown): string {
   }
 
   return String(err);
+}
+
+function formatValidationFeedback(err: unknown): string {
+  if (err instanceof z.ZodError) {
+    return err.issues
+      .slice(0, 8)
+      .map(issue => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+      .join('; ');
+  }
+
+  if (err instanceof Error) {
+    return err.message;
+  }
+
+  return String(err);
+}
+
+function shouldRetryStructuredOutput(err: unknown, attempt: number): boolean {
+  if (attempt >= MAX_STRUCTURED_OUTPUT_ATTEMPTS - 1) {
+    return false;
+  }
+
+  return err instanceof z.ZodError
+    || err instanceof SyntaxError
+    || (err instanceof Error && /no structured text response/i.test(err.message));
+}
+
+export function buildStructuredOutputSchema(schema: z.ZodTypeAny): Record<string, unknown> {
+  const buildJsonSchema = zodToJsonSchema as unknown as (
+    input: z.ZodTypeAny,
+    options: Record<string, unknown>,
+  ) => Record<string, unknown>;
+
+  const jsonSchema = buildJsonSchema(schema, {
+    $refStrategy: 'none',
+    target: 'jsonSchema7',
+  });
+
+  delete jsonSchema.$schema;
+  delete jsonSchema.definitions;
+
+  return jsonSchema;
+}
+
+export function extractStructuredOutput(response: OpenCodeMessageResponse): unknown {
+  if (response.info.structured_output !== undefined) {
+    return response.info.structured_output;
+  }
+
+  if (response.info.structured !== undefined) {
+    return response.info.structured;
+  }
+
+  for (const part of response.parts) {
+    if (part.type !== 'tool' || part.tool !== 'StructuredOutput') {
+      continue;
+    }
+
+    const state = part.state as {
+      input?: unknown;
+      metadata?: {
+        valid?: boolean;
+      };
+    } | undefined;
+
+    if (state?.metadata?.valid && state.input !== undefined) {
+      return state.input;
+    }
+  }
+
+  return undefined;
+}
+
+export function coerceReviewerPayload(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(coerceReviewerPayload);
+  }
+
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+  const coerced: Record<string, unknown> = {};
+
+  for (const [key, raw] of Object.entries(record)) {
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+
+      if (['score', 'confidence', 'startLine', 'endLine', 'startColumn', 'endColumn'].includes(key)) {
+        const numeric = Number(trimmed);
+        if (!Number.isNaN(numeric)) {
+          coerced[key] = numeric;
+          continue;
+        }
+      }
+
+      if (
+        ['findings', 'evidence', 'tags', 'verificationTrail', 'searchedFor'].includes(key)
+        && (trimmed.startsWith('[') || trimmed.startsWith('{'))
+      ) {
+        try {
+          coerced[key] = coerceReviewerPayload(JSON.parse(trimmed));
+          continue;
+        } catch {
+          // Fall through to keep the original string.
+        }
+      }
+    }
+
+    coerced[key] = coerceReviewerPayload(raw);
+  }
+
+  return coerced;
+}
+
+function asTrimmedString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function asStringArray(value: unknown): string[] | undefined {
+  if (Array.isArray(value)) {
+    const items = value
+      .map(item => asTrimmedString(item))
+      .filter((item): item is string => Boolean(item));
+
+    return items.length > 0 ? items : undefined;
+  }
+
+  const single = asTrimmedString(value);
+  return single ? [single] : undefined;
+}
+
+function asNumericValue(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  const stringValue = asTrimmedString(value);
+  if (!stringValue) {
+    return undefined;
+  }
+
+  const numeric = Number(stringValue);
+  return Number.isFinite(numeric) ? numeric : undefined;
+}
+
+function mapPriorityAlias(value: unknown): string | undefined {
+  const normalized = asTrimmedString(value)?.toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+
+  switch (normalized) {
+    case 'critical':
+    case 'high':
+    case 'medium':
+    case 'low':
+    case 'info':
+      return normalized;
+    case 'severe':
+    case 'blocker':
+      return 'critical';
+    case 'warning':
+      return 'medium';
+    default:
+      return undefined;
+  }
+}
+
+function deriveTitleFromDescription(description: string | undefined): string | undefined {
+  if (!description) {
+    return undefined;
+  }
+
+  const title = description
+    .split(/[\r\n.!?]/, 1)[0]
+    .trim();
+
+  return title ? title.slice(0, 100) : undefined;
+}
+
+function repairReviewerFindingShape(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+  const description = asTrimmedString(record.description)
+    || asTrimmedString(record.details)
+    || asTrimmedString(record.explanation)
+    || asTrimmedString(record.reason);
+  const title = asTrimmedString(record.title)
+    || asTrimmedString(record.name)
+    || asTrimmedString(record.issue)
+    || asTrimmedString(record.headline)
+    || deriveTitleFromDescription(description);
+  const evidence = asStringArray(record.evidence)
+    || asStringArray(record.examples)
+    || asStringArray(record.proof)
+    || asStringArray(record.references);
+  const recommendation = asTrimmedString(record.recommendation)
+    || asTrimmedString(record.fix)
+    || asTrimmedString(record.suggestion)
+    || asTrimmedString(record.remediation)
+    || asTrimmedString(record.action);
+  const filePath = asTrimmedString(record.filePath)
+    || asTrimmedString(record.path)
+    || asTrimmedString(record.file)
+    || asTrimmedString(record.filename);
+  const rawStartLine = asNumericValue(record.startLine)
+    || asNumericValue(record.line)
+    || asNumericValue(record.lineNumber);
+  const rawEndLine = asNumericValue(record.endLine) || rawStartLine;
+  const startLine = rawStartLine !== undefined && rawEndLine !== undefined
+    ? Math.min(rawStartLine, rawEndLine)
+    : rawStartLine;
+  const endLine = rawStartLine !== undefined && rawEndLine !== undefined
+    ? Math.max(rawStartLine, rawEndLine)
+    : rawEndLine;
+  const rawStartColumn = asNumericValue(record.startColumn)
+    || asNumericValue(record.column)
+    || asNumericValue(record.columnNumber);
+  const rawEndColumn = asNumericValue(record.endColumn) || rawStartColumn;
+  const startColumn = rawStartColumn !== undefined && rawEndColumn !== undefined
+    ? Math.min(rawStartColumn, rawEndColumn)
+    : rawStartColumn;
+  const endColumn = rawStartColumn !== undefined && rawEndColumn !== undefined
+    ? Math.max(rawStartColumn, rawEndColumn)
+    : rawEndColumn;
+  const confidence = asNumericValue(record.confidence) || asNumericValue(record.certainty);
+  const priority = mapPriorityAlias(record.priority) || mapPriorityAlias(record.severity);
+
+  return {
+    ...record,
+    ...(title ? { title } : {}),
+    ...(description ? { description } : {}),
+    ...(priority ? { priority } : {}),
+    ...(confidence !== undefined ? { confidence } : {}),
+    ...(filePath ? { filePath } : {}),
+    ...(startLine !== undefined ? { startLine } : {}),
+    ...(endLine !== undefined ? { endLine } : {}),
+    ...(startColumn !== undefined ? { startColumn } : {}),
+    ...(endColumn !== undefined ? { endColumn } : {}),
+    ...(evidence ? { evidence } : {}),
+    ...(recommendation ? { recommendation } : {}),
+  };
+}
+
+export function repairReviewerPayload(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.findings)) {
+    return value;
+  }
+
+  return {
+    ...record,
+    findings: record.findings.map(repairReviewerFindingShape),
+  };
+}
+
+export function serializeOpenCodeResponse(response: OpenCodeMessageResponse): string {
+  const structuredOutput = extractStructuredOutput(response);
+  if (structuredOutput !== undefined) {
+    return JSON.stringify(structuredOutput);
+  }
+
+  return response.parts
+    .filter((part): part is { type: 'text'; text: string } => part.type === 'text' && typeof part.text === 'string')
+    .map(part => part.text)
+    .join('\n')
+    .trim();
 }
 
 function buildEnvSignature(env: NodeJS.ProcessEnv): string {
@@ -254,83 +546,89 @@ export class OpenCodeCLIRuntime implements IRuntime {
     const start = Date.now();
     const server = await getServer(options);
     const target = resolveModelTarget(options.model, options.transport);
-    let sessionID: string | undefined;
+    const responseSchema = buildStructuredOutputSchema(schema);
     const headers = {
       'content-type': 'application/json',
       'x-opencode-directory': cwd,
     };
+    let lastError: unknown;
 
-    try {
-      const session = await this.request<OpenCodeSession>(`${server.url}/session`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ title: 'CodeOwl Review Session' }),
-      }, 30_000);
-      sessionID = session.id;
+    for (let attempt = 0; attempt < MAX_STRUCTURED_OUTPUT_ATTEMPTS; attempt++) {
+      let sessionID: string | undefined;
+      const validationRetryNote = attempt === 0
+        ? ''
+        : `\n\nPREVIOUS ATTEMPT FAILED STRUCTURED OUTPUT VALIDATION. Return ONLY JSON matching the requested schema with all required fields and correct value types. Validation issue: ${formatValidationFeedback(lastError)}`;
 
-      const response = await this.request<OpenCodeMessageResponse>(`${server.url}/session/${sessionID}/message`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model: {
-            providerID: target.transport,
-            modelID: target.modelId,
-          },
-          format: {
-            type: 'json_schema',
-            name: 'CodeOwlResponse',
-            schema: {
-              type: 'object',
-              additionalProperties: true,
+      try {
+        const session = await this.request<OpenCodeSession>(`${server.url}/session`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ title: 'CodeOwl Review Session' }),
+        }, 30_000);
+        sessionID = session.id;
+
+        const response = await this.request<OpenCodeMessageResponse>(`${server.url}/session/${sessionID}/message`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            model: {
+              providerID: target.transport,
+              modelID: target.modelId,
             },
-          },
-          system: options.systemPrompt,
-          parts: [{ type: 'text', text: options.userMessage }],
-        }),
-      }, timeoutMs);
+            format: {
+              type: 'json_schema',
+              name: 'CodeOwlResponse',
+              schema: responseSchema,
+              retryCount: OPEN_CODE_STRUCTURED_OUTPUT_RETRY_COUNT,
+            },
+            system: options.systemPrompt + validationRetryNote,
+            parts: [{ type: 'text', text: options.userMessage }],
+          }),
+        }, timeoutMs);
 
-      const providerError = response.info.error?.data?.message;
-      if (providerError) {
-        throw new Error(providerError);
-      }
+        const providerError = response.info.error?.data?.message || response.info.error?.message;
+        if (providerError) {
+          throw new Error(providerError);
+        }
 
-      const rawText = response.parts
-        .filter((part): part is { type: 'text'; text: string } => part.type === 'text' && typeof part.text === 'string')
-        .map(part => part.text)
-        .join('\n')
-        .trim();
+        const serializedResponse = serializeOpenCodeResponse(response);
 
-      const fallbackStructured = response.info.structured;
-      const serializedResponse = rawText || (fallbackStructured !== undefined ? JSON.stringify(fallbackStructured) : '');
+        if (!serializedResponse) {
+          throw new Error('OpenCode returned no structured text response for the requested JSON payload.');
+        }
 
-      if (!serializedResponse) {
-        throw new Error('OpenCode returned no structured text response for the requested JSON payload.');
-      }
+        const parsed = coerceReviewerPayload(JSON.parse(extractJson(serializedResponse)));
+        const normalized = repairReviewerPayload(parsed);
+        const validated = schema.parse(normalized);
 
-      const parsed = JSON.parse(extractJson(serializedResponse));
-      const validated = schema.parse(parsed);
+        return {
+          data: validated,
+          model: options.model,
+          runtime: 'cli',
+          durationMs: Date.now() - start,
+          rawResponse: serializedResponse,
+        };
+      } catch (err) {
+        lastError = err;
 
-      return {
-        data: validated,
-        model: options.model,
-        runtime: 'cli',
-        durationMs: Date.now() - start,
-        rawResponse: serializedResponse,
-      };
-    } catch (err) {
-      throw new Error(`OpenCode server request failed: ${summarizeSdkError(err)}`, { cause: err });
-    } finally {
-      if (sessionID) {
-        try {
-          await this.request<boolean>(`${server.url}/session/${sessionID}`, {
-            method: 'DELETE',
-            headers,
-          }, 10_000);
-        } catch {
-          // Best-effort cleanup; stale sessions should not fail the review run.
+        if (!shouldRetryStructuredOutput(err, attempt)) {
+          throw new Error(`OpenCode server request failed: ${summarizeSdkError(err)}`, { cause: err });
+        }
+      } finally {
+        if (sessionID) {
+          try {
+            await this.request<boolean>(`${server.url}/session/${sessionID}`, {
+              method: 'DELETE',
+              headers,
+            }, 10_000);
+          } catch {
+            // Best-effort cleanup; stale sessions should not fail the review run.
+          }
         }
       }
     }
+
+    throw new Error(`OpenCode server request failed: ${summarizeSdkError(lastError)}`, { cause: lastError });
   }
 
   async listModels(_provider: string, _apiKey: string, _apiBaseUrl?: string): Promise<string[]> {
