@@ -16,6 +16,8 @@ export async function runPRReviewCommand(repoPath: string, options: PRReviewComm
   console.log(chalk.cyan('\n🦉 CodeOwl PR Review\n'));
 
   const spinner = ora({ text: 'Starting PR review...', color: 'cyan' }).start();
+  let lastMessage = 'Starting PR review...';
+  const noticePattern = /^\s*(Warning:|⚠|✗)/;
 
   let result: PRReviewResult;
   try {
@@ -27,7 +29,16 @@ export async function runPRReviewCommand(repoPath: string, options: PRReviewComm
       githubToken: options.token,
       prNumber: options.prNumber ? parseInt(options.prNumber, 10) : undefined,
       dryRun: options.dryRun,
-      onProgress: msg => { spinner.text = msg; },
+      onProgress: msg => {
+        if (noticePattern.test(msg)) {
+          spinner.stopAndPersist({ symbol: chalk.yellow('!'), text: msg.trim() });
+          spinner.start(lastMessage);
+          return;
+        }
+
+        lastMessage = msg;
+        spinner.text = msg;
+      },
     });
   } catch (err) {
     spinner.fail(chalk.red(`PR review failed: ${(err as Error).message}`));

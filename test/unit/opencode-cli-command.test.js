@@ -5,6 +5,10 @@ const os = require('node:os');
 const path = require('node:path');
 
 const {
+  MAX_INLINE_OPEN_CODE_PROMPT_CHARS,
+  OPEN_CODE_PROMPT_ATTACHMENT_MESSAGE,
+  buildOpenCodeEnvironment,
+  buildOpenCodeRunArguments,
   resolveBundledOpenCodeInvocation,
   resolveOpenCodeInvocation,
 } = require('../../dist/core/runtime/opencode-cli/command');
@@ -47,4 +51,69 @@ test('resolveOpenCodeInvocation prefers the bundled opencode-ai dependency', () 
   assert.equal(invocation.command, process.execPath);
   assert.match(invocation.args[0], /opencode-ai[\\/]+bin[\\/]+opencode$/);
   assert.equal(fs.existsSync(invocation.args[0]), true);
+});
+
+test('buildOpenCodeRunArguments uses supported file-attachment syntax with a message separator', () => {
+  const args = buildOpenCodeRunArguments(
+    { command: process.execPath, args: ['opencode'], source: 'bundled' },
+    { model: 'anthropic/claude-sonnet-4-5' },
+    'x'.repeat(MAX_INLINE_OPEN_CODE_PROMPT_CHARS + 1),
+    'C:\\temp\\prompt.txt',
+  );
+
+  assert.deepEqual(args, [
+    'opencode',
+    'run',
+    '--model',
+    'anthropic/claude-sonnet-4-5',
+    '--file',
+    'C:\\temp\\prompt.txt',
+    '--',
+    OPEN_CODE_PROMPT_ATTACHMENT_MESSAGE,
+  ]);
+  assert.equal(args.includes('--no-interactive'), false);
+});
+
+test('buildOpenCodeRunArguments inlines smaller prompts directly', () => {
+  const prompt = 'Return exactly {"ok":true}.';
+  const args = buildOpenCodeRunArguments(
+    { command: process.execPath, args: ['opencode'], source: 'bundled' },
+    { model: 'anthropic/claude-sonnet-4-5' },
+    prompt,
+    'C:\\temp\\prompt.txt',
+  );
+
+  assert.deepEqual(args, [
+    'opencode',
+    'run',
+    '--model',
+    'anthropic/claude-sonnet-4-5',
+    '--',
+    prompt,
+  ]);
+});
+
+test('buildOpenCodeEnvironment maps CodeOwl credentials onto OpenCode-compatible env vars', () => {
+  const env = buildOpenCodeEnvironment({}, {
+    apiKey: 'secret-key',
+    model: 'anthropic/claude-sonnet-4-5',
+    transport: 'auto',
+    apiBaseUrl: undefined,
+  });
+
+  assert.equal(env.ANTHROPIC_API_KEY, 'secret-key');
+  assert.equal(env.OPENAI_API_KEY, undefined);
+});
+
+test('buildOpenCodeEnvironment uses OpenAI-compatible gateway env for vercel transport', () => {
+  const env = buildOpenCodeEnvironment({}, {
+    apiKey: 'gateway-key',
+    model: 'anthropic/claude-sonnet-4-5',
+    transport: 'vercel',
+    apiBaseUrl: undefined,
+  });
+
+  assert.equal(env.AI_GATEWAY_API_KEY, 'gateway-key');
+  assert.equal(env.OPENAI_API_KEY, 'gateway-key');
+  assert.equal(env.OPENAI_BASE_URL, 'https://ai-gateway.vercel.sh/v1');
 });

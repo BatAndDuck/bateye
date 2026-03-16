@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { AuditResult, Finding, ReviewIssue, Reviewer, ReviewerResult } from '../../../types/index';
-import { buildRepoIndex, formatFilesForContext, scopeFilesForReviewer } from '../../../core/indexing/index';
+import { buildRepoIndex, scopeFilesForReviewer } from '../../../core/indexing/index';
 import { reviewerAnalysisSchema, ReviewerAnalysis } from '../../../core/validation/schemas';
 import { buildAuditSystemPrompt, buildAuditUserMessage } from '../../../core/prompts/audit';
 import { computeOverallScore } from '../../../core/scoring/normalizer';
@@ -11,7 +11,6 @@ import {
   AUDIT_OUTPUT_FILE,
   OUTPUT_DIR,
   MAX_FILES_FOR_REVIEWER_CONTEXT,
-  MAX_CHARS_PER_REVIEWER_FILE,
   MAX_CONCURRENT_AUDIT_REVIEWERS,
   MAX_AUDIT_REVIEWER_TOKENS,
   MAX_AUDIT_REVIEWER_TIMEOUT_MS,
@@ -215,7 +214,6 @@ async function runSingleReviewer(
 ): Promise<ReviewerResult> {
   const start = Date.now();
   const scopedFiles = scopeFilesForReviewer(index, reviewer.scopeHints);
-  const filesContext = formatFilesForContext(scopedFiles, MAX_FILES_FOR_REVIEWER_CONTEXT, MAX_CHARS_PER_REVIEWER_FILE);
   const model = reviewer.model || config.model;
   const seedFiles = scopedFiles.slice(0, MAX_FILES_FOR_REVIEWER_CONTEXT).map(file => file.relativePath);
 
@@ -244,7 +242,7 @@ async function runSingleReviewer(
   }
 
   const systemPrompt = buildAuditSystemPrompt(reviewer.instructions, reviewer.id, reviewer.name);
-  const userMessage = buildAuditUserMessage(filesContext, index.totalFiles, scopedFiles.length, toolContext);
+  const userMessage = buildAuditUserMessage(seedFiles, index.totalFiles, scopedFiles.length, toolContext);
 
   let analysis: ReviewerAnalysis;
   let runtimeType: import('../../../types/index').RuntimeType;

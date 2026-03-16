@@ -63,20 +63,24 @@ Rules:
 }
 
 export function buildAuditUserMessage(
-  filesContext: string,
+  seedFiles: string[],
   totalFiles: number,
   scopedFiles: number,
   additionalContext?: string,
 ): string {
+  const seedList = seedFiles.length > 0
+    ? seedFiles.map(filePath => `- ${filePath}`).join('\n')
+    : '- No seed files were selected';
+
   return `## Repository Context
 Total files in repository: ${totalFiles}
 Seed files provided for analysis: ${scopedFiles}
 
-## Seed File Contents
+## Seed Files To Inspect First
 
-${filesContext}
+${seedList}
 ${additionalContext ? '\n' + additionalContext + '\n' : ''}
-Investigate the current repository using tools as needed, starting from the seeded files above. Return the JSON result.`;
+Investigate the current repository using tools as needed, starting from the seeded files above. Open the files directly in the repository instead of relying on pasted snapshots. Return the JSON result.`;
 }
 
 export function buildAuditOrchestratorSystemPrompt(
