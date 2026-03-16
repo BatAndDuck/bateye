@@ -1,4 +1,4 @@
-name: Unit Tests
+name: Test Suite
 
 on:
   pull_request:
@@ -7,8 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  unit-tests:
-    name: Unit Tests
+  test-suite:
+    name: Test Suite
     runs-on: ubuntu-latest
 
     steps:
@@ -24,8 +24,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
-        run: npm run build
+      - name: Run lint
+        run: npm run lint
 
-      - name: Run unit tests
-        run: npm run test:unit
+      - name: Run full test suite
+        run: npm test

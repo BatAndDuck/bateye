@@ -36,6 +36,6 @@ export async function getRuntime(): Promise<IRuntime> {
   return runtimeInstance;
 }
 
-function resetRuntime(): void {
+export function resetRuntime(): void {
   runtimeInstance = null;
 }

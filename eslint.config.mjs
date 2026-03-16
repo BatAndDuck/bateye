@@ -1,15 +1,41 @@
 // @ts-check
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
+const repoRoot = path.dirname(fileURLToPath(import.meta.url));
+
 export default tseslint.config(
-  js.configs.recommended,
-  ...tseslint.configs.recommended,
   {
-    ignores: ['dist/**', 'node_modules/**', 'coverage/**', '**/*.js'],
+    ignores: ['.claude/**', 'dist/**', 'node_modules/**', 'coverage/**', 'report/**'],
   },
   {
-    files: ['src/**/*.ts'],
+    files: ['**/*.js', '**/*.cjs'],
+    ...js.configs.recommended,
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'commonjs',
+      globals: {
+        __dirname: 'readonly',
+        console: 'readonly',
+        module: 'readonly',
+        process: 'readonly',
+        require: 'readonly',
+      },
+    },
+    rules: {
+      'no-console': 'off',
+    },
+  },
+  {
+    files: ['**/*.ts'],
+    extends: [js.configs.recommended, ...tseslint.configs.recommended],
+    languageOptions: {
+      parserOptions: {
+        tsconfigRootDir: repoRoot,
+      },
+    },
     rules: {
       // Catch real bugs
       'no-console': 'off',

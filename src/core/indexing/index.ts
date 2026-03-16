@@ -29,17 +29,8 @@ function loadGitignore(repoPath: string): ReturnType<typeof ignore> {
   return ig;
 }
 
-function buildExcludePatterns(config: Config): string[] {
-  const patterns: string[] = [...BUILT_IN_EXCLUDES];
-  if (config.exclude) {
-    patterns.push(...config.exclude);
-  }
-  return patterns;
-}
-
 export async function buildRepoIndex(repoPath: string, config: Config): Promise<RepoIndex> {
   const ig = loadGitignore(repoPath);
-  const excludePatterns = buildExcludePatterns(config);
 
   // Build glob ignore list
   const globIgnore = [

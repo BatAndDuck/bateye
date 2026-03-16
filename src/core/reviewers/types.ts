@@ -1,4 +1,4 @@
-import { ReviewerMetadata, Reviewer } from '../../types/index';
+import { Reviewer } from '../../types/index';
 
 /**
  * Result of loading reviewers from the filesystem.
