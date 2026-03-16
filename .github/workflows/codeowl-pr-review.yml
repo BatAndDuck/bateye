@@ -16,6 +16,7 @@ jobs:
   codeowl-review:
     name: CodeOwl Review
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     # Run on all PR events, or when someone comments "/review" on a PR
     if: |
@@ -67,6 +68,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
 
       # Build and link from source so we test the exact code in this PR,
       # not the last published npm version.
