@@ -168,9 +168,18 @@ export const prFindingVerificationSchema = z.object({
   counterEvidence: z.array(z.string()).default([]),
 });
 
+export const prFindingBatchVerificationSchema = z.object({
+  verifications: z.array(z.object({
+    findingId: z.string(),
+    supported: z.boolean(),
+    reason: z.string(),
+  })),
+});
+
 export type ReviewerAnalysis = z.infer<typeof reviewerAnalysisSchema>;
 export type PRReviewerAnalysis = z.infer<typeof prReviewerAnalysisSchema>;
 export type PRFindingVerification = z.infer<typeof prFindingVerificationSchema>;
+export type PRFindingBatchVerification = z.infer<typeof prFindingBatchVerificationSchema>;
 export type OrchestratorAnalysis = z.infer<typeof orchestratorResultSchema>;
 export type SystemSynthesis = z.infer<typeof systemSynthesisSchema>;
 export type ServiceDoc = z.infer<typeof serviceDesignDocSchema>;

@@ -6,6 +6,8 @@ import { CONFIG_FILE, DEFAULT_MODEL, DEFAULT_API_KEY_ENV } from '../../../core/c
 export type ResolvedConfig = {
   $schema?: string;
   model: string;
+  /** Lighter/cheaper model for orchestration and verification. Defaults to model if not configured. */
+  lightModel: string;
   transport: string;
   apiBaseUrl?: string;
   exclude: string[];
@@ -46,9 +48,11 @@ export function resolveConfig(
   repoPath: string,
 ): ResolvedConfig {
   const config = loadConfig(repoPath);
+  const model = config.model || DEFAULT_MODEL;
   return {
     $schema: config.$schema,
-    model: config.model || DEFAULT_MODEL,
+    model,
+    lightModel: config.lightModel || model,
     transport: config.transport || 'auto',
     apiBaseUrl: config.apiBaseUrl,
     exclude: config.exclude || [],
@@ -92,6 +96,7 @@ export function resolveApiKey(config: Pick<ResolvedConfig, 'model' | 'transport'
 const ALLOWED_CONFIG_KEYS: ReadonlySet<keyof Config> = new Set([
   '$schema',
   'model',
+  'lightModel',
   'transport',
   'apiBaseUrl',
   'exclude',

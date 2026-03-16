@@ -152,6 +152,8 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   const currentDiffFiles = getFilesInDiff(parsedDiff);
   const currentFileContext = buildCurrentFileContext(repoPath, currentDiffFiles);
   log(`Parsed ${currentDiffFiles.length} files from diff`);
+  log(`[token-diag] Raw diff: ${rawDiff.length.toLocaleString()} chars (~${Math.round(rawDiff.length / 4).toLocaleString()} tokens) | Structured diff: ${structuredDiff.length.toLocaleString()} chars (~${Math.round(structuredDiff.length / 4).toLocaleString()} tokens, capped at 24k chars for reviewer)`);
+  log(`[token-diag] Current file context: ${currentFileContext.length.toLocaleString()} chars (~${Math.round(currentFileContext.length / 4).toLocaleString()} tokens) across ${currentDiffFiles.length} file(s)`);
 
   let platform: GitHubReviewPlatform | null = null;
   let conversation: PRConversation | null = null;
@@ -202,15 +204,21 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     apiKey,
     config.transport,
     config.apiBaseUrl,
+    config.lightModel !== config.model ? config.lightModel : undefined,
   );
   issues.push(...orchestratorResult.issues);
 
   const selectedReviewerIds = new Set(orchestratorResult.selectedReviewers.map(r => r.reviewerId));
   const selectedReviewers = reviewers.filter(r => selectedReviewerIds.has(r.id));
+  const orchestratorModel = config.lightModel !== config.model ? config.lightModel : config.model;
   log(`Selected ${selectedReviewers.length} reviewer(s): ${selectedReviewers.map(r => r.name).join(', ')}`);
+  if (orchestratorResult.tokensUsed) {
+    log(`[token-diag] Orchestrator (${orchestratorModel}): ${formatTokenSummary(orchestratorResult.tokensUsed)}`);
+  }
 
   const runtime = await getPRReviewRuntime();
-  log('Running agentic reviewers in parallel...');
+  log(`Running ${selectedReviewers.length} agentic reviewer(s) in parallel (model: ${config.model})...`);
+  log(`[token-diag] Per-reviewer estimated input context: structured diff (~${Math.round(Math.min(structuredDiff.length, 24000) / 4).toLocaleString()} tokens) + file context (~${Math.round(currentFileContext.length / 4).toLocaleString()} tokens) + system prompt (~600 tokens)`);
 
   const reviewerPromises = selectedReviewers.map(reviewer =>
     runPRReviewer(
@@ -245,7 +253,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     }
   }
   if (hasTokenData) {
-    log(`Token usage (reviewers): ${formatTokenSummary(reviewerTokenTotal)}`);
+    log(`[token-diag] Reviewers subtotal: ${formatTokenSummary(reviewerTokenTotal)}`);
   }
 
   const allFindings = reviewerRunResults.flatMap(r => r.findings);
@@ -273,6 +281,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     repoPath,
     runtime,
     model: config.model,
+    lightModel: config.lightModel !== config.model ? config.lightModel : undefined,
     apiKey,
     transport: config.transport,
     apiBaseUrl: config.apiBaseUrl,
@@ -280,6 +289,9 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   });
   issues.push(...semantic.issues);
   log(`Semantic verification: accepted ${semantic.verified.length}, rejected ${semantic.rejected.length}`);
+  if (semantic.tokensUsed) {
+    log(`[token-diag] Semantic verification (${config.lightModel !== config.model ? config.lightModel : config.model}): ${formatTokenSummary(semantic.tokensUsed)}`);
+  }
 
   if (semantic.rejected.length > 0) {
     for (const rejected of semantic.rejected.slice(0, 5)) {
@@ -304,9 +316,26 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     finalFindings: finalFindings.length,
   };
 
-  // Log total token usage
+  // Grand total token usage summary
+  let grandTotal: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  let hasGrandTotalData = false;
+  if (orchestratorResult.tokensUsed) {
+    grandTotal = addTokens(grandTotal, orchestratorResult.tokensUsed);
+    hasGrandTotalData = true;
+  }
   if (hasTokenData) {
-    log(`Token usage (total reviewers): ${formatTokenSummary(reviewerTokenTotal)}`);
+    grandTotal = addTokens(grandTotal, reviewerTokenTotal);
+    hasGrandTotalData = true;
+  }
+  if (semantic.tokensUsed) {
+    grandTotal = addTokens(grandTotal, semantic.tokensUsed);
+    hasGrandTotalData = true;
+  }
+  if (hasGrandTotalData) {
+    log(`[token-diag] ═══ GRAND TOTAL: ${formatTokenSummary(grandTotal)} ═══`);
+    log(`[token-diag]   orchestrator: ${orchestratorResult.tokensUsed ? formatTokenSummary(orchestratorResult.tokensUsed) : 'n/a'}`);
+    log(`[token-diag]   reviewers (${selectedReviewers.length}x): ${hasTokenData ? formatTokenSummary(reviewerTokenTotal) : 'n/a'}`);
+    log(`[token-diag]   semantic verification: ${semantic.tokensUsed ? formatTokenSummary(semantic.tokensUsed) : 'n/a'}`);
   }
 
   // Degrade on error-severity issues, non-transient warnings (tool failures etc.),
@@ -330,7 +359,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     issues,
     rejectedFindings: verificationStats.deterministicRejected + verificationStats.semanticRejected,
     verificationStats,
-    tokenUsage: hasTokenData ? reviewerTokenTotal : undefined,
+    tokenUsage: hasGrandTotalData ? grandTotal : undefined,
     generatedAt: new Date().toISOString(),
   };
 

@@ -91,6 +91,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
         index,
         availableReviewers: allReviewers,
         model: config.model,
+        lightModel: config.lightModel !== config.model ? config.lightModel : undefined,
         apiKey,
         transport: config.transport,
         apiBaseUrl: config.apiBaseUrl,

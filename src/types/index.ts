@@ -258,6 +258,8 @@ export type PRReviewConfig = {
 export type Config = {
   $schema?: string;
   model?: string;
+  /** Lighter/cheaper model for fast orchestration and verification tasks (e.g. anthropic/claude-haiku-4-5). Falls back to model if not set. */
+  lightModel?: string;
   transport?: string;
   apiBaseUrl?: string;
   exclude?: string[];

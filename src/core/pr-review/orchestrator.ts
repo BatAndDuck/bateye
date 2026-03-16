@@ -1,4 +1,4 @@
-import { Reviewer, OrchestratorResult, ReviewIssue } from '../../types/index';
+import { Reviewer, OrchestratorResult, ReviewIssue, TokenUsageSummary } from '../../types/index';
 import { getRuntime } from '../runtime/factory';
 import { orchestratorResultSchema } from '../validation/schemas';
 import { buildOrchestratorSystemPrompt, buildOrchestratorUserMessage } from '../prompts/pr-review';
@@ -78,6 +78,7 @@ function broadenReviewerSelection(
 
 export interface ReviewerSelectionResult extends OrchestratorResult {
   issues: ReviewIssue[];
+  tokensUsed?: TokenUsageSummary;
 }
 
 export async function selectReviewers(
@@ -89,6 +90,7 @@ export async function selectReviewers(
   apiKey: string,
   transport?: string,
   apiBaseUrl?: string,
+  lightModel?: string,
 ): Promise<ReviewerSelectionResult> {
   const runtime = await getRuntime();
 
@@ -101,15 +103,18 @@ export async function selectReviewers(
 
   const systemPrompt = buildOrchestratorSystemPrompt(reviewerDescriptions);
   const userMessage = buildOrchestratorUserMessage(changedFiles, diff, commits);
+  // Orchestrator is a simple JSON selection task — use the lighter model if configured
+  const orchestratorModel = lightModel || model;
 
   try {
     const result = await runtime.run<OrchestratorResult>(
-      { systemPrompt, userMessage, model, apiKey, transport, apiBaseUrl, maxTokens: 2048, temperature: 0 },
+      { systemPrompt, userMessage, model: orchestratorModel, apiKey, transport, apiBaseUrl, maxTokens: 2048, temperature: 0 },
       orchestratorResultSchema
     );
     return {
       ...broadenReviewerSelection(result.data, availableReviewers, changedFiles, commits),
       issues: [],
+      tokensUsed: result.tokensUsed,
     };
   } catch {
     // Fall back to selecting all reviewers if orchestrator fails
