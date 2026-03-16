@@ -90,9 +90,13 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
       },
       {
         data: {
-          supported: true,
-          reason: 'The finding is supported by the current file content and anchored to changed code.',
-          counterEvidence: [],
+          verifications: [
+            {
+              findingId: 'PR_TOOL_PR_1',
+              supported: true,
+              reason: 'The finding is supported by the current file content and anchored to changed code.',
+            },
+          ],
         },
       },
     ],
@@ -423,9 +427,13 @@ export function buildRepoIndex(config) {
       },
       {
         data: {
-          supported: false,
-          reason: 'The current file still applies config.exclude inline, so the claimed regression does not exist.',
-          counterEvidence: ['const excludePatterns = [\'dist\', ...(config.exclude || [])];'],
+          verifications: [
+            {
+              findingId: 'BUG_HUNTER_LOCAL_1',
+              supported: false,
+              reason: 'The current file still applies config.exclude inline, so the claimed regression does not exist.',
+            },
+          ],
         },
       },
     ],
@@ -537,9 +545,13 @@ jobs:
       },
       {
         data: {
-          supported: false,
-          reason: 'The current workflow still configures npm cache in actions/setup-node.',
-          counterEvidence: ['cache: \'npm\''],
+          verifications: [
+            {
+              findingId: 'CI_CD_LOCAL_1',
+              supported: false,
+              reason: 'The current workflow still configures npm cache in actions/setup-node.',
+            },
+          ],
         },
       },
     ],
@@ -724,9 +736,13 @@ Report only concrete code quality findings after investigating the current repos
       },
       {
         data: {
-          supported: true,
-          reason: 'The low-severity issue is supported by the current file content.',
-          counterEvidence: [],
+          verifications: [
+            {
+              findingId: 'GITHUB_REVIEWER_1',
+              supported: true,
+              reason: 'The low-severity issue is supported by the current file content.',
+            },
+          ],
         },
       },
     ],
