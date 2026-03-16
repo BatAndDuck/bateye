@@ -12,7 +12,7 @@ codeowl models anthropic   # List Anthropic models
 codeowl config show        # Show current config
 codeowl config set model anthropic/claude-sonnet-4-5
 
-codeowl reviewers                         # List all available reviewers
+codeowl reviewers                         # List all built-in and user reviewers (id, name, description)
 
 codeowl audit                             # Full codebase audit (all reviewers)
 codeowl audit --output ./report.json      # Custom output path
