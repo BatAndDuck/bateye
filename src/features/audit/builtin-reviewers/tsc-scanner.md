@@ -3,7 +3,7 @@ id: tsc-scanner
 name: TypeScript Compiler Scanner
 description: Runs the TypeScript compiler in check-only mode to detect type errors, then AI categorizes and prioritizes them.
 enabled: true
-mode: both
+mode: audit
 category: code-quality
 tool:
   command: npx

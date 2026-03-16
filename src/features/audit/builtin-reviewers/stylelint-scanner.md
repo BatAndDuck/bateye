@@ -3,7 +3,7 @@ id: stylelint-scanner
 name: Stylelint Scanner
 description: Runs Stylelint on CSS/SCSS/Less files to detect bugs, browser compatibility issues, and accessibility concerns.
 enabled: true
-mode: both
+mode: audit
 category: code-quality
 tool:
   command: npx

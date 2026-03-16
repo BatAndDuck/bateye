@@ -16,8 +16,22 @@ import {
   MAX_AUDIT_REVIEWER_TIMEOUT_MS,
 } from '../../../core/config/defaults';
 import { ensureDir, writeAuditResult } from '../../../core/output/writer';
-import { IRuntime } from '../../../core/runtime/interface';
+import { IRuntime, TokenUsage } from '../../../core/runtime/interface';
 import { getAuditRuntime } from '../../../core/runtime/factory';
+
+function addTokens(a: TokenUsage, b: TokenUsage): TokenUsage {
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    estimated: a.estimated || b.estimated,
+  };
+}
+
+function formatTokenSummary(usage: TokenUsage): string {
+  const total = usage.inputTokens + usage.outputTokens;
+  const suffix = usage.estimated ? ' (estimated)' : '';
+  return `${total.toLocaleString()} tokens (${usage.inputTokens.toLocaleString()} in + ${usage.outputTokens.toLocaleString()} out)${suffix}`;
+}
 import { resolveApiKey, resolveConfig } from '../../config/application/config-service';
 import { loadReviewersForMode } from '../../reviewers/application/reviewer-registry';
 import { selectAuditReviewers } from './audit-orchestrator';
@@ -119,14 +133,22 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
             reviewerName: reviewer.name,
           });
         }
-        log(`  ✓ ${reviewer.name}: score=${result.score}, findings=${result.findings.length}`);
+        const durationSec = (result.execution.durationMs / 1000).toFixed(1);
+        const tokenSuffix = result.tokensUsed
+          ? ` | ${formatTokenSummary(result.tokensUsed)}`
+          : '';
+        log(`  ✓ ${reviewer.name}: score=${result.score}, findings=${result.findings.length} (${durationSec}s${tokenSuffix})`);
         return result;
       } catch (err) {
-        log(`  Warning: reviewer ${reviewer.name} failed and will be skipped: ${(err as Error).message}`);
+        const msg = (err as Error).message;
+        const isTimeout = /timed out after/i.test(msg);
+        log(`  Warning: reviewer ${reviewer.name} failed and will be skipped: ${msg}`);
         issues.push({
           severity: 'warning',
-          code: 'audit-reviewer-failed',
-          message: `Reviewer "${reviewer.name}" failed and was skipped: ${(err as Error).message}`,
+          code: isTimeout ? 'audit-reviewer-timeout' : 'audit-reviewer-failed',
+          message: isTimeout
+            ? `Reviewer "${reviewer.name}" timed out and was skipped: ${msg}`
+            : `Reviewer "${reviewer.name}" failed and was skipped: ${msg}`,
           stage: 'run-reviewers',
           reviewerId: reviewer.id,
           reviewerName: reviewer.name,
@@ -158,14 +180,36 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   const totalFindings = deduped.length;
   const criticalCount = deduped.filter(f => f.priority === 'critical').length;
 
+  // Aggregate token usage across all successful reviewers
+  let totalTokens: TokenUsage | undefined;
+  for (const r of successfulReviewerResults) {
+    if (r.tokensUsed) {
+      totalTokens = totalTokens ? addTokens(totalTokens, r.tokensUsed) : { ...r.tokensUsed };
+    }
+  }
+  if (totalTokens) {
+    log(`Token usage (all reviewers): ${formatTokenSummary(totalTokens)}`);
+  }
+
+  // Degrade on error-severity issues, non-transient warnings (tool failures etc.),
+  // or majority reviewer failures. Transient timeouts alone don't warrant DEGRADED.
+  const failedCount = reviewerResults.filter(r => r === null).length;
+  const majorityFailed = failedCount > activeReviewers.length / 2;
+  const hasErrorIssues = issues.some(i => i.severity === 'error');
+  const hasNonTransientWarnings = issues.some(
+    i => i.severity === 'warning' && !i.code.endsWith('-timeout'),
+  );
+  const runStatus: AuditResult['status'] = (hasErrorIssues || hasNonTransientWarnings || majorityFailed) ? 'degraded' : 'complete';
+
   const result: AuditResult = {
     command: 'audit',
     repoPath: path.resolve(repoPath),
-    status: issues.length > 0 ? 'degraded' : 'complete',
+    status: runStatus,
     overallScore,
     summary: buildAuditSummary(overallScore, totalFindings, criticalCount, activeReviewers.length),
     reviewerResults: finalReviewerResults,
     issues,
+    tokenUsage: totalTokens,
     generatedAt: new Date().toISOString(),
   };
 
@@ -246,6 +290,7 @@ async function runSingleReviewer(
 
   let analysis: ReviewerAnalysis;
   let runtimeType: import('../../../types/index').RuntimeType;
+  let reviewerTokensUsed: TokenUsage | undefined;
 
   try {
     const result = await runtime.runAgenticReview<ReviewerAnalysis>(
@@ -265,8 +310,10 @@ async function runSingleReviewer(
     );
     analysis = result.data;
     runtimeType = result.runtime;
+    reviewerTokensUsed = result.tokensUsed;
   } catch (err) {
-    throw new Error(`Reviewer ${reviewer.id} failed: ${(err as Error).message}`, { cause: err });
+    const msg = (err as Error).message;
+    throw new Error(`Reviewer ${reviewer.id} failed: ${msg}`, { cause: err });
   }
 
   const findings: Finding[] = analysis.findings.map(finding => ({
@@ -282,6 +329,7 @@ async function runSingleReviewer(
     score: analysis.score,
     summary: analysis.summary,
     findings,
+    tokensUsed: reviewerTokensUsed,
     execution: {
       model,
       runtime: runtimeType,

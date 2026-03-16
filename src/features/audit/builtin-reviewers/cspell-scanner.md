@@ -3,7 +3,7 @@ id: cspell-scanner
 name: Spell Check Scanner
 description: Runs CSpell spell checker on source code to find typos in user-facing strings, comments, and identifiers.
 enabled: true
-mode: both
+mode: audit
 category: code-quality
 tool:
   command: npx

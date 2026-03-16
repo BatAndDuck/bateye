@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import { createServer, AddressInfo } from 'net';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, resolveModelTarget } from '../interface';
+import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, TokenUsage, resolveModelTarget } from '../interface';
 import { buildOpenCodeEnvironment, resolveOpenCodeInvocation } from './command';
 
 type OpenCodeServerHandle = {
@@ -12,8 +12,8 @@ type OpenCodeServerHandle = {
   close: () => void;
 };
 
-const MAX_STRUCTURED_OUTPUT_ATTEMPTS = 3;
-const OPEN_CODE_STRUCTURED_OUTPUT_RETRY_COUNT = 4;
+const MAX_STRUCTURED_OUTPUT_ATTEMPTS = 2;
+const OPEN_CODE_STRUCTURED_OUTPUT_RETRY_COUNT = 1;
 
 type OpenCodeSession = {
   id: string;
@@ -552,6 +552,8 @@ export class OpenCodeCLIRuntime implements IRuntime {
       'x-opencode-directory': cwd,
     };
     let lastError: unknown;
+    // Estimate input tokens from prompt character lengths (1 token ≈ 4 chars)
+    const estimatedInputTokens = Math.ceil((options.systemPrompt.length + options.userMessage.length) / 4);
 
     for (let attempt = 0; attempt < MAX_STRUCTURED_OUTPUT_ATTEMPTS; attempt++) {
       let sessionID: string | undefined;
@@ -601,12 +603,20 @@ export class OpenCodeCLIRuntime implements IRuntime {
         const normalized = repairReviewerPayload(parsed);
         const validated = schema.parse(normalized);
 
+        const estimatedOutputTokens = Math.ceil(serializedResponse.length / 4);
+        const tokensUsed: TokenUsage = {
+          inputTokens: estimatedInputTokens,
+          outputTokens: estimatedOutputTokens,
+          estimated: true,
+        };
+
         return {
           data: validated,
           model: options.model,
           runtime: 'cli',
           durationMs: Date.now() - start,
           rawResponse: serializedResponse,
+          tokensUsed,
         };
       } catch (err) {
         lastError = err;
@@ -666,6 +676,15 @@ export class OpenCodeCLIRuntime implements IRuntime {
       }
 
       return bodyText ? JSON.parse(bodyText) as T : (true as T);
+    } catch (err) {
+      if (
+        (err instanceof DOMException && err.name === 'AbortError') ||
+        (err instanceof Error && (err.message.includes('aborted') || err.name === 'AbortError'))
+      ) {
+        const seconds = Math.round(timeoutMs / 1000);
+        throw new Error(`Timed out after ${seconds}s`);
+      }
+      throw err;
     } finally {
       clearTimeout(timer);
     }

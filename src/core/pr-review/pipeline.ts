@@ -26,9 +26,23 @@ import { verifyFindings } from './verifier';
 import { verifyFindingsSemantically } from './semantic-verifier';
 import { deduplicateFindings } from './deduplicator';
 import { buildConversation, filterAlreadyPosted, PRConversation } from './conversation';
-import { IRuntime } from '../runtime/interface';
+import { IRuntime, TokenUsage } from '../runtime/interface';
 import { runReviewerTool } from '../tools/runner';
 import { formatToolContext } from '../tools/format';
+
+function addTokens(a: TokenUsage, b: TokenUsage): TokenUsage {
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    estimated: a.estimated || b.estimated,
+  };
+}
+
+function formatTokenSummary(usage: TokenUsage): string {
+  const total = usage.inputTokens + usage.outputTokens;
+  const suffix = usage.estimated ? ' (estimated)' : '';
+  return `${total.toLocaleString()} tokens (${usage.inputTokens.toLocaleString()} in + ${usage.outputTokens.toLocaleString()} out)${suffix}`;
+}
 
 export interface PRReviewPipelineOptions {
   repoPath: string;
@@ -220,6 +234,20 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   for (const reviewerRunResult of reviewerRunResults) {
     issues.push(...reviewerRunResult.issues);
   }
+
+  // Aggregate token usage across all reviewer runs
+  let reviewerTokenTotal: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  let hasTokenData = false;
+  for (const r of reviewerRunResults) {
+    if (r.tokensUsed) {
+      reviewerTokenTotal = addTokens(reviewerTokenTotal, r.tokensUsed);
+      hasTokenData = true;
+    }
+  }
+  if (hasTokenData) {
+    log(`Token usage (reviewers): ${formatTokenSummary(reviewerTokenTotal)}`);
+  }
+
   const allFindings = reviewerRunResults.flatMap(r => r.findings);
   log(`Collected ${allFindings.length} raw findings from all reviewers`);
 
@@ -276,17 +304,33 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     finalFindings: finalFindings.length,
   };
 
+  // Log total token usage
+  if (hasTokenData) {
+    log(`Token usage (total reviewers): ${formatTokenSummary(reviewerTokenTotal)}`);
+  }
+
+  // Degrade on error-severity issues, non-transient warnings (tool failures etc.),
+  // or majority reviewer failures. Transient timeouts alone don't warrant DEGRADED.
+  const failedReviewerCount = reviewerRunResults.filter(r => r.findings.length === 0 && r.issues.length > 0).length;
+  const majorityFailed = failedReviewerCount > selectedReviewers.length / 2;
+  const hasErrorIssues = issues.some(i => i.severity === 'error');
+  const hasNonTransientWarnings = issues.some(
+    i => i.severity === 'warning' && !i.code.endsWith('-timeout'),
+  );
+  const runStatus: PRReviewResult['status'] = (hasErrorIssues || hasNonTransientWarnings || majorityFailed) ? 'degraded' : 'complete';
+
   const result: PRReviewResult = {
     command: 'pr-review',
     baseRef,
     headRef,
-    status: issues.length > 0 ? 'degraded' : 'complete',
+    status: runStatus,
     selectedReviewers: orchestratorResult.selectedReviewers,
     summary: '',
     findings: finalFindings,
     issues,
     rejectedFindings: verificationStats.deterministicRejected + verificationStats.semanticRejected,
     verificationStats,
+    tokenUsage: hasTokenData ? reviewerTokenTotal : undefined,
     generatedAt: new Date().toISOString(),
   };
 
@@ -374,6 +418,7 @@ interface PRReviewerRunResult {
   toolRan: boolean;
   toolError?: string;
   issues: ReviewIssue[];
+  tokensUsed?: TokenUsage;
 }
 
 async function runPRReviewer(
@@ -459,14 +504,22 @@ async function runPRReviewer(
       reviewerName: reviewer.name,
     }));
 
-    log(`  ✓ ${reviewer.name}: ${findings.length} findings`);
-    return { findings, reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError, issues };
+    const durationSec = (runResult.durationMs / 1000).toFixed(1);
+    const tokenSuffix = runResult.tokensUsed
+      ? ` | ${formatTokenSummary(runResult.tokensUsed)}`
+      : '';
+    log(`  ✓ ${reviewer.name}: ${findings.length} findings (${durationSec}s${tokenSuffix})`);
+    return { findings, reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError, issues, tokensUsed: runResult.tokensUsed };
   } catch (err) {
-    log(`  ✗ ${reviewer.name} failed: ${(err as Error).message}`);
+    const msg = (err as Error).message;
+    const isTimeout = /timed out after/i.test(msg);
+    log(`  ✗ ${reviewer.name} failed: ${msg}`);
     issues.push({
-      severity: 'warning',
-      code: 'pr-reviewer-failed',
-      message: `Reviewer "${reviewer.name}" failed: ${(err as Error).message}`,
+      severity: isTimeout ? 'warning' : 'warning',
+      code: isTimeout ? 'pr-reviewer-timeout' : 'pr-reviewer-failed',
+      message: isTimeout
+        ? `Reviewer "${reviewer.name}" timed out: ${msg}`
+        : `Reviewer "${reviewer.name}" failed: ${msg}`,
       stage: 'run-reviewers',
       reviewerId: reviewer.id,
       reviewerName: reviewer.name,

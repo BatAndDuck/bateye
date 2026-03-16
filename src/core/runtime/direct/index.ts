@@ -3,7 +3,7 @@ import OpenAI, { AzureOpenAI } from 'openai';
 import * as fs from 'fs';
 import * as path from 'path';
 import { z } from 'zod';
-import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, normalizeTransport, resolveModelTarget } from '../interface';
+import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, TokenUsage, normalizeTransport, resolveModelTarget } from '../interface';
 
 const MAX_RETRIES = 3;
 const VERCEL_AI_GATEWAY_BASE_URL = 'https://ai-gateway.vercel.sh/v1';
@@ -113,6 +113,10 @@ async function runWithAnthropic<T>(
       .filter(c => c.type === 'text')
       .map(c => (c as { type: 'text'; text: string }).text)
       .join('');
+    const tokensUsed: TokenUsage = {
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    };
 
     const jsonStr = extractJson(rawText);
     try {
@@ -124,6 +128,7 @@ async function runWithAnthropic<T>(
         runtime: 'sdk',
         durationMs: Date.now() - start,
         rawResponse: rawText,
+        tokensUsed,
       };
     } catch (err) {
       lastError = err as Error;
@@ -175,6 +180,10 @@ async function runWithAzure<T>(
     }
 
     const rawText = response.choices[0]?.message?.content || '';
+    const tokensUsed: TokenUsage = {
+      inputTokens: response.usage?.prompt_tokens ?? 0,
+      outputTokens: response.usage?.completion_tokens ?? 0,
+    };
     const jsonStr = extractJson(rawText);
     try {
       const parsed = JSON.parse(jsonStr);
@@ -185,6 +194,7 @@ async function runWithAzure<T>(
         runtime: 'sdk',
         durationMs: Date.now() - start,
         rawResponse: rawText,
+        tokensUsed,
       };
     } catch (err) {
       lastError = err as Error;
@@ -231,6 +241,10 @@ async function runWithOpenAI<T>(
     }
 
     const rawText = response.choices[0]?.message?.content || '';
+    const tokensUsed: TokenUsage = {
+      inputTokens: response.usage?.prompt_tokens ?? 0,
+      outputTokens: response.usage?.completion_tokens ?? 0,
+    };
     const jsonStr = extractJson(rawText);
     try {
       const parsed = JSON.parse(jsonStr);
@@ -241,6 +255,7 @@ async function runWithOpenAI<T>(
         runtime: 'sdk',
         durationMs: Date.now() - start,
         rawResponse: rawText,
+        tokensUsed,
       };
     } catch (err) {
       lastError = err as Error;

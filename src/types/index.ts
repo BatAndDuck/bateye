@@ -41,6 +41,14 @@ export type PRFinding = Finding & {
   searchedFor?: string[];
 };
 
+/** Token usage for a single LLM call or aggregated across multiple calls */
+export type TokenUsageSummary = {
+  inputTokens: number;
+  outputTokens: number;
+  /** True when counts are estimated from character length rather than reported by the API */
+  estimated?: boolean;
+};
+
 /** The full output from a single reviewer, including score, summary, and all findings */
 export type ReviewerResult = {
   reviewerId: string;
@@ -49,6 +57,7 @@ export type ReviewerResult = {
   score: number;
   summary: string;
   findings: Finding[];
+  tokensUsed?: TokenUsageSummary;
   execution: {
     model: string;
     runtime: RuntimeType;
@@ -72,6 +81,7 @@ export type AuditResult = {
   summary: string;
   reviewerResults: ReviewerResult[];
   issues: ReviewIssue[];
+  tokenUsage?: TokenUsageSummary;
   generatedAt: string;
 };
 
@@ -95,6 +105,7 @@ export type PRReviewResult = {
     semanticRejected: number;
     finalFindings: number;
   };
+  tokenUsage?: TokenUsageSummary;
   generatedAt: string;
   autoApproved?: boolean;
 };

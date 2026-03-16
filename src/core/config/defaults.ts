@@ -37,9 +37,9 @@ export const MAX_CONCURRENT_AUDIT_REVIEWERS = 10;
 /** Maximum token budget for a single audit reviewer response. */
 export const MAX_AUDIT_REVIEWER_TOKENS = 8096;
 /** Maximum wall clock time for one agentic audit reviewer investigation (ms). */
-export const MAX_AUDIT_REVIEWER_TIMEOUT_MS = 420_000;
+export const MAX_AUDIT_REVIEWER_TIMEOUT_MS = 1_200_000;
 /** Maximum wall clock time for one agentic PR reviewer investigation (ms). */
-export const MAX_PR_REVIEWER_TIMEOUT_MS = 150_000;
+export const MAX_PR_REVIEWER_TIMEOUT_MS = 1_200_000;
 /** Maximum number of files an agentic PR reviewer should inspect. */
 export const MAX_PR_REVIEWER_FILES_TO_INSPECT = 20;
 /** Maximum number of supporting files a PR finding should rely on. */
