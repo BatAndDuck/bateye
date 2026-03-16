@@ -3,6 +3,14 @@ export function buildAuditSystemPrompt(reviewerInstructions: string, reviewerId:
 
 ${reviewerInstructions}
 
+## INVESTIGATION REQUIREMENTS
+You are running inside the repository workspace with filesystem/search tools available.
+- Use repository navigation tools before reporting findings.
+- Treat the seeded files below as a starting point, not as the only evidence you may inspect.
+- Inspect neighboring modules, config files, manifests, or tests when needed to confirm or disprove a concern.
+- Do not report "missing", "removed", or "no X" claims unless you actually searched the relevant repository locations.
+- Prefer zero findings over partially verified concerns.
+
 ## SCOPE DISCIPLINE
 Only report findings within your specific area of expertise described above. Do NOT report issues that belong to other reviewer specializations (e.g., a Security reviewer should not report code style issues; a Performance reviewer should not report missing auth).
 
@@ -45,7 +53,7 @@ You MUST return a single JSON object with this exact structure:
 
 Rules:
 - score reflects overall category health (100 = perfect, 0 = critically broken)
-- Only report findings that are supported by evidence in the provided code
+- Only report findings that are supported by evidence in the current repository after investigation
 - Findings must be actionable within this repository; do not report generic best-practice wishes without a concrete target
 - filePath must be the exact relative path from the repo root
 - startLine and endLine must be accurate line numbers from the provided code
@@ -55,20 +63,24 @@ Rules:
 }
 
 export function buildAuditUserMessage(
-  filesContext: string,
+  seedFiles: string[],
   totalFiles: number,
   scopedFiles: number,
   additionalContext?: string,
 ): string {
+  const seedList = seedFiles.length > 0
+    ? seedFiles.map(filePath => `- ${filePath}`).join('\n')
+    : '- No seed files were selected';
+
   return `## Repository Context
 Total files in repository: ${totalFiles}
-Files provided for analysis: ${scopedFiles}
+Seed files provided for analysis: ${scopedFiles}
 
-## Files to Analyze
+## Seed Files To Inspect First
 
-${filesContext}
+${seedList}
 ${additionalContext ? '\n' + additionalContext + '\n' : ''}
-Analyze the code above according to your reviewer instructions. Return the JSON result.`;
+Investigate the current repository using tools as needed, starting from the seeded files above. Open the files directly in the repository instead of relying on pasted snapshots. Return the JSON result.`;
 }
 
 export function buildAuditOrchestratorSystemPrompt(

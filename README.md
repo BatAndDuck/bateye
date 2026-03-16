@@ -30,6 +30,9 @@ codeowl system-design --output ./out
 
 **Prerequisites:** Node.js 18.x or later
 
+No separate `npm i -g opencode-ai` step is required when CodeOwl is installed normally.
+`codeowl audit` and `codeowl pr-review` use the OpenCode runtime bundled with CodeOwl, with a global `opencode` on `PATH` only as a fallback.
+
 ```bash
 # Install dependencies reproducibly
 npm ci
@@ -284,6 +287,11 @@ npm install -g codeowl@latest   # Upgrade to latest
 **No reviewers found**
 - Built-in reviewers load automatically — if missing, verify the npm package is correctly installed
 - Custom reviewers must live in `.codeowl/reviewers/*.md` and include valid frontmatter
+
+**OpenCode runtime unavailable**
+- `audit` and `pr-review` expect the bundled OpenCode runtime from the CodeOwl install
+- Reinstall dependencies with `npm ci`, `npm install`, or reinstall the global `codeowl` package
+- A separate global `opencode` install is optional and only used as a fallback
 
 **Config validation errors**
 - Run `codeowl doctor` for a full config check

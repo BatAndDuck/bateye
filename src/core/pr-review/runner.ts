@@ -1,5 +1,5 @@
 import { PRReviewResult } from '../../types/index';
-import { runPRReviewPipeline, PRReviewPipelineOptions } from './pipeline';
+import { runPRReviewPipeline } from './pipeline';
 
 // Backward-compatible interface
 export interface PRReviewOptions {

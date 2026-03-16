@@ -14,6 +14,7 @@ export async function runCliTask<TResult>(options: CliTaskOptions<TResult>): Pro
   console.log(chalk.cyan(`\n${options.title}\n`));
   const interactive = Boolean(process.stdout.isTTY && !process.env.CI);
   let lastMessage = options.startText;
+  const noticePattern = /^\s*(Warning:|⚠|✗)/;
 
   if (!interactive) {
     console.log(chalk.gray(`- ${options.startText}`));
@@ -25,6 +26,16 @@ export async function runCliTask<TResult>(options: CliTaskOptions<TResult>): Pro
 
   try {
     const result = await options.task(message => {
+      if (noticePattern.test(message)) {
+        if (spinner) {
+          spinner.stopAndPersist({ symbol: chalk.yellow('!'), text: message.trim() });
+          spinner.start(lastMessage);
+        } else {
+          console.log(chalk.yellow(`! ${message.trim()}`));
+        }
+        return;
+      }
+
       lastMessage = message;
       if (spinner) {
         spinner.text = message;

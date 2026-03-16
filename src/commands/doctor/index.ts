@@ -7,6 +7,7 @@ import { CONFIG_FILE } from '../../core/config/defaults';
 import { loadReviewers } from '../../core/reviewers/loader';
 import { isGitRepo } from '../../core/git/index';
 import { resolveAuthEnvName } from '../../features/config/application/config-service';
+import { resolveOpenCodeInvocation } from '../../core/runtime/opencode-cli/command';
 
 interface CheckResult {
   label: string;
@@ -85,10 +86,16 @@ export async function runDoctor(repoPath: string): Promise<void> {
   }
 
   try {
-    const result = await execa('opencode', ['--version'], { timeout: 3000 });
-    checks.push({ label: 'OpenCode CLI', status: 'ok', detail: result.stdout.trim() });
+    const invocation = resolveOpenCodeInvocation();
+    const result = await execa(invocation.command, [...invocation.args, '--version'], { timeout: 3000 });
+    const sourceLabel = invocation.source === 'bundled' ? 'bundled with CodeOwl' : 'from PATH';
+    checks.push({ label: 'OpenCode CLI', status: 'ok', detail: `${result.stdout.trim()} (${sourceLabel})` });
   } catch {
-    checks.push({ label: 'OpenCode CLI (optional)', status: 'warn', detail: 'Not found - using direct AI SDK (fine for most uses)' });
+    checks.push({
+      label: 'OpenCode CLI (agentic runtime)',
+      status: 'warn',
+      detail: 'Not available - reinstall CodeOwl dependencies or add `opencode` to PATH for `audit` and `pr-review`.',
+    });
   }
 
   let hasErrors = false;

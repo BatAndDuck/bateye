@@ -3,7 +3,7 @@ import OpenAI, { AzureOpenAI } from 'openai';
 import * as fs from 'fs';
 import * as path from 'path';
 import { z } from 'zod';
-import { IRuntime, RunOptions, RunResult, normalizeTransport, resolveModelTarget } from '../interface';
+import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, normalizeTransport, resolveModelTarget } from '../interface';
 
 const MAX_RETRIES = 3;
 const VERCEL_AI_GATEWAY_BASE_URL = 'https://ai-gateway.vercel.sh/v1';
@@ -92,7 +92,7 @@ function normalizeRuntimeError(err: unknown, baseURL?: string): Error {
 
 async function runWithAnthropic<T>(
   options: RunOptions,
-  schema: z.ZodSchema<T>,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   modelId: string
 ): Promise<RunResult<T>> {
   const client = new Anthropic({ apiKey: options.apiKey });
@@ -134,7 +134,7 @@ async function runWithAnthropic<T>(
 
 async function runWithAzure<T>(
   options: RunOptions,
-  schema: z.ZodSchema<T>,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   modelId: string
 ): Promise<RunResult<T>> {
   const resourceName = process.env['AZURE_RESOURCE_NAME'];
@@ -195,7 +195,7 @@ async function runWithAzure<T>(
 
 async function runWithOpenAI<T>(
   options: RunOptions,
-  schema: z.ZodSchema<T>,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   modelId: string,
   baseURL?: string
 ): Promise<RunResult<T>> {
@@ -304,7 +304,7 @@ function resolveOpenAICompatibleBaseUrl(transport: string, apiBaseUrl?: string):
 }
 
 export class DirectAIRuntime implements IRuntime {
-  async run<T>(options: RunOptions, schema: z.ZodSchema<T>): Promise<RunResult<T>> {
+  async run<T>(options: RunOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>> {
     const { transport, modelId } = resolveModelTarget(options.model, options.transport);
     const baseURL = resolveOpenAICompatibleBaseUrl(transport, options.apiBaseUrl);
 
@@ -398,5 +398,12 @@ export class DirectAIRuntime implements IRuntime {
 
   async isAvailable(): Promise<boolean> {
     return true; // Direct runtime is always available
+  }
+
+  async runAgenticReview<T>(_options: AgenticRepositoryReviewOptions, _schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>> {
+    throw new Error(
+      'Agentic repository review requires the OpenCode CLI runtime or CODEOWL_RUNTIME=mock. '
+      + 'The direct SDK runtime cannot inspect the repository before reporting findings.'
+    );
   }
 }

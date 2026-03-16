@@ -3,16 +3,14 @@ import * as path from 'path';
 import execa from 'execa';
 import { z } from 'zod';
 import { RepoFile, RepoIndex, ResourceCategory, ServiceDesignDoc, ServiceInterfaceType, ServiceKind, SystemDesignInventory, SystemDesignResult } from '../../../types/index';
-import { buildRepoIndex, formatFilesForContext, readFileContent } from '../../../core/indexing/index';
+import { buildRepoIndex, readFileContent } from '../../../core/indexing/index';
 import { createRuntime, getRuntime } from '../../../core/runtime/factory';
-import { serviceDesignDocSchema, ServiceDoc } from '../../../core/validation/schemas';
+import { serviceDesignDocSchema } from '../../../core/validation/schemas';
 import {
   buildFileSummarySystemPrompt,
   buildFileSummaryUserMessage,
   buildRelevantFileSelectionSystemPrompt,
   buildRelevantFileSelectionUserMessage,
-  buildServiceAnalysisSystemPrompt,
-  buildServiceAnalysisUserMessage,
   buildServiceSynthesisFromFilesSystemPrompt,
   buildServiceSynthesisFromFilesUserMessage,
 } from '../../../core/prompts/system-design';
@@ -249,7 +247,7 @@ export async function runSystemDesign(
   const result = buildSystemDesignResult(repoPath, outputDir, synthesis, services, coverage);
 
   log('Writing output files...');
-  const graph = writeSystemDesignOutputs(outputDir, result, unitAnalyses, units);
+  writeSystemDesignOutputs(outputDir, result, unitAnalyses, units);
   log(`✓ HTML report: ${path.join(outputDir, 'index.html')}`);
 
   return result;
@@ -1341,7 +1339,7 @@ function extractAspNetControllerInterfaces(file: RepoFile): ArchitecturalUnit['i
     : '';
   const baseRoute = resolveAspNetRouteTemplate(extractRouteAttribute(classAttributes), controllerSegment);
   const methodInterfaces: ArchitecturalUnit['interfaceHints'] = [];
-  const methodPattern = /((?:\s*\[[^\]]+\]\s*)+)public\s+(?:async\s+)?(?:Task(?:<[^>]+>)?|ActionResult(?:<[^>]+>)?|IActionResult|IEnumerable<[^>]+>|[A-Za-z0-9_<>,\[\]\?]+)\s+([A-Za-z0-9_]+)\s*\(/g;
+  const methodPattern = /((?:\s*\[[^\]]+\]\s*)+)public\s+(?:async\s+)?(?:Task(?:<[^>]+>)?|ActionResult(?:<[^>]+>)?|IActionResult|IEnumerable<[^>]+>|[A-Za-z0-9_<>,?[\]]+)\s+([A-Za-z0-9_]+)\s*\(/g;
 
   for (const match of content.matchAll(methodPattern)) {
     const attributes = match[1];
@@ -1430,9 +1428,9 @@ function extractOutboundHttpCallsFromFile(file: RepoFile): ExtractedHttpCall[] {
 
   const calls: ExtractedHttpCall[] = [];
   const callPatterns = [
-    /\.(get|post|put|patch|delete)\s*(?:<[^>]+>)?\(\s*([^,\)\r\n]+)/gi,
-    /\bfetch\(\s*([^,\)\r\n]+)/gi,
-    /\baxios\.(get|post|put|patch|delete)\(\s*([^,\)\r\n]+)/gi,
+    /\.(get|post|put|patch|delete)\s*(?:<[^>]+>)?\(\s*([^,)\r\n]+)/gi,
+    /\bfetch\(\s*([^,)\r\n]+)/gi,
+    /\baxios\.(get|post|put|patch|delete)\(\s*([^,)\r\n]+)/gi,
   ];
 
   for (const pattern of callPatterns) {
@@ -2152,10 +2150,12 @@ function detectContainerDirUnits(repoPath: string, index: RepoIndex): Architectu
           try {
             return fs.statSync(path.join(patternDir, e)).isDirectory();
           } catch {
+            // Ignore entries that disappear or become unreadable during discovery.
             return false;
           }
         });
-    } catch (err) {
+    } catch {
+      // Container directory discovery is best-effort; skip unreadable roots and continue.
       continue;
     }
     for (const subdir of subdirs) {
@@ -2411,7 +2411,7 @@ function inferPackageKind(
   const haystack = `${name} ${dirPath} ${dependencies} ${devDependencies}`;
 
   if (isFrontendPackage(manifest, files, dirPath)) return 'app';
-  if (/\"next\"/.test(haystack)) return 'app';
+  if (/"next"/.test(haystack)) return 'app';
   if (/(^|[.\s/_-])worker(?=$|[.\s/_-])/.test(`${name} ${dirPath}`.toLowerCase())) return 'worker';
   return inferServiceKind(name, haystack);
 }
@@ -2509,7 +2509,7 @@ function isHybridWebAppPackage(
   dirPath: string,
 ): boolean {
   const dependencies = JSON.stringify(manifest.dependencies || {});
-  const hasNext = /\"next\"/.test(dependencies) || files.some(file => file.relativePath.startsWith(`${dirPath}/app/`) || file.relativePath.startsWith(`${dirPath}/src/app/`));
+  const hasNext = /"next"/.test(dependencies) || files.some(file => file.relativePath.startsWith(`${dirPath}/app/`) || file.relativePath.startsWith(`${dirPath}/src/app/`));
   if (!hasNext) return false;
 
   const apiFiles = files.filter(file => isApiLikeFile(file.relativePath, dirPath));
@@ -3165,13 +3165,6 @@ function readFileSafe(filePath: string): string {
   } catch {
     return '';
   }
-}
-
-function selectFilesForAnalysis(unit: ArchitecturalUnit): RepoFile[] {
-  const scored = unit.files.map(file => ({ file, score: scoreFileForAnalysis(file, unit) }))
-    .sort((a, b) => b.score - a.score);
-
-  return scored.slice(0, 48).map(entry => entry.file);
 }
 
 function scoreFileForAnalysis(file: RepoFile, unit: ArchitecturalUnit): number {

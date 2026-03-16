@@ -20,6 +20,29 @@ export async function getChangedFiles(repoPath: string, baseRef: string, headRef
   return result.stdout.split('\n').filter(Boolean);
 }
 
+export type CommitSummary = {
+  sha: string;
+  subject: string;
+};
+
+export async function getCommitSummaries(repoPath: string, baseRef: string, headRef: string): Promise<CommitSummary[]> {
+  const result = await execa('git', ['log', '--format=%H%x09%s', '--reverse', `${baseRef}..${headRef}`], {
+    cwd: repoPath,
+  });
+
+  return result.stdout
+    .split('\n')
+    .filter(Boolean)
+    .map(line => {
+      const [sha, ...subjectParts] = line.split('\t');
+      return {
+        sha,
+        subject: subjectParts.join('\t').trim(),
+      };
+    })
+    .filter(commit => commit.sha && commit.subject);
+}
+
 async function getRemoteUrl(repoPath: string): Promise<string | null> {
   try {
     const result = await execa('git', ['remote', 'get-url', 'origin'], {

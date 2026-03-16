@@ -1,21 +1,29 @@
+import * as fs from 'fs';
 import * as path from 'path';
-import { PRFinding, PRReviewResult, Reviewer } from '../../types/index';
+import { PRFinding, PRReviewResult, ReviewIssue, Reviewer } from '../../types/index';
 import { resolveConfig, resolveApiKey } from '../config/loader';
 import { loadReviewersForMode } from '../reviewers/loader';
-import { getRuntime } from '../runtime/factory';
+import { getPRReviewRuntime } from '../runtime/factory';
 import { prReviewerAnalysisSchema, PRReviewerAnalysis } from '../validation/schemas';
 import {
   buildPRReviewSystemPrompt,
   buildPRReviewUserMessage,
   buildPRSummaryPrompt,
 } from '../prompts/pr-review';
-import { getGitDiff, getChangedFiles, getRepoOwnerAndName } from '../git/index';
+import { getGitDiff, getChangedFiles, getCommitSummaries, getRepoOwnerAndName } from '../git/index';
 import { selectReviewers } from './orchestrator';
 import { writePRReviewResult, ensureDir } from '../output/writer';
-import { PR_REVIEW_OUTPUT_FILE, OUTPUT_DIR } from '../config/defaults';
+import {
+  MAX_PR_CURRENT_CONTEXT_CHARS,
+  MAX_PR_CURRENT_FILE_CHARS,
+  MAX_PR_REVIEWER_TIMEOUT_MS,
+  OUTPUT_DIR,
+  PR_REVIEW_OUTPUT_FILE,
+} from '../config/defaults';
 import { GitHubReviewPlatform, getGitHubEnvContext } from '../github/platform';
 import { parseUnifiedDiff, buildReviewerDiffContext, getFilesInDiff } from './diff-parser';
 import { verifyFindings } from './verifier';
+import { verifyFindingsSemantically } from './semantic-verifier';
 import { deduplicateFindings } from './deduplicator';
 import { buildConversation, filterAlreadyPosted, PRConversation } from './conversation';
 import { IRuntime } from '../runtime/interface';
@@ -33,6 +41,8 @@ export interface PRReviewPipelineOptions {
   onProgress?: (msg: string) => void;
 }
 
+const MIN_CURRENT_FILE_CHARS = 1_000;
+
 const SEVERITY_ORDER: Record<string, number> = {
   info: 0,
   low: 1,
@@ -41,9 +51,17 @@ const SEVERITY_ORDER: Record<string, number> = {
   critical: 4,
 };
 
+function extractTrailFiles(finding: Pick<PRFinding, 'verificationTrail'>): string[] {
+  return finding.verificationTrail
+    .filter(entry => entry.startsWith('file:'))
+    .map(entry => entry.slice('file:'.length).trim())
+    .filter(Boolean);
+}
+
 function formatFindingComment(finding: PRFinding): string {
   const icon = { critical: '🔴', high: '🟠', medium: '🟡', low: '🟢', info: 'ℹ️' }[finding.priority] || '•';
   const confidencePercent = Math.round(finding.confidence * 100);
+  const inspectedFiles = extractTrailFiles(finding).slice(0, 3);
 
   let comment = `${icon} **[CodeOwl ${finding.priority.toUpperCase()}] ${finding.title}**\n\n`;
   comment += `${finding.description}\n\n`;
@@ -55,25 +73,60 @@ function formatFindingComment(finding: PRFinding): string {
 
   comment += `*Reviewer: ${finding.reviewerName} | Confidence: ${confidencePercent}%*`;
 
+  if (inspectedFiles.length > 0) {
+    comment += `\n\n*Verified via: ${inspectedFiles.join(', ')}*`;
+  }
+
   return comment;
+}
+
+function truncate(content: string, limit: number): string {
+  if (content.length <= limit) return content;
+  return content.slice(0, limit) + '\n\n[...current file truncated...]';
+}
+
+function buildCurrentFileContext(repoPath: string, currentDiffFiles: string[]): string {
+  if (currentDiffFiles.length === 0) {
+    return 'No readable current files were detected for this PR.';
+  }
+
+  const perFileBudget = Math.max(
+    MIN_CURRENT_FILE_CHARS,
+    Math.min(MAX_PR_CURRENT_FILE_CHARS, Math.floor(MAX_PR_CURRENT_CONTEXT_CHARS / currentDiffFiles.length)),
+  );
+
+  return currentDiffFiles.map(filePath => {
+    const absolutePath = path.join(repoPath, filePath);
+    if (!fs.existsSync(absolutePath)) {
+      return `### ${filePath}\n[Current file unavailable: file does not exist in the post-change workspace]`;
+    }
+
+    try {
+      const content = fs.readFileSync(absolutePath, 'utf-8');
+      return `### ${filePath}\n\`\`\`\n${truncate(content, perFileBudget)}\n\`\`\``;
+    } catch {
+      return `### ${filePath}\n[Current file unavailable: file could not be read as text]`;
+    }
+  }).join('\n\n');
 }
 
 export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Promise<PRReviewResult> {
   const { repoPath, onProgress } = options;
   const log = (msg: string) => onProgress?.(msg);
+  const issues: ReviewIssue[] = [];
 
-  // ─── Stage 1: Load config ───
   log('Loading configuration...');
   const config = resolveConfig(repoPath);
   const apiKey = resolveApiKey(config);
   const baseRef = options.baseRef || 'origin/main';
   const headRef = options.headRef || 'HEAD';
 
-  // ─── Stage 2: Get diff and parse it ───
   log(`Getting diff: ${baseRef}...${headRef}`);
   const rawDiff = await getGitDiff(repoPath, baseRef, headRef);
   const changedFiles = await getChangedFiles(repoPath, baseRef, headRef);
+  const commits = await getCommitSummaries(repoPath, baseRef, headRef);
   log(`Changed files: ${changedFiles.length}`);
+  log(`Commits in review range: ${commits.length}`);
 
   if (changedFiles.length === 0) {
     throw new Error('No changed files found between the specified refs.');
@@ -82,10 +135,10 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   log('Parsing diff...');
   const parsedDiff = parseUnifiedDiff(rawDiff);
   const structuredDiff = buildReviewerDiffContext(parsedDiff);
-  const filesInDiff = getFilesInDiff(parsedDiff);
-  log(`Parsed ${filesInDiff.length} files from diff`);
+  const currentDiffFiles = getFilesInDiff(parsedDiff);
+  const currentFileContext = buildCurrentFileContext(repoPath, currentDiffFiles);
+  log(`Parsed ${currentDiffFiles.length} files from diff`);
 
-  // ─── Stage 3: GitHub setup (start comment + reaction + conversation) ───
   let platform: GitHubReviewPlatform | null = null;
   let conversation: PRConversation | null = null;
 
@@ -102,18 +155,15 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
           repoPath,
         });
 
-        // Post start comment
         log('Posting review start comment...');
         await platform.publishStartComment();
 
-        // Add eyes reaction to /review trigger comment
         const triggerCommentId = parseInt(process.env.COMMENT_ID || '', 10);
         if (!isNaN(triggerCommentId) && triggerCommentId > 0) {
           log('Adding reaction to trigger comment...');
           await platform.addReaction(triggerCommentId, 'eyes');
         }
 
-        // Read existing conversation
         log('Reading existing PR conversation...');
         const [generalComments, reviewComments] = await Promise.all([
           platform.listExistingComments(),
@@ -125,7 +175,6 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     }
   }
 
-  // ─── Stage 4: Orchestrator - select reviewers ───
   log('Loading reviewers...');
   const { reviewers } = loadReviewersForMode(repoPath, 'pr-review', config);
 
@@ -133,72 +182,114 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   const orchestratorResult = await selectReviewers(
     changedFiles,
     rawDiff,
+    commits,
     reviewers,
     config.model,
     apiKey,
     config.transport,
     config.apiBaseUrl,
   );
+  issues.push(...orchestratorResult.issues);
 
   const selectedReviewerIds = new Set(orchestratorResult.selectedReviewers.map(r => r.reviewerId));
   const selectedReviewers = reviewers.filter(r => selectedReviewerIds.has(r.id));
   log(`Selected ${selectedReviewers.length} reviewer(s): ${selectedReviewers.map(r => r.name).join(', ')}`);
 
-  // ─── Stage 5: Run reviewer agents (parallel) ───
-  const runtime = await getRuntime();
-  log('Running reviewers in parallel...');
+  const runtime = await getPRReviewRuntime();
+  log('Running agentic reviewers in parallel...');
 
   const reviewerPromises = selectedReviewers.map(reviewer =>
-    runPRReviewer(reviewer, structuredDiff, changedFiles, repoPath, config.model, apiKey, config.transport, config.apiBaseUrl, runtime, log)
+    runPRReviewer(
+      reviewer,
+      structuredDiff,
+      currentDiffFiles,
+      currentFileContext,
+      repoPath,
+      config.model,
+      apiKey,
+      config.transport,
+      config.apiBaseUrl,
+      runtime,
+      log,
+    ),
   );
   const reviewerRunResults = await Promise.all(reviewerPromises);
   const toolSummaries = reviewerRunResults
     .filter(r => r.hasTool)
     .map(r => ({ reviewerName: r.reviewerName, toolRan: r.toolRan, findingCount: r.findings.length, error: r.toolError }));
+  for (const reviewerRunResult of reviewerRunResults) {
+    issues.push(...reviewerRunResult.issues);
+  }
   const allFindings = reviewerRunResults.flatMap(r => r.findings);
   log(`Collected ${allFindings.length} raw findings from all reviewers`);
 
-  // ─── Stage 6: Evidence verification ───
-  log('Verifying findings against diff...');
-  const { verified, rejected } = verifyFindings(allFindings, parsedDiff);
-  log(`Verified: ${verified.length}, Rejected: ${rejected.length}`);
+  log('Running deterministic verification...');
+  const deterministic = verifyFindings(allFindings, parsedDiff, repoPath);
+  log(`Deterministic verification: accepted ${deterministic.verified.length}, rejected ${deterministic.rejected.length}`);
 
-  if (rejected.length > 0) {
-    for (const r of rejected.slice(0, 5)) {
-      log(`  ✗ Rejected: "${r.finding.title}" — ${r.reason}`);
+  if (deterministic.rejected.length > 0) {
+    for (const rejected of deterministic.rejected.slice(0, 5)) {
+      log(`  ✗ Rejected (deterministic): "${rejected.finding.title}" — ${rejected.reason}`);
     }
-    if (rejected.length > 5) {
-      log(`  ... and ${rejected.length - 5} more rejected`);
+    if (deterministic.rejected.length > 5) {
+      log(`  ... and ${deterministic.rejected.length - 5} more deterministic rejections`);
     }
   }
 
-  // ─── Stage 7: Deduplication ───
-  log('Deduplicating findings...');
-  const deduped = deduplicateFindings(verified);
-  log(`After dedup: ${deduped.length} findings (removed ${verified.length - deduped.length} duplicates)`);
+  log('Deduplicating verified findings...');
+  const deduped = deduplicateFindings(deterministic.verified);
+  log(`After dedup: ${deduped.length} findings (removed ${deterministic.verified.length - deduped.length} duplicates)`);
 
-  // ─── Stage 8: Filter already-posted comments ───
-  let finalFindings = deduped;
+  log('Running semantic verification...');
+  const semantic = await verifyFindingsSemantically(deduped, {
+    repoPath,
+    runtime,
+    model: config.model,
+    apiKey,
+    transport: config.transport,
+    apiBaseUrl: config.apiBaseUrl,
+    log,
+  });
+  issues.push(...semantic.issues);
+  log(`Semantic verification: accepted ${semantic.verified.length}, rejected ${semantic.rejected.length}`);
+
+  if (semantic.rejected.length > 0) {
+    for (const rejected of semantic.rejected.slice(0, 5)) {
+      log(`  ✗ Rejected (semantic): "${rejected.finding.title}" — ${rejected.reason}`);
+    }
+    if (semantic.rejected.length > 5) {
+      log(`  ... and ${semantic.rejected.length - 5} more semantic rejections`);
+    }
+  }
+
+  let finalFindings = semantic.verified;
   if (conversation) {
     log('Filtering already-posted findings...');
-    finalFindings = filterAlreadyPosted(deduped, conversation);
+    finalFindings = filterAlreadyPosted(semantic.verified, conversation);
     log(`After filter: ${finalFindings.length} new findings to post`);
   }
 
-  // ─── Stage 9: Build result ───
-  // Summary is finalised after posting so the counts reflect what GitHub actually accepted.
+  const verificationStats = {
+    rawFindings: allFindings.length,
+    deterministicRejected: deterministic.rejected.length,
+    semanticRejected: semantic.rejected.length,
+    finalFindings: finalFindings.length,
+  };
+
   const result: PRReviewResult = {
     command: 'pr-review',
     baseRef,
     headRef,
+    status: issues.length > 0 ? 'degraded' : 'complete',
     selectedReviewers: orchestratorResult.selectedReviewers,
-    summary: '',        // filled in after stage 10
+    summary: '',
     findings: finalFindings,
-    rejectedFindings: rejected.length,
+    issues,
+    rejectedFindings: verificationStats.deterministicRejected + verificationStats.semanticRejected,
+    verificationStats,
     generatedAt: new Date().toISOString(),
   };
 
-  // ─── Stage 10: Post to GitHub ───
   if (platform && !options.dryRun) {
     log(`Posting ${finalFindings.length} inline comments to GitHub...`);
 
@@ -214,26 +305,31 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
 
     if (postedFindings.length < finalFindings.length) {
       log(`Warning: ${finalFindings.length - postedFindings.length} comment(s) could not be posted (line not in diff or GitHub API error).`);
+      issues.push({
+        severity: 'warning',
+        code: 'pr-inline-comment-post-failed',
+        message: `${finalFindings.length - postedFindings.length} inline comment(s) could not be posted to GitHub.`,
+        stage: 'publish-comments',
+      });
     }
 
-    // Build summary from findings that were actually posted so counts are accurate
-    const summary = buildPRSummaryPrompt(postedFindings, rejected.length, toolSummaries);
-    result.summary = summary;
+    result.verificationStats = {
+      ...verificationStats,
+      finalFindings: postedFindings.length,
+    };
+    result.status = issues.length > 0 ? 'degraded' : 'complete';
+    result.summary = buildPRSummaryPrompt(postedFindings, result.status, issues, result.verificationStats, toolSummaries);
     result.findings = postedFindings;
 
-    // Update or create summary comment
     log('Updating summary comment...');
-    await platform.updateOrCreateSummary(summary);
+    await platform.updateOrCreateSummary(result.summary);
 
-    // Update status comment to show completion
-    const statusBody = `<!-- codeowl-status -->\n🦉 **CodeOwl** review complete — ${postedFindings.length} findings posted.`;
+    const statusBody = result.status === 'degraded'
+      ? `<!-- codeowl-status -->\n🦉 **CodeOwl** review completed with warnings — ${postedFindings.length} findings posted.`
+      : `<!-- codeowl-status -->\n🦉 **CodeOwl** review complete — ${postedFindings.length} findings posted.`;
     await platform.updateStatusComment(statusBody);
 
-    // Auto-approve if configured and threshold met.
-    // Use `postedFindings` (what was actually reported in this run) for the threshold check.
-    // This ensures that already-posted findings from previous runs don't permanently block
-    // auto-approval on re-runs — what matters is whether THIS run's new findings exceed the threshold.
-    if (config.prReview?.autoApprove?.enabled) {
+    if (config.prReview?.autoApprove?.enabled && result.status === 'complete') {
       const maxSev = config.prReview.autoApprove.maxSeverity || 'low';
       const threshold = SEVERITY_ORDER[maxSev] ?? 1;
       const hasBlocker = postedFindings.some(f => SEVERITY_ORDER[f.priority] > threshold);
@@ -248,7 +344,6 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
         } else {
           const failMsg = '⚠️  Auto-approve failed — enable **Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests"** in this repository.';
           log(failMsg);
-          // Surface the failure in the status comment so it's visible on the PR
           await platform.updateStatusComment(
             `<!-- codeowl-status -->\n🦉 **CodeOwl** review complete — ${postedFindings.length} findings posted.\n\n${failMsg}`
           );
@@ -256,15 +351,15 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       } else {
         log(`Auto-approve skipped — findings exceed "${maxSev}" threshold.`);
       }
+    } else if (config.prReview?.autoApprove?.enabled && result.status !== 'complete') {
+      log('Auto-approve skipped — review completed with warnings.');
     }
 
-    log(`✓ GitHub comments posted`);
+    log('✓ GitHub comments posted');
   } else {
-    // Dry-run or no platform — use all finalFindings for the summary
-    result.summary = buildPRSummaryPrompt(finalFindings, rejected.length, toolSummaries);
+    result.summary = buildPRSummaryPrompt(finalFindings, result.status, issues, verificationStats, toolSummaries);
   }
 
-  // Write local artifact after summary is finalised
   const outputPath = path.join(repoPath, PR_REVIEW_OUTPUT_FILE);
   ensureDir(path.join(repoPath, OUTPUT_DIR));
   writePRReviewResult(outputPath, result);
@@ -278,12 +373,14 @@ interface PRReviewerRunResult {
   hasTool: boolean;
   toolRan: boolean;
   toolError?: string;
+  issues: ReviewIssue[];
 }
 
 async function runPRReviewer(
   reviewer: Reviewer,
   structuredDiff: string,
-  changedFiles: string[],
+  currentDiffFiles: string[],
+  currentFileContext: string,
   repoPath: string,
   model: string,
   apiKey: string,
@@ -292,7 +389,7 @@ async function runPRReviewer(
   runtime: IRuntime,
   log: (msg: string) => void
 ): Promise<PRReviewerRunResult> {
-  // Run external tool if configured
+  const issues: ReviewIssue[] = [];
   let toolContext: string | undefined;
   let toolRan = false;
   let toolError: string | undefined;
@@ -300,7 +397,7 @@ async function runPRReviewer(
   if (reviewer.tool) {
     const targetFiles =
       reviewer.tool.targeting === 'file' && reviewer.tool.fileArgs
-        ? changedFiles
+        ? currentDiffFiles
         : undefined;
 
     const toolResult = await runReviewerTool(reviewer.tool, repoPath, targetFiles);
@@ -310,31 +407,50 @@ async function runPRReviewer(
       toolContext = formatToolContext(reviewer.name, toolResult);
     } else if (!reviewer.tool.optional) {
       log(`  ✗ Required tool for ${reviewer.name} failed: ${toolResult.error}`);
-      return { findings: [], reviewerName: reviewer.name, hasTool: true, toolRan: false, toolError: toolResult.error };
+      issues.push({
+        severity: 'warning',
+        code: 'pr-reviewer-required-tool-failed',
+        message: `Required tool for reviewer "${reviewer.name}" failed: ${toolResult.error}`,
+        stage: 'reviewer-tool',
+        reviewerId: reviewer.id,
+        reviewerName: reviewer.name,
+      });
+      return { findings: [], reviewerName: reviewer.name, hasTool: true, toolRan: false, toolError: toolResult.error, issues };
     } else {
       toolError = toolResult.error;
       toolRan = false;
-      log(`  ⚠ Tool for ${reviewer.name} failed (continuing AI-only): ${toolResult.error}`);
+      log(`  ⚠ Tool for ${reviewer.name} failed (continuing investigation): ${toolResult.error}`);
+      issues.push({
+        severity: 'warning',
+        code: 'pr-reviewer-optional-tool-failed',
+        message: `Optional tool for reviewer "${reviewer.name}" failed: ${toolResult.error}`,
+        stage: 'reviewer-tool',
+        reviewerId: reviewer.id,
+        reviewerName: reviewer.name,
+      });
     }
   }
 
   const systemPrompt = buildPRReviewSystemPrompt(reviewer.instructions, reviewer.id, reviewer.name);
-  const userMessage = buildPRReviewUserMessage(structuredDiff, changedFiles, toolContext);
+  const userMessage = buildPRReviewUserMessage(structuredDiff, currentDiffFiles, currentFileContext, toolContext);
 
   try {
     log(`  Running reviewer: ${reviewer.name}...`);
-    const runResult = await runtime.run<PRReviewerAnalysis>(
+    const runResult = await runtime.runAgenticReview<PRReviewerAnalysis>(
       {
         systemPrompt,
         userMessage,
         model: reviewer.model || model,
         apiKey,
+        repoPath,
+        initialFiles: currentDiffFiles,
         transport,
         apiBaseUrl,
         maxTokens: 8096,
         temperature: 0,
+        timeoutMs: MAX_PR_REVIEWER_TIMEOUT_MS,
       },
-      prReviewerAnalysisSchema
+      prReviewerAnalysisSchema,
     );
 
     const findings: PRFinding[] = runResult.data.findings.map(f => ({
@@ -344,10 +460,18 @@ async function runPRReviewer(
     }));
 
     log(`  ✓ ${reviewer.name}: ${findings.length} findings`);
-    return { findings, reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError };
+    return { findings, reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError, issues };
   } catch (err) {
     log(`  ✗ ${reviewer.name} failed: ${(err as Error).message}`);
-    return { findings: [], reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError };
+    issues.push({
+      severity: 'warning',
+      code: 'pr-reviewer-failed',
+      message: `Reviewer "${reviewer.name}" failed: ${(err as Error).message}`,
+      stage: 'run-reviewers',
+      reviewerId: reviewer.id,
+      reviewerName: reviewer.name,
+    });
+    return { findings: [], reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError, issues };
   }
 }
 
@@ -355,11 +479,9 @@ async function resolveGitHubContext(
   options: PRReviewPipelineOptions,
   repoPath: string
 ): Promise<{ owner: string; repo: string; prNumber: number } | null> {
-  // Try GitHub Actions environment first
   const envCtx = getGitHubEnvContext();
   if (envCtx) return envCtx;
 
-  // Fall back to git remote + manual PR number
   if (!options.prNumber) {
     console.warn('Warning: --pr-number is required for GitHub comments outside of GitHub Actions.');
     return null;

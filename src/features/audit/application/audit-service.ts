@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { AuditResult, Finding, Reviewer, ReviewerResult } from '../../../types/index';
-import { buildRepoIndex, formatFilesForContext, scopeFilesForReviewer } from '../../../core/indexing/index';
+import { AuditResult, Finding, ReviewIssue, Reviewer, ReviewerResult } from '../../../types/index';
+import { buildRepoIndex, scopeFilesForReviewer } from '../../../core/indexing/index';
 import { reviewerAnalysisSchema, ReviewerAnalysis } from '../../../core/validation/schemas';
 import { buildAuditSystemPrompt, buildAuditUserMessage } from '../../../core/prompts/audit';
 import { computeOverallScore } from '../../../core/scoring/normalizer';
@@ -11,13 +11,13 @@ import {
   AUDIT_OUTPUT_FILE,
   OUTPUT_DIR,
   MAX_FILES_FOR_REVIEWER_CONTEXT,
-  MAX_CHARS_PER_REVIEWER_FILE,
   MAX_CONCURRENT_AUDIT_REVIEWERS,
   MAX_AUDIT_REVIEWER_TOKENS,
+  MAX_AUDIT_REVIEWER_TIMEOUT_MS,
 } from '../../../core/config/defaults';
 import { ensureDir, writeAuditResult } from '../../../core/output/writer';
 import { IRuntime } from '../../../core/runtime/interface';
-import { getRuntime } from '../../../core/runtime/factory';
+import { getAuditRuntime } from '../../../core/runtime/factory';
 import { resolveApiKey, resolveConfig } from '../../config/application/config-service';
 import { loadReviewersForMode } from '../../reviewers/application/reviewer-registry';
 import { selectAuditReviewers } from './audit-orchestrator';
@@ -34,13 +34,14 @@ export interface AuditDependencies {
 }
 
 const defaultDependencies: AuditDependencies = {
-  getRuntime,
+  getRuntime: getAuditRuntime,
 };
 
 /** Run a full repository audit and write the resulting report to disk. */
 export async function runAudit(options: AuditOptions, dependencies: AuditDependencies = defaultDependencies): Promise<AuditResult> {
   const { repoPath, onProgress } = options;
   const log = (msg: string) => onProgress?.(msg);
+  const issues: ReviewIssue[] = [];
 
   log('Loading configuration...');
   const config = resolveConfig(repoPath);
@@ -48,7 +49,15 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
 
   log('Loading reviewers into the owlery...');
   const { reviewers: allReviewers, warnings } = loadReviewersForMode(repoPath, 'audit', config);
-  warnings.forEach(warning => log(`Warning: ${warning}`));
+  warnings.forEach(warning => {
+    log(`Warning: ${warning}`);
+    issues.push({
+      severity: 'warning',
+      code: 'reviewer-load-warning',
+      message: warning,
+      stage: 'load-reviewers',
+    });
+  });
 
   log('Indexing repository...');
   const index = await buildRepoIndex(repoPath, config);
@@ -77,6 +86,12 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       log(`Orchestrator selected ${activeReviewers.length} reviewer(s): ${activeReviewers.map(r => r.name).join(', ')}`);
     } catch (err) {
       log(`Orchestrator stumbled (${(err as Error).message}); falling back to the full reviewer set.`);
+      issues.push({
+        severity: 'warning',
+        code: 'audit-orchestrator-fallback',
+        message: `Audit orchestrator failed and the full reviewer set was used instead: ${(err as Error).message}`,
+        stage: 'select-reviewers',
+      });
       activeReviewers = allReviewers;
     }
   }
@@ -94,10 +109,28 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       log(`Running reviewer: ${reviewer.name}...`);
       try {
         const result = await runSingleReviewer(reviewer, index, config, apiKey, runtime);
+        if (result.execution.toolError) {
+          issues.push({
+            severity: reviewer.tool?.optional === false ? 'error' : 'warning',
+            code: 'audit-reviewer-tool-error',
+            message: `Tool for reviewer "${reviewer.name}" failed: ${result.execution.toolError}`,
+            stage: 'reviewer-tool',
+            reviewerId: reviewer.id,
+            reviewerName: reviewer.name,
+          });
+        }
         log(`  ✓ ${reviewer.name}: score=${result.score}, findings=${result.findings.length}`);
         return result;
       } catch (err) {
         log(`  Warning: reviewer ${reviewer.name} failed and will be skipped: ${(err as Error).message}`);
+        issues.push({
+          severity: 'warning',
+          code: 'audit-reviewer-failed',
+          message: `Reviewer "${reviewer.name}" failed and was skipped: ${(err as Error).message}`,
+          stage: 'run-reviewers',
+          reviewerId: reviewer.id,
+          reviewerName: reviewer.name,
+        });
         return null;
       }
     },
@@ -128,9 +161,11 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   const result: AuditResult = {
     command: 'audit',
     repoPath: path.resolve(repoPath),
+    status: issues.length > 0 ? 'degraded' : 'complete',
     overallScore,
     summary: buildAuditSummary(overallScore, totalFindings, criticalCount, activeReviewers.length),
     reviewerResults: finalReviewerResults,
+    issues,
     generatedAt: new Date().toISOString(),
   };
 
@@ -179,8 +214,8 @@ async function runSingleReviewer(
 ): Promise<ReviewerResult> {
   const start = Date.now();
   const scopedFiles = scopeFilesForReviewer(index, reviewer.scopeHints);
-  const filesContext = formatFilesForContext(scopedFiles, MAX_FILES_FOR_REVIEWER_CONTEXT, MAX_CHARS_PER_REVIEWER_FILE);
   const model = reviewer.model || config.model;
+  const seedFiles = scopedFiles.slice(0, MAX_FILES_FOR_REVIEWER_CONTEXT).map(file => file.relativePath);
 
   // Run external tool if configured
   let toolContext: string | undefined;
@@ -207,24 +242,29 @@ async function runSingleReviewer(
   }
 
   const systemPrompt = buildAuditSystemPrompt(reviewer.instructions, reviewer.id, reviewer.name);
-  const userMessage = buildAuditUserMessage(filesContext, index.totalFiles, scopedFiles.length, toolContext);
+  const userMessage = buildAuditUserMessage(seedFiles, index.totalFiles, scopedFiles.length, toolContext);
 
   let analysis: ReviewerAnalysis;
+  let runtimeType: import('../../../types/index').RuntimeType;
 
   try {
-    const result = await runtime.run<ReviewerAnalysis>(
+    const result = await runtime.runAgenticReview<ReviewerAnalysis>(
       {
         systemPrompt,
         userMessage,
         model,
         apiKey,
+        repoPath: index.repoPath,
+        initialFiles: seedFiles,
         transport: config.transport,
         apiBaseUrl: config.apiBaseUrl,
         maxTokens: MAX_AUDIT_REVIEWER_TOKENS,
+        timeoutMs: MAX_AUDIT_REVIEWER_TIMEOUT_MS,
       },
       reviewerAnalysisSchema,
     );
     analysis = result.data;
+    runtimeType = result.runtime;
   } catch (err) {
     throw new Error(`Reviewer ${reviewer.id} failed: ${(err as Error).message}`, { cause: err });
   }
@@ -244,7 +284,7 @@ async function runSingleReviewer(
     findings,
     execution: {
       model,
-      runtime: 'sdk',
+      runtime: runtimeType,
       durationMs: Date.now() - start,
       scopedFiles: scopedFiles.length,
       totalRepoFilesSeen: index.totalFiles,

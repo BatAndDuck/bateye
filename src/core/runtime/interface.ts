@@ -6,10 +6,23 @@ export interface RunOptions {
   userMessage: string;
   model: string;       // e.g. "anthropic/claude-sonnet-4-5"
   apiKey: string;
+  cwd?: string;
   transport?: string;  // e.g. "vercel" when routing anthropic/openai models through a gateway
   apiBaseUrl?: string; // Override for OpenAI-compatible gateways
   maxTokens?: number;
   temperature?: number;
+}
+
+export interface AgenticPRReviewOptions extends RunOptions {
+  repoPath: string;
+  changedFiles: string[];
+  timeoutMs?: number;
+}
+
+export interface AgenticRepositoryReviewOptions extends RunOptions {
+  repoPath: string;
+  initialFiles?: string[];
+  timeoutMs?: number;
 }
 
 /** Result wrapper returned by IRuntime.run, including parsed data and execution metadata */
@@ -26,7 +39,8 @@ export interface RunResult<T> {
  * Implementations include DirectAIRuntime (SDK) and any future CLI-based runtimes.
  */
 export interface IRuntime {
-  run<T>(options: RunOptions, schema: z.ZodSchema<T>): Promise<RunResult<T>>;
+  run<T>(options: RunOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>>;
+  runAgenticReview<T>(options: AgenticRepositoryReviewOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>>;
   listModels(provider: string, apiKey: string, apiBaseUrl?: string): Promise<string[]>;
   isAvailable(): Promise<boolean>;
 }

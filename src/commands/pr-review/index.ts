@@ -16,6 +16,8 @@ export async function runPRReviewCommand(repoPath: string, options: PRReviewComm
   console.log(chalk.cyan('\n🦉 CodeOwl PR Review\n'));
 
   const spinner = ora({ text: 'Starting PR review...', color: 'cyan' }).start();
+  let lastMessage = 'Starting PR review...';
+  const noticePattern = /^\s*(Warning:|⚠|✗)/;
 
   let result: PRReviewResult;
   try {
@@ -27,7 +29,16 @@ export async function runPRReviewCommand(repoPath: string, options: PRReviewComm
       githubToken: options.token,
       prNumber: options.prNumber ? parseInt(options.prNumber, 10) : undefined,
       dryRun: options.dryRun,
-      onProgress: msg => { spinner.text = msg; },
+      onProgress: msg => {
+        if (noticePattern.test(msg)) {
+          spinner.stopAndPersist({ symbol: chalk.yellow('!'), text: msg.trim() });
+          spinner.start(lastMessage);
+          return;
+        }
+
+        lastMessage = msg;
+        spinner.text = msg;
+      },
     });
   } catch (err) {
     spinner.fail(chalk.red(`PR review failed: ${(err as Error).message}`));
@@ -51,10 +62,19 @@ function printPRReviewSummary(result: PRReviewResult): void {
   console.log(chalk.white(`  PR Review: ${result.baseRef}...${result.headRef}`));
   console.log(chalk.cyan('─'.repeat(50)));
   console.log();
+  const statusColor = result.status === 'complete' ? chalk.green : chalk.yellow;
+  console.log(chalk.gray('  Status:'), statusColor(result.status.toUpperCase()));
   console.log(chalk.gray('  Reviewers run:'), result.selectedReviewers.map(r => r.reviewerId).join(', '));
-  console.log(chalk.gray('  Total findings:'), result.findings.length);
-  if (result.rejectedFindings && result.rejectedFindings > 0) {
-    console.log(chalk.gray('  Rejected (unverified):'), result.rejectedFindings);
+  if (result.verificationStats) {
+    console.log(chalk.gray('  Raw findings:'), result.verificationStats.rawFindings);
+    console.log(chalk.gray('  Rejected (deterministic):'), result.verificationStats.deterministicRejected);
+    console.log(chalk.gray('  Rejected (semantic):'), result.verificationStats.semanticRejected);
+    console.log(chalk.gray('  Final findings:'), result.verificationStats.finalFindings);
+  } else {
+    console.log(chalk.gray('  Total findings:'), result.findings.length);
+    if (result.rejectedFindings && result.rejectedFindings > 0) {
+      console.log(chalk.gray('  Rejected (unverified):'), result.rejectedFindings);
+    }
   }
   console.log();
 
@@ -67,6 +87,17 @@ function printPRReviewSummary(result: PRReviewResult): void {
   if (result.autoApproved) {
     console.log();
     console.log(chalk.green('  ✅ PR auto-approved (no findings above threshold)'));
+  }
+
+  if (result.issues.length > 0) {
+    console.log();
+    console.log(chalk.yellow(`  Review issues (${result.issues.length}):`));
+    for (const issue of result.issues.slice(0, 5)) {
+      console.log(chalk.yellow(`    - ${issue.message}`));
+    }
+    if (result.issues.length > 5) {
+      console.log(chalk.gray(`    ... and ${result.issues.length - 5} more`));
+    }
   }
 
   console.log();
