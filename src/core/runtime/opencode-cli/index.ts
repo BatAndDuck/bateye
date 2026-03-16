@@ -554,12 +554,19 @@ export class OpenCodeCLIRuntime implements IRuntime {
     let lastError: unknown;
     // Estimate input tokens from prompt character lengths (1 token ≈ 4 chars)
     const estimatedInputTokens = Math.ceil((options.systemPrompt.length + options.userMessage.length) / 4);
+    const callId = `${target.transport}/${target.modelId}`;
+
+    console.error(`[opencode] Starting call: model=${callId}, systemPrompt=${options.systemPrompt.length} chars, userMessage=${options.userMessage.length} chars, estInputTokens=~${estimatedInputTokens}, timeout=${Math.round(timeoutMs / 1000)}s`);
 
     for (let attempt = 0; attempt < MAX_STRUCTURED_OUTPUT_ATTEMPTS; attempt++) {
       let sessionID: string | undefined;
       const validationRetryNote = attempt === 0
         ? ''
         : `\n\nPREVIOUS ATTEMPT FAILED STRUCTURED OUTPUT VALIDATION. Return ONLY JSON matching the requested schema with all required fields and correct value types. Validation issue: ${formatValidationFeedback(lastError)}`;
+
+      if (attempt > 0) {
+        console.error(`[opencode] Retry attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS} for ${callId}: previous error was ${summarizeSdkError(lastError)}`);
+      }
 
       try {
         const session = await this.request<OpenCodeSession>(`${server.url}/session`, {
@@ -588,9 +595,16 @@ export class OpenCodeCLIRuntime implements IRuntime {
           }),
         }, timeoutMs);
 
-        const providerError = response.info.error?.data?.message || response.info.error?.message;
+        const providerError = response?.info?.error?.data?.message || response?.info?.error?.message;
         if (providerError) {
           throw new Error(providerError);
+        }
+
+        if (!response?.info || !response?.parts) {
+          throw new Error(
+            `OpenCode returned an invalid response structure (info=${typeof response?.info}, parts=${typeof response?.parts}). `
+            + `Model: ${target.transport}/${target.modelId}. Raw: ${JSON.stringify(response).slice(0, 500)}`
+          );
         }
 
         const serializedResponse = serializeOpenCodeResponse(response);
@@ -610,18 +624,28 @@ export class OpenCodeCLIRuntime implements IRuntime {
           estimated: true,
         };
 
+        const durationMs = Date.now() - start;
+        console.error(`[opencode] ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ~${estimatedInputTokens} in + ~${estimatedOutputTokens} out (estimated), attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}`);
+
         return {
           data: validated,
           model: options.model,
           runtime: 'cli',
-          durationMs: Date.now() - start,
+          durationMs,
           rawResponse: serializedResponse,
           tokensUsed,
         };
       } catch (err) {
         lastError = err;
+        const durationMs = Date.now() - start;
+        const willRetry = shouldRetryStructuredOutput(err, attempt);
 
-        if (!shouldRetryStructuredOutput(err, attempt)) {
+        console.error(`[opencode] ✗ ${callId} failed after ${(durationMs / 1000).toFixed(1)}s (attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}, retry=${willRetry}): ${summarizeSdkError(err)}`);
+        if (err instanceof z.ZodError) {
+          console.error(`[opencode]   Validation errors: ${formatValidationFeedback(err)}`);
+        }
+
+        if (!willRetry) {
           throw new Error(`OpenCode server request failed: ${summarizeSdkError(err)}`, { cause: err });
         }
       } finally {

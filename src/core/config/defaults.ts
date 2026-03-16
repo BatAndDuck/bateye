@@ -40,6 +40,8 @@ export const MAX_AUDIT_REVIEWER_TOKENS = 8096;
 export const MAX_AUDIT_REVIEWER_TIMEOUT_MS = 1_200_000;
 /** Maximum wall clock time for one agentic PR reviewer investigation (ms). */
 export const MAX_PR_REVIEWER_TIMEOUT_MS = 1_200_000;
+/** Hard cap on number of reviewers to run in a single PR review. Prevents cost explosion. */
+export const MAX_PR_REVIEWERS = 10;
 /** Maximum number of files an agentic PR reviewer should inspect. */
 export const MAX_PR_REVIEWER_FILES_TO_INSPECT = 20;
 /** Maximum number of supporting files a PR finding should rely on. */

@@ -116,18 +116,24 @@ export async function selectReviewers(
       issues: [],
       tokensUsed: result.tokensUsed,
     };
-  } catch {
-    // Fall back to selecting all reviewers if orchestrator fails
+  } catch (err) {
+    // Orchestrator failed — fall back to a SMALL core set using the same
+    // broadening logic that normally supplements the AI's selection.
+    // NEVER fall back to ALL reviewers: that causes catastrophic cost explosion.
+    const fallbackSelection = broadenReviewerSelection(
+      { selectedReviewers: [] },
+      availableReviewers,
+      changedFiles,
+      commits,
+    );
+
     return {
-      selectedReviewers: availableReviewers.map(r => ({
-        reviewerId: r.id,
-        reason: 'Selected by fallback (orchestrator unavailable)',
-      })),
+      ...fallbackSelection,
       issues: [
         {
           severity: 'warning',
           code: 'pr-orchestrator-fallback',
-          message: 'PR reviewer orchestrator failed and all available reviewers were selected instead.',
+          message: `PR reviewer orchestrator failed (${(err as Error).message}); using ${fallbackSelection.selectedReviewers.length} core reviewer(s) as fallback.`,
           stage: 'select-reviewers',
         },
       ],

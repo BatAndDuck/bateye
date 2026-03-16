@@ -17,6 +17,7 @@ import {
   MAX_PR_CURRENT_CONTEXT_CHARS,
   MAX_PR_CURRENT_FILE_CHARS,
   MAX_PR_REVIEWER_TIMEOUT_MS,
+  MAX_PR_REVIEWERS,
   OUTPUT_DIR,
   PR_REVIEW_OUTPUT_FILE,
 } from '../config/defaults';
@@ -209,12 +210,30 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   issues.push(...orchestratorResult.issues);
 
   const selectedReviewerIds = new Set(orchestratorResult.selectedReviewers.map(r => r.reviewerId));
-  const selectedReviewers = reviewers.filter(r => selectedReviewerIds.has(r.id));
+  let selectedReviewers = reviewers.filter(r => selectedReviewerIds.has(r.id));
   const orchestratorModel = config.lightModel !== config.model ? config.lightModel : config.model;
-  log(`Selected ${selectedReviewers.length} reviewer(s): ${selectedReviewers.map(r => r.name).join(', ')}`);
   if (orchestratorResult.tokensUsed) {
     log(`[token-diag] Orchestrator (${orchestratorModel}): ${formatTokenSummary(orchestratorResult.tokensUsed)}`);
   }
+
+  // Hard cap to prevent cost explosion (e.g. orchestrator fallback or misconfigured reviewers)
+  if (selectedReviewers.length > MAX_PR_REVIEWERS) {
+    log(`⚠ WARNING: ${selectedReviewers.length} reviewers selected — exceeds hard cap of ${MAX_PR_REVIEWERS}. Trimming to first ${MAX_PR_REVIEWERS}.`);
+    issues.push({
+      severity: 'warning',
+      code: 'pr-reviewer-cap-exceeded',
+      message: `Reviewer count (${selectedReviewers.length}) exceeded hard cap (${MAX_PR_REVIEWERS}); only first ${MAX_PR_REVIEWERS} reviewers will run.`,
+      stage: 'select-reviewers',
+    });
+    selectedReviewers = selectedReviewers.slice(0, MAX_PR_REVIEWERS);
+  }
+
+  log(`Selected ${selectedReviewers.length} reviewer(s): ${selectedReviewers.map(r => r.name).join(', ')}`);
+
+  // Estimate cost BEFORE running reviewers so user sees what's about to happen
+  const estInputPerReviewer = Math.round((Math.min(structuredDiff.length, 24000) + currentFileContext.length + 2500) / 4);
+  const estTotalInput = estInputPerReviewer * selectedReviewers.length;
+  log(`[token-diag] Estimated cost preview: ${selectedReviewers.length} reviewers × ~${estInputPerReviewer.toLocaleString()} input tokens/ea = ~${estTotalInput.toLocaleString()} total input tokens (agentic calls may multiply this 2-5×)`);
 
   const runtime = await getPRReviewRuntime();
   log(`Running ${selectedReviewers.length} agentic reviewer(s) in parallel (model: ${config.model})...`);

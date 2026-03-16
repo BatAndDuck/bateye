@@ -97,9 +97,16 @@ async function runWithAnthropic<T>(
 ): Promise<RunResult<T>> {
   const client = new Anthropic({ apiKey: options.apiKey });
   const start = Date.now();
+  const estInputTokens = Math.ceil((options.systemPrompt.length + options.userMessage.length) / 4);
+
+  console.error(`[direct-anthropic] Starting call: model=${modelId}, systemPrompt=${options.systemPrompt.length} chars, userMessage=${options.userMessage.length} chars, estInputTokens=~${estInputTokens}`);
 
   let lastError: Error | null = null;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      console.error(`[direct-anthropic] Retry ${attempt + 1}/${MAX_RETRIES} for ${modelId}: ${lastError?.message?.slice(0, 200)}`);
+    }
+
     const retryNote = attempt > 0 ? `\n\nPREVIOUS ATTEMPT FAILED JSON VALIDATION. Return ONLY valid JSON.` : '';
     const response = await client.messages.create({
       model: modelId,
@@ -122,16 +129,19 @@ async function runWithAnthropic<T>(
     try {
       const parsed = JSON.parse(jsonStr);
       const validated = schema.parse(parsed);
+      const durationMs = Date.now() - start;
+      console.error(`[direct-anthropic] ✓ ${modelId} completed in ${(durationMs / 1000).toFixed(1)}s: ${tokensUsed.inputTokens} in + ${tokensUsed.outputTokens} out (actual), attempt ${attempt + 1}/${MAX_RETRIES}`);
       return {
         data: validated,
         model: modelId,
         runtime: 'sdk',
-        durationMs: Date.now() - start,
+        durationMs,
         rawResponse: rawText,
         tokensUsed,
       };
     } catch (err) {
       lastError = err as Error;
+      console.error(`[direct-anthropic] ✗ ${modelId} validation failed (attempt ${attempt + 1}/${MAX_RETRIES}): ${lastError.message.slice(0, 200)}`);
     }
   }
   throw new Error(`Failed to get valid JSON after ${MAX_RETRIES} attempts: ${lastError?.message}`);
@@ -214,10 +224,17 @@ async function runWithOpenAI<T>(
     baseURL,
   });
   const start = Date.now();
+  const estInputTokens = Math.ceil((options.systemPrompt.length + options.userMessage.length) / 4);
+  const label = baseURL ? `openai-compat(${baseURL})` : 'openai';
+
+  console.error(`[direct-${label}] Starting call: model=${modelId}, systemPrompt=${options.systemPrompt.length} chars, userMessage=${options.userMessage.length} chars, estInputTokens=~${estInputTokens}`);
 
   let lastError: Error | null = null;
   let includeResponseFormat = true;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      console.error(`[direct-${label}] Retry ${attempt + 1}/${MAX_RETRIES} for ${modelId}: ${lastError?.message?.slice(0, 200)}`);
+    }
     const retryNote = attempt > 0 ? `\n\nPREVIOUS ATTEMPT FAILED JSON VALIDATION. Return ONLY valid JSON.` : '';
     let response: Awaited<ReturnType<typeof client.chat.completions.create>>;
     try {
@@ -233,6 +250,7 @@ async function runWithOpenAI<T>(
       });
     } catch (err) {
       if (includeResponseFormat && shouldRetryWithoutResponseFormat(err)) {
+        console.error(`[direct-${label}] response_format not supported by ${modelId}, retrying without it`);
         includeResponseFormat = false;
         attempt -= 1;
         continue;
@@ -249,16 +267,19 @@ async function runWithOpenAI<T>(
     try {
       const parsed = JSON.parse(jsonStr);
       const validated = schema.parse(parsed);
+      const durationMs = Date.now() - start;
+      console.error(`[direct-${label}] ✓ ${modelId} completed in ${(durationMs / 1000).toFixed(1)}s: ${tokensUsed.inputTokens} in + ${tokensUsed.outputTokens} out, attempt ${attempt + 1}/${MAX_RETRIES}`);
       return {
         data: validated,
         model: modelId,
         runtime: 'sdk',
-        durationMs: Date.now() - start,
+        durationMs,
         rawResponse: rawText,
         tokensUsed,
       };
     } catch (err) {
       lastError = err as Error;
+      console.error(`[direct-${label}] ✗ ${modelId} validation failed (attempt ${attempt + 1}/${MAX_RETRIES}): ${lastError.message.slice(0, 200)}`);
     }
   }
   throw new Error(`Failed to get valid JSON after ${MAX_RETRIES} attempts: ${lastError?.message}`);
