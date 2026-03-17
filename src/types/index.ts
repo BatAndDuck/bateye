@@ -30,6 +30,8 @@ export type Finding = {
   startColumn?: number;
   endColumn?: number;
   evidence: string[];
+  /** One-sentence explanation of why this finding applies to the specific codebase being reviewed */
+  applicabilityNote?: string;
   recommendation: string;
   tags?: string[];
 };
@@ -83,6 +85,13 @@ export type AuditResult = {
   issues: ReviewIssue[];
   tokenUsage?: TokenUsageSummary;
   generatedAt: string;
+  codeowlVersion?: string;
+  verificationStats?: {
+    rawFindings: number;
+    confidenceRejected: number;
+    semanticRejected: number;
+    finalFindings: number;
+  };
 };
 
 /** PR review output containing all inline findings and an overall summary */
@@ -108,6 +117,7 @@ export type PRReviewResult = {
   tokenUsage?: TokenUsageSummary;
   generatedAt: string;
   autoApproved?: boolean;
+  codeowlVersion?: string;
 };
 
 /** The communication interface type exposed by a service (e.g. REST, GraphQL, event stream) */
@@ -269,6 +279,7 @@ export type Config = {
   };
 };
 
+/** Controls which review mode(s) a reviewer participates in. Defaults to 'both'. */
 export type ReviewerMode = 'audit' | 'pr-review' | 'both';
 
 /** Whether a tool targets individual files or the whole project */

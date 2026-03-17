@@ -204,38 +204,17 @@ export async function runSystemDesign(
 ): Promise<SystemDesignResult> {
   const { repoPath, onProgress } = options;
   const log = (msg: string) => onProgress?.(msg);
-  const outputDir = options.outputDir || path.join(repoPath, SYSTEM_DESIGN_OUTPUT_DIR);
 
-  log('Loading configuration...');
-  const config = resolveConfig(repoPath);
-  const apiKey = resolveSystemDesignApiKey(config, log);
+  // Phase 1: Load config and index
+  const { config, apiKey, outputDir } = loadSystemDesignConfig(options, log);
+  const { index, units } = await loadRepoAndDetectUnits(repoPath, config, log);
 
-  log('Indexing repository...');
-  let index: Awaited<ReturnType<typeof buildRepoIndex>>;
-  try {
-    index = await buildRepoIndex(repoPath, config);
-  } catch (err) {
-    throw new Error(`Failed to index repository: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
-  }
-  log(`Found ${index.totalFiles} files.`);
-
-  log('Detecting services and modules...');
-  let units: Awaited<ReturnType<typeof detectArchitecturalUnits>>;
-  try {
-    units = await detectArchitecturalUnits(repoPath, index);
-  } catch (err) {
-    throw new Error(`Failed to detect architectural units: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
-  }
-  log(`Detected ${units.length} architectural unit(s): ${units.map(unit => unit.name).join(', ')}`);
-
+  // Phase 2: Analyze architectural units with optional AI
   const runtime = apiKey ? await resolveSystemDesignRuntime(dependencies, log) : null;
-  const aiContext: AIRuntimeContext = {
-    apiKey,
-    runtime,
-    enabled: Boolean(apiKey && runtime),
-  };
+  const aiContext: AIRuntimeContext = { apiKey, runtime, enabled: Boolean(apiKey && runtime) };
   const { services, unitAnalyses } = await analyzeArchitecturalUnits(units, index, config.model, aiContext, log);
 
+  // Phase 3: Reconcile connections and synthesize architecture
   reconcileServiceConnections(services, unitAnalyses, index);
   const coverage = buildCoverageSummary(unitAnalyses, services);
   appendIntegrationServices(services);
@@ -245,13 +224,51 @@ export async function runSystemDesign(
   const synthesis = aiContext.enabled && aiContext.apiKey
     ? await synthesizeArchitecture(services, repoStructure, config.model, aiContext.apiKey, coverage, config.transport, config.apiBaseUrl)
     : synthesizeStaticArchitecture(services, repoStructure);
-  const result = buildSystemDesignResult(repoPath, outputDir, synthesis, services, coverage);
 
+  // Phase 4: Assemble and write output
+  const result = buildSystemDesignResult(repoPath, outputDir, synthesis, services, coverage);
   log('Writing output files...');
   writeSystemDesignOutputs(outputDir, result, unitAnalyses, units);
   log(`✓ HTML report: ${path.join(outputDir, 'index.html')}`);
 
   return result;
+}
+
+function loadSystemDesignConfig(
+  options: SystemDesignOptions,
+  log: (msg: string) => void,
+): { config: ReturnType<typeof resolveConfig>; apiKey: string | null; outputDir: string } {
+  log('Loading configuration...');
+  const config = resolveConfig(options.repoPath);
+  const apiKey = resolveSystemDesignApiKey(config, log);
+  const outputDir = options.outputDir || path.join(options.repoPath, SYSTEM_DESIGN_OUTPUT_DIR);
+  return { config, apiKey, outputDir };
+}
+
+async function loadRepoAndDetectUnits(
+  repoPath: string,
+  config: ReturnType<typeof resolveConfig>,
+  log: (msg: string) => void,
+): Promise<{ index: RepoIndex; units: ArchitecturalUnit[] }> {
+  log('Indexing repository...');
+  let index: RepoIndex;
+  try {
+    index = await buildRepoIndex(repoPath, config);
+  } catch (err) {
+    throw new Error(`Failed to index repository: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+  }
+  log(`Found ${index.totalFiles} files.`);
+
+  log('Detecting services and modules...');
+  let units: ArchitecturalUnit[];
+  try {
+    units = await detectArchitecturalUnits(repoPath, index);
+  } catch (err) {
+    throw new Error(`Failed to detect architectural units: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+  }
+  log(`Detected ${units.length} architectural unit(s): ${units.map(unit => unit.name).join(', ')}`);
+
+  return { index, units };
 }
 
 function resolveSystemDesignApiKey(

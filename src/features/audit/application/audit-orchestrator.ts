@@ -10,7 +10,7 @@ import {
   RepoProfile,
 } from '../../../core/prompts/audit';
 
-const ORCHESTRATOR_MAX_TOKENS = 2048;
+const ORCHESTRATOR_MAX_TOKENS = 4096;
 const ORCHESTRATOR_TEMPERATURE = 0;
 
 /**
@@ -90,6 +90,7 @@ export interface SelectAuditReviewersOptions {
 export interface AuditReviewerSelectionResult extends OrchestratorResult {
   issues: ReviewIssue[];
   tokensUsed?: TokenUsageSummary;
+  repoProfile: RepoProfile;
 }
 
 export async function selectAuditReviewers(options: SelectAuditReviewersOptions): Promise<AuditReviewerSelectionResult> {
@@ -129,6 +130,7 @@ export async function selectAuditReviewers(options: SelectAuditReviewersOptions)
       ...result.data,
       issues: [],
       tokensUsed: result.tokensUsed,
+      repoProfile: profile,
     };
   } catch (err) {
     // Orchestrator unavailable — use a conservative core set rather than all reviewers
@@ -144,6 +146,7 @@ export async function selectAuditReviewers(options: SelectAuditReviewersOptions)
           stage: 'select-reviewers',
         },
       ],
+      repoProfile: profile,
     };
   }
 }
