@@ -46,6 +46,8 @@ export const MAX_PR_REVIEWERS = 10;
 export const MAX_PR_REVIEWER_FILES_TO_INSPECT = 20;
 /** Maximum number of supporting files a PR finding should rely on. */
 export const MAX_PR_FINDING_SUPPORT_FILES = 5;
+/** Maximum characters of structured diff to include in PR reviewer user messages. */
+export const MAX_STRUCTURED_DIFF_CHARS = 24_000;
 /** Maximum characters of current file content to seed into PR review prompts. */
 export const MAX_PR_CURRENT_FILE_CHARS = 4_000;
 /**

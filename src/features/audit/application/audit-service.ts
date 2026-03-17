@@ -18,20 +18,7 @@ import {
 import { ensureDir, writeAuditResult } from '../../../core/output/writer';
 import { IRuntime, TokenUsage } from '../../../core/runtime/interface';
 import { getAuditRuntime } from '../../../core/runtime/factory';
-
-function addTokens(a: TokenUsage, b: TokenUsage): TokenUsage {
-  return {
-    inputTokens: a.inputTokens + b.inputTokens,
-    outputTokens: a.outputTokens + b.outputTokens,
-    estimated: a.estimated || b.estimated,
-  };
-}
-
-function formatTokenSummary(usage: TokenUsage): string {
-  const total = usage.inputTokens + usage.outputTokens;
-  const suffix = usage.estimated ? ' (estimated)' : '';
-  return `${total.toLocaleString()} tokens (${usage.inputTokens.toLocaleString()} in + ${usage.outputTokens.toLocaleString()} out)${suffix}`;
-}
+import { addTokens, formatTokenSummary } from '../../../core/runtime/token-utils';
 import { resolveApiKey, resolveConfig } from '../../config/application/config-service';
 import { loadReviewersForMode } from '../../reviewers/application/reviewer-registry';
 import { selectAuditReviewers } from './audit-orchestrator';

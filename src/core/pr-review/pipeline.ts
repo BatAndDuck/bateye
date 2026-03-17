@@ -18,6 +18,7 @@ import {
   MAX_PR_CURRENT_FILE_CHARS,
   MAX_PR_REVIEWER_TIMEOUT_MS,
   MAX_PR_REVIEWERS,
+  MAX_STRUCTURED_DIFF_CHARS,
   OUTPUT_DIR,
   PR_REVIEW_OUTPUT_FILE,
 } from '../config/defaults';
@@ -28,22 +29,9 @@ import { verifyFindingsSemantically } from './semantic-verifier';
 import { deduplicateFindings } from './deduplicator';
 import { buildConversation, filterAlreadyPosted, PRConversation } from './conversation';
 import { IRuntime, TokenUsage } from '../runtime/interface';
+import { addTokens, formatTokenSummary } from '../runtime/token-utils';
 import { runReviewerTool } from '../tools/runner';
 import { formatToolContext } from '../tools/format';
-
-function addTokens(a: TokenUsage, b: TokenUsage): TokenUsage {
-  return {
-    inputTokens: a.inputTokens + b.inputTokens,
-    outputTokens: a.outputTokens + b.outputTokens,
-    estimated: a.estimated || b.estimated,
-  };
-}
-
-function formatTokenSummary(usage: TokenUsage): string {
-  const total = usage.inputTokens + usage.outputTokens;
-  const suffix = usage.estimated ? ' (est)' : ' (actual)';
-  return `${total.toLocaleString()} tokens (${usage.inputTokens.toLocaleString()} in + ${usage.outputTokens.toLocaleString()} out)${suffix}`;
-}
 
 export interface PRReviewPipelineOptions {
   repoPath: string;
@@ -229,13 +217,13 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   log(`Selected ${selectedReviewers.length} reviewer(s): ${selectedReviewers.map(r => r.name).join(', ')}`);
 
   // Estimate cost BEFORE running reviewers so user sees what's about to happen
-  const estInputPerReviewer = Math.round((Math.min(structuredDiff.length, 24000) + currentFileContext.length + 2500) / 4);
+  const estInputPerReviewer = Math.round((Math.min(structuredDiff.length, MAX_STRUCTURED_DIFF_CHARS) + currentFileContext.length + 2500) / 4);
   const estTotalInput = estInputPerReviewer * selectedReviewers.length;
   log(`[token-diag] Estimated cost preview: ${selectedReviewers.length} reviewers × ~${estInputPerReviewer.toLocaleString()} input tokens/ea = ~${estTotalInput.toLocaleString()} total input tokens (agentic calls may multiply this 2-5×)`);
 
   const runtime = await getPRReviewRuntime();
   log(`Running ${selectedReviewers.length} agentic reviewer(s) in parallel (model: ${config.model})...`);
-  log(`[token-diag] Per-reviewer estimated input context: structured diff (~${Math.round(Math.min(structuredDiff.length, 24000) / 4).toLocaleString()} tokens) + file context (~${Math.round(currentFileContext.length / 4).toLocaleString()} tokens) + system prompt (~600 tokens)`);
+  log(`[token-diag] Per-reviewer estimated input context: structured diff (~${Math.round(Math.min(structuredDiff.length, MAX_STRUCTURED_DIFF_CHARS) / 4).toLocaleString()} tokens) + file context (~${Math.round(currentFileContext.length / 4).toLocaleString()} tokens) + system prompt (~600 tokens)`);
 
   const reviewerPromises = selectedReviewers.map(reviewer =>
     runPRReviewer(

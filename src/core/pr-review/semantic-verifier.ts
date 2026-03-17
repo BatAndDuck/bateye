@@ -1,7 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { PRFinding, ReviewIssue } from '../../types/index';
+import { MAX_PR_CURRENT_FILE_CHARS } from '../config/defaults';
 import { IRuntime, TokenUsage } from '../runtime/interface';
+import { addTokens } from '../runtime/token-utils';
 import { prFindingBatchVerificationSchema } from '../validation/schemas';
 import {
   buildPRFindingBatchVerificationSystemPrompt,
@@ -31,18 +33,16 @@ const VERIFICATION_BATCH_SIZE = 5;
 
 function readFileContent(repoPath: string, filePath: string): string | null {
   try {
-    return fs.readFileSync(path.join(repoPath, filePath), 'utf-8');
+    const content = fs.readFileSync(path.join(repoPath, filePath), 'utf-8');
+    // Truncate to keep semantic verification prompts manageable. The verifier only
+    // needs the region around the finding; sending entire large files is wasteful.
+    if (content.length > MAX_PR_CURRENT_FILE_CHARS) {
+      return content.slice(0, MAX_PR_CURRENT_FILE_CHARS) + `\n... [truncated at ${MAX_PR_CURRENT_FILE_CHARS} chars]`;
+    }
+    return content;
   } catch {
     return null;
   }
-}
-
-function addTokens(a: TokenUsage, b: TokenUsage): TokenUsage {
-  return {
-    inputTokens: a.inputTokens + b.inputTokens,
-    outputTokens: a.outputTokens + b.outputTokens,
-    estimated: a.estimated || b.estimated,
-  };
 }
 
 type FindingWithContext = {
