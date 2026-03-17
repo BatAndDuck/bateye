@@ -3,7 +3,8 @@ import OpenAI, { AzureOpenAI } from 'openai';
 import * as fs from 'fs';
 import * as path from 'path';
 import { z } from 'zod';
-import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, normalizeTransport, resolveModelTarget } from '../interface';
+import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, TokenUsage, normalizeTransport, resolveModelTarget } from '../interface';
+import { buildStructureRepairPrompt, formatZodErrors, tryParseAndValidate, extractJsonFromText } from '../structure-repair';
 
 const MAX_RETRIES = 3;
 const VERCEL_AI_GATEWAY_BASE_URL = 'https://ai-gateway.vercel.sh/v1';
@@ -97,9 +98,18 @@ async function runWithAnthropic<T>(
 ): Promise<RunResult<T>> {
   const client = new Anthropic({ apiKey: options.apiKey });
   const start = Date.now();
+  const estInputTokens = Math.ceil((options.systemPrompt.length + options.userMessage.length) / 4);
+
+  const labelTag = options.callLabel ? ` [${options.callLabel}]` : '';
+  console.error(`[direct-anthropic]${labelTag} Starting call: model=${modelId}, systemPrompt=${options.systemPrompt.length} chars, userMessage=${options.userMessage.length} chars, estInputTokens=~${estInputTokens}`);
 
   let lastError: Error | null = null;
+  let lastRawJson: string | null = null;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      console.error(`[direct-anthropic] Retry ${attempt + 1}/${MAX_RETRIES} for ${modelId}: ${lastError?.message?.slice(0, 200)}`);
+    }
+
     const retryNote = attempt > 0 ? `\n\nPREVIOUS ATTEMPT FAILED JSON VALIDATION. Return ONLY valid JSON.` : '';
     const response = await client.messages.create({
       model: modelId,
@@ -113,23 +123,72 @@ async function runWithAnthropic<T>(
       .filter(c => c.type === 'text')
       .map(c => (c as { type: 'text'; text: string }).text)
       .join('');
+    const tokensUsed: TokenUsage = {
+      inputTokens: response.usage.input_tokens,
+      outputTokens: response.usage.output_tokens,
+    };
 
     const jsonStr = extractJson(rawText);
     try {
       const parsed = JSON.parse(jsonStr);
       const validated = schema.parse(parsed);
+      const durationMs = Date.now() - start;
+      console.error(`[direct-anthropic] ✓ ${modelId} completed in ${(durationMs / 1000).toFixed(1)}s: ${tokensUsed.inputTokens} in + ${tokensUsed.outputTokens} out (actual), attempt ${attempt + 1}/${MAX_RETRIES}`);
       return {
         data: validated,
         model: modelId,
         runtime: 'sdk',
-        durationMs: Date.now() - start,
+        durationMs,
         rawResponse: rawText,
+        tokensUsed,
       };
     } catch (err) {
       lastError = err as Error;
+      lastRawJson = jsonStr;
+      console.error(`[direct-anthropic] ✗ ${modelId} validation failed (attempt ${attempt + 1}/${MAX_RETRIES}): ${lastError.message.slice(0, 200)}`);
     }
   }
-  throw new Error(`Failed to get valid JSON after ${MAX_RETRIES} attempts: ${lastError?.message}`);
+
+  // AI structure repair: ask the model to fix the malformed JSON
+  if (lastRawJson) {
+    console.error(`[direct-anthropic] Attempting AI structure repair for ${modelId}...`);
+    try {
+      const repair = buildStructureRepairPrompt(lastRawJson, formatZodErrors(lastError));
+      const repairResponse = await client.messages.create({
+        model: modelId,
+        max_tokens: options.maxTokens || 8096,
+        temperature: 0,
+        system: repair.systemPrompt,
+        messages: [{ role: 'user', content: repair.userMessage }],
+      });
+      const repairText = repairResponse.content
+        .filter(c => c.type === 'text')
+        .map(c => (c as { type: 'text'; text: string }).text)
+        .join('');
+      const repairJson = extractJsonFromText(repairText);
+      const repairResult = tryParseAndValidate(repairJson, schema);
+      if ('data' in repairResult) {
+        const durationMs = Date.now() - start;
+        console.error(`[direct-anthropic] ✓ AI repair succeeded for ${modelId} in ${(durationMs / 1000).toFixed(1)}s`);
+        return {
+          data: repairResult.data,
+          model: modelId,
+          runtime: 'sdk',
+          durationMs,
+          rawResponse: repairText,
+          tokensUsed: {
+            inputTokens: repairResponse.usage.input_tokens,
+            outputTokens: repairResponse.usage.output_tokens,
+          },
+        };
+      }
+      console.error(`[direct-anthropic] ✗ AI repair also failed validation: ${('error' in repairResult ? repairResult.error.message : 'unknown').slice(0, 200)}`);
+    } catch (repairErr) {
+      console.error(`[direct-anthropic] ✗ AI repair call failed: ${(repairErr as Error).message.slice(0, 200)}`);
+    }
+  }
+
+  throw new Error(`Failed to get valid JSON after ${MAX_RETRIES} attempts + AI repair: ${lastError?.message}`);
 }
 
 async function runWithAzure<T>(
@@ -150,6 +209,7 @@ async function runWithAzure<T>(
   const start = Date.now();
 
   let lastError: Error | null = null;
+  let lastRawJson: string | null = null;
   let includeResponseFormat = true;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     const retryNote = attempt > 0 ? `\n\nPREVIOUS ATTEMPT FAILED JSON VALIDATION. Return ONLY valid JSON.` : '';
@@ -175,6 +235,10 @@ async function runWithAzure<T>(
     }
 
     const rawText = response.choices[0]?.message?.content || '';
+    const tokensUsed: TokenUsage = {
+      inputTokens: response.usage?.prompt_tokens ?? 0,
+      outputTokens: response.usage?.completion_tokens ?? 0,
+    };
     const jsonStr = extractJson(rawText);
     try {
       const parsed = JSON.parse(jsonStr);
@@ -185,12 +249,50 @@ async function runWithAzure<T>(
         runtime: 'sdk',
         durationMs: Date.now() - start,
         rawResponse: rawText,
+        tokensUsed,
       };
     } catch (err) {
       lastError = err as Error;
+      lastRawJson = jsonStr;
     }
   }
-  throw new Error(`Failed to get valid JSON after ${MAX_RETRIES} attempts: ${lastError?.message}`);
+
+  // AI structure repair for Azure
+  if (lastRawJson) {
+    try {
+      const repair = buildStructureRepairPrompt(lastRawJson, formatZodErrors(lastError));
+      const repairResponse = await client.chat.completions.create({
+        model: modelId,
+        max_tokens: options.maxTokens || 8096,
+        temperature: 0,
+        ...(includeResponseFormat ? { response_format: { type: 'json_object' as const } } : {}),
+        messages: [
+          { role: 'system', content: repair.systemPrompt },
+          { role: 'user', content: repair.userMessage },
+        ],
+      });
+      const repairText = repairResponse.choices[0]?.message?.content || '';
+      const repairJson = extractJsonFromText(repairText);
+      const repairResult = tryParseAndValidate(repairJson, schema);
+      if ('data' in repairResult) {
+        return {
+          data: repairResult.data,
+          model: modelId,
+          runtime: 'sdk',
+          durationMs: Date.now() - start,
+          rawResponse: repairText,
+          tokensUsed: {
+            inputTokens: repairResponse.usage?.prompt_tokens ?? 0,
+            outputTokens: repairResponse.usage?.completion_tokens ?? 0,
+          },
+        };
+      }
+    } catch {
+      // Fall through to throw
+    }
+  }
+
+  throw new Error(`Failed to get valid JSON after ${MAX_RETRIES} attempts + AI repair: ${lastError?.message}`);
 }
 
 async function runWithOpenAI<T>(
@@ -204,10 +306,19 @@ async function runWithOpenAI<T>(
     baseURL,
   });
   const start = Date.now();
+  const estInputTokens = Math.ceil((options.systemPrompt.length + options.userMessage.length) / 4);
+  const label = baseURL ? `openai-compat(${baseURL})` : 'openai';
+
+  const labelTag = options.callLabel ? ` [${options.callLabel}]` : '';
+  console.error(`[direct-${label}]${labelTag} Starting call: model=${modelId}, systemPrompt=${options.systemPrompt.length} chars, userMessage=${options.userMessage.length} chars, estInputTokens=~${estInputTokens}`);
 
   let lastError: Error | null = null;
+  let lastRawJson: string | null = null;
   let includeResponseFormat = true;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      console.error(`[direct-${label}] Retry ${attempt + 1}/${MAX_RETRIES} for ${modelId}: ${lastError?.message?.slice(0, 200)}`);
+    }
     const retryNote = attempt > 0 ? `\n\nPREVIOUS ATTEMPT FAILED JSON VALIDATION. Return ONLY valid JSON.` : '';
     let response: Awaited<ReturnType<typeof client.chat.completions.create>>;
     try {
@@ -223,6 +334,7 @@ async function runWithOpenAI<T>(
       });
     } catch (err) {
       if (includeResponseFormat && shouldRetryWithoutResponseFormat(err)) {
+        console.error(`[direct-${label}] response_format not supported by ${modelId}, retrying without it`);
         includeResponseFormat = false;
         attempt -= 1;
         continue;
@@ -231,22 +343,71 @@ async function runWithOpenAI<T>(
     }
 
     const rawText = response.choices[0]?.message?.content || '';
+    const tokensUsed: TokenUsage = {
+      inputTokens: response.usage?.prompt_tokens ?? 0,
+      outputTokens: response.usage?.completion_tokens ?? 0,
+    };
     const jsonStr = extractJson(rawText);
     try {
       const parsed = JSON.parse(jsonStr);
       const validated = schema.parse(parsed);
+      const durationMs = Date.now() - start;
+      console.error(`[direct-${label}] ✓ ${modelId} completed in ${(durationMs / 1000).toFixed(1)}s: ${tokensUsed.inputTokens} in + ${tokensUsed.outputTokens} out, attempt ${attempt + 1}/${MAX_RETRIES}`);
       return {
         data: validated,
         model: modelId,
         runtime: 'sdk',
-        durationMs: Date.now() - start,
+        durationMs,
         rawResponse: rawText,
+        tokensUsed,
       };
     } catch (err) {
       lastError = err as Error;
+      lastRawJson = jsonStr;
+      console.error(`[direct-${label}] ✗ ${modelId} validation failed (attempt ${attempt + 1}/${MAX_RETRIES}): ${lastError.message.slice(0, 200)}`);
     }
   }
-  throw new Error(`Failed to get valid JSON after ${MAX_RETRIES} attempts: ${lastError?.message}`);
+
+  // AI structure repair: ask the model to fix the malformed JSON
+  if (lastRawJson) {
+    console.error(`[direct-${label}] Attempting AI structure repair for ${modelId}...`);
+    try {
+      const repair = buildStructureRepairPrompt(lastRawJson, formatZodErrors(lastError));
+      const repairResponse = await client.chat.completions.create({
+        model: modelId,
+        max_tokens: options.maxTokens || 8096,
+        temperature: 0,
+        ...(includeResponseFormat ? { response_format: { type: 'json_object' as const } } : {}),
+        messages: [
+          { role: 'system', content: repair.systemPrompt },
+          { role: 'user', content: repair.userMessage },
+        ],
+      });
+      const repairText = repairResponse.choices[0]?.message?.content || '';
+      const repairJson = extractJsonFromText(repairText);
+      const repairResult = tryParseAndValidate(repairJson, schema);
+      if ('data' in repairResult) {
+        const durationMs = Date.now() - start;
+        console.error(`[direct-${label}] ✓ AI repair succeeded for ${modelId} in ${(durationMs / 1000).toFixed(1)}s`);
+        return {
+          data: repairResult.data,
+          model: modelId,
+          runtime: 'sdk',
+          durationMs,
+          rawResponse: repairText,
+          tokensUsed: {
+            inputTokens: repairResponse.usage?.prompt_tokens ?? 0,
+            outputTokens: repairResponse.usage?.completion_tokens ?? 0,
+          },
+        };
+      }
+      console.error(`[direct-${label}] ✗ AI repair also failed validation: ${('error' in repairResult ? repairResult.error.message : 'unknown').slice(0, 200)}`);
+    } catch (repairErr) {
+      console.error(`[direct-${label}] ✗ AI repair call failed: ${(repairErr as Error).message.slice(0, 200)}`);
+    }
+  }
+
+  throw new Error(`Failed to get valid JSON after ${MAX_RETRIES} attempts + AI repair: ${lastError?.message}`);
 }
 
 function resolveOpenAICompatibleBaseUrl(transport: string, apiBaseUrl?: string): string | undefined {

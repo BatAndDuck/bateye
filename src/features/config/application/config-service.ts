@@ -46,9 +46,10 @@ export function resolveConfig(
   repoPath: string,
 ): ResolvedConfig {
   const config = loadConfig(repoPath);
+  const model = config.model || DEFAULT_MODEL;
   return {
     $schema: config.$schema,
-    model: config.model || DEFAULT_MODEL,
+    model,
     transport: config.transport || 'auto',
     apiBaseUrl: config.apiBaseUrl,
     exclude: config.exclude || [],

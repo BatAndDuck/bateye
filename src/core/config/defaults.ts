@@ -37,17 +37,26 @@ export const MAX_CONCURRENT_AUDIT_REVIEWERS = 10;
 /** Maximum token budget for a single audit reviewer response. */
 export const MAX_AUDIT_REVIEWER_TOKENS = 8096;
 /** Maximum wall clock time for one agentic audit reviewer investigation (ms). */
-export const MAX_AUDIT_REVIEWER_TIMEOUT_MS = 420_000;
+export const MAX_AUDIT_REVIEWER_TIMEOUT_MS = 1_200_000;
 /** Maximum wall clock time for one agentic PR reviewer investigation (ms). */
-export const MAX_PR_REVIEWER_TIMEOUT_MS = 150_000;
+export const MAX_PR_REVIEWER_TIMEOUT_MS = 1_200_000;
+/** Hard cap on number of reviewers to run in a single PR review. Prevents cost explosion. */
+export const MAX_PR_REVIEWERS = 10;
 /** Maximum number of files an agentic PR reviewer should inspect. */
 export const MAX_PR_REVIEWER_FILES_TO_INSPECT = 20;
 /** Maximum number of supporting files a PR finding should rely on. */
 export const MAX_PR_FINDING_SUPPORT_FILES = 5;
+/** Maximum characters of structured diff to include in PR reviewer user messages. */
+export const MAX_STRUCTURED_DIFF_CHARS = 24_000;
 /** Maximum characters of current file content to seed into PR review prompts. */
 export const MAX_PR_CURRENT_FILE_CHARS = 4_000;
-/** Maximum total characters of seeded current file context for PR review prompts. */
-export const MAX_PR_CURRENT_CONTEXT_CHARS = 80_000;
+/**
+ * Maximum total characters of seeded current file context for PR review prompts.
+ * Kept intentionally low because agentic reviewers can read full files on demand.
+ * The seeded context is a convenience to give the reviewer an overview, not a substitute
+ * for filesystem access. Previous value of 80,000 was the main source of token bloat.
+ */
+export const MAX_PR_CURRENT_CONTEXT_CHARS = 20_000;
 
 /** Default timeout for external scanning tools (ms) */
 export const DEFAULT_TOOL_TIMEOUT_MS = 60_000;

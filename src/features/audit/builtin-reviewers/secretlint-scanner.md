@@ -3,7 +3,7 @@ id: secretlint-scanner
 name: Secretlint Scanner
 description: Runs Secretlint for deterministic detection of hardcoded secrets, API keys, credentials, and tokens.
 enabled: true
-mode: both
+mode: audit
 category: security
 tool:
   command: npx

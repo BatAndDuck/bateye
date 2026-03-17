@@ -3,7 +3,7 @@ id: html-validate-scanner
 name: HTML Validation & Accessibility Scanner
 description: Runs html-validate for HTML standards compliance and accessibility violations (WCAG).
 enabled: true
-mode: both
+mode: audit
 category: ux
 tool:
   command: npx

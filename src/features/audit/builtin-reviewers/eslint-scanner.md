@@ -3,7 +3,7 @@ id: eslint-scanner
 name: ESLint Scanner
 description: Runs ESLint static analysis, then AI filters false positives and reports actionable code quality and security findings.
 enabled: true
-mode: both
+mode: audit
 category: code-quality
 tool:
   command: npx

@@ -3,7 +3,7 @@ id: semgrep-scanner
 name: Semgrep SAST Scanner
 description: Runs Semgrep static analysis for security vulnerabilities and bugs. Requires semgrep CLI installed (pip install semgrep).
 enabled: true
-mode: both
+mode: audit
 category: security
 tool:
   command: semgrep

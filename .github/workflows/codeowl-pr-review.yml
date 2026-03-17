@@ -2,7 +2,7 @@ name: CodeOwl PR Review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, reopened]
   issue_comment:
     types: [created]
 
@@ -70,7 +70,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install OpenCode CLI
@@ -102,8 +102,7 @@ jobs:
             mkdir -p .codeowl
             cat > .codeowl/config.json << 'EOF'
           {
-            "model": "anthropic/claude-sonnet-4-5",
-            "lightModel": "anthropic/claude-haiku-4-5-20251001"
+            "model": "anthropic/claude-sonnet-4-5"
           }
           EOF
           fi

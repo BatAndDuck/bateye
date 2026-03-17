@@ -87,7 +87,8 @@ export interface SelectAuditReviewersOptions {
 }
 
 export async function selectAuditReviewers(options: SelectAuditReviewersOptions): Promise<OrchestratorResult> {
-  const { index, availableReviewers, model, apiKey, transport, apiBaseUrl } = options;
+  const { index, availableReviewers, apiKey, transport, apiBaseUrl } = options;
+  const model = options.model;
   const runtime = await getRuntime();
 
   const profile = buildRepoProfile(index);

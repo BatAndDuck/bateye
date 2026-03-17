@@ -17,6 +17,8 @@ import {
   MAX_PR_CURRENT_CONTEXT_CHARS,
   MAX_PR_CURRENT_FILE_CHARS,
   MAX_PR_REVIEWER_TIMEOUT_MS,
+  MAX_PR_REVIEWERS,
+  MAX_STRUCTURED_DIFF_CHARS,
   OUTPUT_DIR,
   PR_REVIEW_OUTPUT_FILE,
 } from '../config/defaults';
@@ -26,7 +28,8 @@ import { verifyFindings } from './verifier';
 import { verifyFindingsSemantically } from './semantic-verifier';
 import { deduplicateFindings } from './deduplicator';
 import { buildConversation, filterAlreadyPosted, PRConversation } from './conversation';
-import { IRuntime } from '../runtime/interface';
+import { IRuntime, TokenUsage } from '../runtime/interface';
+import { addTokens, formatTokenSummary } from '../runtime/token-utils';
 import { runReviewerTool } from '../tools/runner';
 import { formatToolContext } from '../tools/format';
 
@@ -138,6 +141,8 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   const currentDiffFiles = getFilesInDiff(parsedDiff);
   const currentFileContext = buildCurrentFileContext(repoPath, currentDiffFiles);
   log(`Parsed ${currentDiffFiles.length} files from diff`);
+  log(`[token-diag] Raw diff: ${rawDiff.length.toLocaleString()} chars (~${Math.round(rawDiff.length / 4).toLocaleString()} tokens) | Structured diff: ${structuredDiff.length.toLocaleString()} chars (~${Math.round(structuredDiff.length / 4).toLocaleString()} tokens, capped at 24k chars for reviewer)`);
+  log(`[token-diag] Current file context: ${currentFileContext.length.toLocaleString()} chars (~${Math.round(currentFileContext.length / 4).toLocaleString()} tokens) across ${currentDiffFiles.length} file(s)`);
 
   let platform: GitHubReviewPlatform | null = null;
   let conversation: PRConversation | null = null;
@@ -192,11 +197,33 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   issues.push(...orchestratorResult.issues);
 
   const selectedReviewerIds = new Set(orchestratorResult.selectedReviewers.map(r => r.reviewerId));
-  const selectedReviewers = reviewers.filter(r => selectedReviewerIds.has(r.id));
+  let selectedReviewers = reviewers.filter(r => selectedReviewerIds.has(r.id));
+  if (orchestratorResult.tokensUsed) {
+    log(`[token-diag] Orchestrator (${config.model}): ${formatTokenSummary(orchestratorResult.tokensUsed)}`);
+  }
+
+  // Hard cap to prevent cost explosion (e.g. orchestrator fallback or misconfigured reviewers)
+  if (selectedReviewers.length > MAX_PR_REVIEWERS) {
+    log(`⚠ WARNING: ${selectedReviewers.length} reviewers selected — exceeds hard cap of ${MAX_PR_REVIEWERS}. Trimming to first ${MAX_PR_REVIEWERS}.`);
+    issues.push({
+      severity: 'warning',
+      code: 'pr-reviewer-cap-exceeded',
+      message: `Reviewer count (${selectedReviewers.length}) exceeded hard cap (${MAX_PR_REVIEWERS}); only first ${MAX_PR_REVIEWERS} reviewers will run.`,
+      stage: 'select-reviewers',
+    });
+    selectedReviewers = selectedReviewers.slice(0, MAX_PR_REVIEWERS);
+  }
+
   log(`Selected ${selectedReviewers.length} reviewer(s): ${selectedReviewers.map(r => r.name).join(', ')}`);
 
+  // Estimate cost BEFORE running reviewers so user sees what's about to happen
+  const estInputPerReviewer = Math.round((Math.min(structuredDiff.length, MAX_STRUCTURED_DIFF_CHARS) + currentFileContext.length + 2500) / 4);
+  const estTotalInput = estInputPerReviewer * selectedReviewers.length;
+  log(`[token-diag] Estimated cost preview: ${selectedReviewers.length} reviewers × ~${estInputPerReviewer.toLocaleString()} input tokens/ea = ~${estTotalInput.toLocaleString()} total input tokens (agentic calls may multiply this 2-5×)`);
+
   const runtime = await getPRReviewRuntime();
-  log('Running agentic reviewers in parallel...');
+  log(`Running ${selectedReviewers.length} agentic reviewer(s) in parallel (model: ${config.model})...`);
+  log(`[token-diag] Per-reviewer estimated input context: structured diff (~${Math.round(Math.min(structuredDiff.length, MAX_STRUCTURED_DIFF_CHARS) / 4).toLocaleString()} tokens) + file context (~${Math.round(currentFileContext.length / 4).toLocaleString()} tokens) + system prompt (~600 tokens)`);
 
   const reviewerPromises = selectedReviewers.map(reviewer =>
     runPRReviewer(
@@ -220,6 +247,20 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   for (const reviewerRunResult of reviewerRunResults) {
     issues.push(...reviewerRunResult.issues);
   }
+
+  // Aggregate token usage across all reviewer runs
+  let reviewerTokenTotal: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  let hasTokenData = false;
+  for (const r of reviewerRunResults) {
+    if (r.tokensUsed) {
+      reviewerTokenTotal = addTokens(reviewerTokenTotal, r.tokensUsed);
+      hasTokenData = true;
+    }
+  }
+  if (hasTokenData) {
+    log(`[token-diag] Reviewers subtotal: ${formatTokenSummary(reviewerTokenTotal)}`);
+  }
+
   const allFindings = reviewerRunResults.flatMap(r => r.findings);
   log(`Collected ${allFindings.length} raw findings from all reviewers`);
 
@@ -240,53 +281,118 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   const deduped = deduplicateFindings(deterministic.verified);
   log(`After dedup: ${deduped.length} findings (removed ${deterministic.verified.length - deduped.length} duplicates)`);
 
-  log('Running semantic verification...');
-  const semantic = await verifyFindingsSemantically(deduped, {
-    repoPath,
-    runtime,
-    model: config.model,
-    apiKey,
-    transport: config.transport,
-    apiBaseUrl: config.apiBaseUrl,
-    log,
-  });
-  issues.push(...semantic.issues);
-  log(`Semantic verification: accepted ${semantic.verified.length}, rejected ${semantic.rejected.length}`);
-
-  if (semantic.rejected.length > 0) {
-    for (const rejected of semantic.rejected.slice(0, 5)) {
-      log(`  ✗ Rejected (semantic): "${rejected.finding.title}" — ${rejected.reason}`);
-    }
-    if (semantic.rejected.length > 5) {
-      log(`  ... and ${semantic.rejected.length - 5} more semantic rejections`);
-    }
+  // Cost optimization: skip semantic verification for high-confidence findings that
+  // already passed all deterministic gates. Only send lower-confidence findings to AI.
+  const HIGH_CONFIDENCE_THRESHOLD = 0.92;
+  const highConfidence = deduped.filter(f => f.confidence >= HIGH_CONFIDENCE_THRESHOLD);
+  const needsSemanticCheck = deduped.filter(f => f.confidence < HIGH_CONFIDENCE_THRESHOLD);
+  if (highConfidence.length > 0) {
+    log(`[token-diag] Skipping semantic verification for ${highConfidence.length} high-confidence (≥${HIGH_CONFIDENCE_THRESHOLD}) finding(s) — saves ~${Math.round(highConfidence.length * 800).toLocaleString()} tokens`);
   }
 
-  let finalFindings = semantic.verified;
+  let semanticVerified: PRFinding[] = [...highConfidence];
+  let semanticRejectedCount = 0;
+  let semanticTokens: TokenUsage | undefined;
+
+  if (needsSemanticCheck.length > 0) {
+    log(`Running semantic verification on ${needsSemanticCheck.length} finding(s)...`);
+    const semantic = await verifyFindingsSemantically(needsSemanticCheck, {
+      repoPath,
+      runtime,
+      model: config.model,
+      apiKey,
+      transport: config.transport,
+      apiBaseUrl: config.apiBaseUrl,
+      log,
+    });
+    issues.push(...semantic.issues);
+    semanticVerified = [...highConfidence, ...semantic.verified];
+    semanticRejectedCount = semantic.rejected.length;
+    semanticTokens = semantic.tokensUsed;
+    log(`Semantic verification: accepted ${semantic.verified.length}, rejected ${semantic.rejected.length}`);
+    if (semantic.tokensUsed) {
+      log(`[token-diag] Semantic verification (${config.model}): ${formatTokenSummary(semantic.tokensUsed)}`);
+    }
+
+    if (semantic.rejected.length > 0) {
+      for (const rejected of semantic.rejected.slice(0, 5)) {
+        log(`  ✗ Rejected (semantic): "${rejected.finding.title}" — ${rejected.reason}`);
+      }
+      if (semantic.rejected.length > 5) {
+        log(`  ... and ${semantic.rejected.length - 5} more semantic rejections`);
+      }
+    }
+  } else {
+    log('Skipping semantic verification — all findings are high-confidence.');
+  }
+
+  let finalFindings = semanticVerified;
   if (conversation) {
     log('Filtering already-posted findings...');
-    finalFindings = filterAlreadyPosted(semantic.verified, conversation);
+    finalFindings = filterAlreadyPosted(semanticVerified, conversation);
     log(`After filter: ${finalFindings.length} new findings to post`);
   }
 
   const verificationStats = {
     rawFindings: allFindings.length,
     deterministicRejected: deterministic.rejected.length,
-    semanticRejected: semantic.rejected.length,
+    semanticRejected: semanticRejectedCount,
     finalFindings: finalFindings.length,
   };
+
+  // Grand total token usage summary
+  let grandTotal: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  let hasGrandTotalData = false;
+  if (orchestratorResult.tokensUsed) {
+    grandTotal = addTokens(grandTotal, orchestratorResult.tokensUsed);
+    hasGrandTotalData = true;
+  }
+  if (hasTokenData) {
+    grandTotal = addTokens(grandTotal, reviewerTokenTotal);
+    hasGrandTotalData = true;
+  }
+  if (semanticTokens) {
+    grandTotal = addTokens(grandTotal, semanticTokens);
+    hasGrandTotalData = true;
+  }
+  if (hasGrandTotalData) {
+    const reviewerTokensAreEstimated = hasTokenData && reviewerTokenTotal.estimated;
+    const reviewerSuffix = reviewerTokensAreEstimated
+      ? ' ⚠ FIRST-TURN ESTIMATE — actual agentic usage is 5-20× higher'
+      : '';
+    log(`[token-diag] ═══ GRAND TOTAL: ${formatTokenSummary(grandTotal)}${reviewerTokensAreEstimated ? ' (⚠ UNDERESTIMATED — see reviewers line)' : ''} ═══`);
+    log(`[token-diag]   orchestrator: ${orchestratorResult.tokensUsed ? formatTokenSummary(orchestratorResult.tokensUsed) : 'n/a'}`);
+    log(`[token-diag]   reviewers (${selectedReviewers.length}x): ${hasTokenData ? formatTokenSummary(reviewerTokenTotal) + reviewerSuffix : 'n/a'}`);
+    log(`[token-diag]   semantic verification: ${semanticTokens ? formatTokenSummary(semanticTokens) : 'skipped (high-confidence)'}`);
+    if (reviewerTokensAreEstimated) {
+      log(`[token-diag] ⚠ Reviewer token counts reflect the initial prompt size only. OpenCode does not`);
+      log(`[token-diag]   expose cumulative session usage — each tool call re-sends the full conversation`);
+      log(`[token-diag]   history, so true input tokens per reviewer ≈ initial_tokens × number_of_turns.`);
+    }
+  }
+
+  // Degrade on error-severity issues, non-transient warnings (tool failures etc.),
+  // or majority reviewer failures. Transient timeouts alone don't warrant DEGRADED.
+  const failedReviewerCount = reviewerRunResults.filter(r => r.findings.length === 0 && r.issues.length > 0).length;
+  const majorityFailed = failedReviewerCount > selectedReviewers.length / 2;
+  const hasErrorIssues = issues.some(i => i.severity === 'error');
+  const hasNonTransientWarnings = issues.some(
+    i => i.severity === 'warning' && !i.code.endsWith('-timeout'),
+  );
+  const runStatus: PRReviewResult['status'] = (hasErrorIssues || hasNonTransientWarnings || majorityFailed) ? 'degraded' : 'complete';
 
   const result: PRReviewResult = {
     command: 'pr-review',
     baseRef,
     headRef,
-    status: issues.length > 0 ? 'degraded' : 'complete',
+    status: runStatus,
     selectedReviewers: orchestratorResult.selectedReviewers,
     summary: '',
     findings: finalFindings,
     issues,
     rejectedFindings: verificationStats.deterministicRejected + verificationStats.semanticRejected,
     verificationStats,
+    tokenUsage: hasGrandTotalData ? grandTotal : undefined,
     generatedAt: new Date().toISOString(),
   };
 
@@ -374,6 +480,7 @@ interface PRReviewerRunResult {
   toolRan: boolean;
   toolError?: string;
   issues: ReviewIssue[];
+  tokensUsed?: TokenUsage;
 }
 
 async function runPRReviewer(
@@ -449,6 +556,7 @@ async function runPRReviewer(
         maxTokens: 8096,
         temperature: 0,
         timeoutMs: MAX_PR_REVIEWER_TIMEOUT_MS,
+        callLabel: `reviewer:${reviewer.name}`,
       },
       prReviewerAnalysisSchema,
     );
@@ -459,14 +567,22 @@ async function runPRReviewer(
       reviewerName: reviewer.name,
     }));
 
-    log(`  ✓ ${reviewer.name}: ${findings.length} findings`);
-    return { findings, reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError, issues };
+    const durationSec = (runResult.durationMs / 1000).toFixed(1);
+    const tokenSuffix = runResult.tokensUsed
+      ? ` | ${formatTokenSummary(runResult.tokensUsed)}`
+      : '';
+    log(`  ✓ ${reviewer.name}: ${findings.length} findings (${durationSec}s${tokenSuffix})`);
+    return { findings, reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError, issues, tokensUsed: runResult.tokensUsed };
   } catch (err) {
-    log(`  ✗ ${reviewer.name} failed: ${(err as Error).message}`);
+    const msg = (err as Error).message;
+    const isTimeout = /timed out after/i.test(msg);
+    log(`  ✗ ${reviewer.name} failed: ${msg}`);
     issues.push({
-      severity: 'warning',
-      code: 'pr-reviewer-failed',
-      message: `Reviewer "${reviewer.name}" failed: ${(err as Error).message}`,
+      severity: isTimeout ? 'warning' : 'warning',
+      code: isTimeout ? 'pr-reviewer-timeout' : 'pr-reviewer-failed',
+      message: isTimeout
+        ? `Reviewer "${reviewer.name}" timed out: ${msg}`
+        : `Reviewer "${reviewer.name}" failed: ${msg}`,
       stage: 'run-reviewers',
       reviewerId: reviewer.id,
       reviewerName: reviewer.name,

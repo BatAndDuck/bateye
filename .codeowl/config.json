@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/codeowl/schemas/codeowl-config.schema.json",
-  "model": "vercel/minimax/minimax-m2.5",
+  "model": "vercel/openai/gpt-5-nano",
   "exclude": ["generated", "vendor"],
   "prReview": {
     "autoApprove": {

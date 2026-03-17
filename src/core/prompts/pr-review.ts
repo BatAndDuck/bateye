@@ -176,6 +176,61 @@ Rules:
 - Return ONLY JSON.`;
 }
 
+export function buildPRFindingBatchVerificationSystemPrompt(): string {
+  return `You are a strict PR finding verifier.
+
+For each finding in the batch, decide whether it is supported by the CURRENT codebase state.
+
+Rules:
+- Reject findings that depend only on removed code.
+- Reject findings that claim something is missing unless the supplied current files confirm it.
+- Reject findings contradicted by current-file evidence.
+- If evidence is insufficient, return supported=false.
+- You MUST return a verdict for EVERY finding in the input — the output array length must equal the input array length.
+- Return ONLY JSON.`;
+}
+
+export function buildPRFindingBatchVerificationUserMessage(
+  batch: Array<{
+    finding: PRFinding;
+    currentFileContent: string;
+    supportingFiles: Array<{ filePath: string; content: string }>;
+  }>,
+): string {
+  const items = batch.map(({ finding, currentFileContent, supportingFiles }, i) => {
+    const supportingSections = supportingFiles.length === 0
+      ? 'None'
+      : supportingFiles.map(file => `#### ${file.filePath}\n\`\`\`\n${file.content}\n\`\`\``).join('\n\n');
+    return `### Finding ${i + 1} — id: "${finding.id}"
+\`\`\`json
+${JSON.stringify({ id: finding.id, title: finding.title, description: finding.description, codeQuote: finding.codeQuote, filePath: finding.filePath }, null, 2)}
+\`\`\`
+
+#### Current File: ${finding.filePath}
+\`\`\`
+${currentFileContent}
+\`\`\`
+
+#### Supporting Files
+${supportingSections}`;
+  });
+
+  return `${items.join('\n\n---\n\n')}
+
+---
+
+Verify each finding. Return JSON:
+\`\`\`json
+{
+  "verifications": [
+    { "findingId": "<id>", "supported": true, "reason": "why" },
+    { "findingId": "<id>", "supported": false, "reason": "why not" }
+  ]
+}
+\`\`\`
+The array must contain exactly ${batch.length} entries, one per finding in order.`;
+}
+
 export function buildPRFindingVerificationUserMessage(
   finding: PRFinding,
   currentFileContent: string,

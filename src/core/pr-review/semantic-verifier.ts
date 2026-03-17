@@ -1,15 +1,21 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { PRFinding, ReviewIssue } from '../../types/index';
-import { IRuntime } from '../runtime/interface';
-import { PRFindingVerification, prFindingVerificationSchema } from '../validation/schemas';
-import { buildPRFindingVerificationSystemPrompt, buildPRFindingVerificationUserMessage } from '../prompts/pr-review';
+import { MAX_PR_CURRENT_FILE_CHARS } from '../config/defaults';
+import { IRuntime, TokenUsage } from '../runtime/interface';
+import { addTokens } from '../runtime/token-utils';
+import { prFindingBatchVerificationSchema } from '../validation/schemas';
+import {
+  buildPRFindingBatchVerificationSystemPrompt,
+  buildPRFindingBatchVerificationUserMessage,
+} from '../prompts/pr-review';
 import { collectVerificationTrailFiles, RejectedFinding } from './verifier';
 
 export interface SemanticVerificationResult {
   verified: PRFinding[];
   rejected: RejectedFinding[];
   issues: ReviewIssue[];
+  tokensUsed?: TokenUsage;
 }
 
 export interface SemanticVerifierOptions {
@@ -22,11 +28,65 @@ export interface SemanticVerifierOptions {
   log?: (message: string) => void;
 }
 
+/** Number of findings to verify per AI call. Batching reduces total call count substantially. */
+const VERIFICATION_BATCH_SIZE = 5;
+
 function readFileContent(repoPath: string, filePath: string): string | null {
   try {
-    return fs.readFileSync(path.join(repoPath, filePath), 'utf-8');
+    const content = fs.readFileSync(path.join(repoPath, filePath), 'utf-8');
+    // Truncate to keep semantic verification prompts manageable. The verifier only
+    // needs the region around the finding; sending entire large files is wasteful.
+    if (content.length > MAX_PR_CURRENT_FILE_CHARS) {
+      return content.slice(0, MAX_PR_CURRENT_FILE_CHARS) + `\n... [truncated at ${MAX_PR_CURRENT_FILE_CHARS} chars]`;
+    }
+    return content;
   } catch {
     return null;
+  }
+}
+
+type FindingWithContext = {
+  finding: PRFinding;
+  currentFileContent: string;
+  supportingFiles: Array<{ filePath: string; content: string }>;
+};
+
+async function verifyBatch(
+  batch: FindingWithContext[],
+  options: SemanticVerifierOptions,
+): Promise<{
+  results: Map<string, { supported: boolean; reason: string }>;
+  tokensUsed?: TokenUsage;
+  error?: string;
+}> {
+  const model = options.model;
+  // maxTokens scales with batch size: ~400 tokens per finding verdict
+  const maxTokens = Math.max(1024, VERIFICATION_BATCH_SIZE * 512);
+
+  try {
+    const result = await options.runtime.run(
+      {
+        systemPrompt: buildPRFindingBatchVerificationSystemPrompt(),
+        userMessage: buildPRFindingBatchVerificationUserMessage(batch),
+        model,
+        apiKey: options.apiKey,
+        transport: options.transport,
+        apiBaseUrl: options.apiBaseUrl,
+        maxTokens,
+        temperature: 0,
+        cwd: options.repoPath,
+        callLabel: 'semantic-verifier',
+      },
+      prFindingBatchVerificationSchema,
+    );
+
+    const resultMap = new Map<string, { supported: boolean; reason: string }>();
+    for (const v of result.data.verifications) {
+      resultMap.set(v.findingId, { supported: v.supported, reason: v.reason });
+    }
+    return { results: resultMap, tokensUsed: result.tokensUsed };
+  } catch (err) {
+    return { results: new Map(), error: (err as Error).message };
   }
 }
 
@@ -37,7 +97,11 @@ export async function verifyFindingsSemantically(
   const verified: PRFinding[] = [];
   const rejected: RejectedFinding[] = [];
   const issues: ReviewIssue[] = [];
+  let totalTokens: TokenUsage = { inputTokens: 0, outputTokens: 0 };
+  let hasTokenData = false;
 
+  // Build context for each finding, reject immediately if primary file unreadable
+  const findingsWithContext: FindingWithContext[] = [];
   for (const finding of findings) {
     const currentFileContent = readFileContent(options.repoPath, finding.filePath);
     if (!currentFileContent) {
@@ -53,46 +117,69 @@ export async function verifyFindingsSemantically(
       .map(filePath => ({ filePath, content: readFileContent(options.repoPath, filePath) }))
       .filter((entry): entry is { filePath: string; content: string } => typeof entry.content === 'string');
 
-    try {
-      const verification = await options.runtime.run<PRFindingVerification>(
-        {
-          systemPrompt: buildPRFindingVerificationSystemPrompt(),
-          userMessage: buildPRFindingVerificationUserMessage(finding, currentFileContent, supportingFiles),
-          model: options.model,
-          apiKey: options.apiKey,
-          transport: options.transport,
-          apiBaseUrl: options.apiBaseUrl,
-          maxTokens: 2048,
-          temperature: 0,
-          cwd: options.repoPath,
-        },
-        prFindingVerificationSchema,
-      );
+    findingsWithContext.push({ finding, currentFileContent, supportingFiles });
+  }
 
-      if (verification.data.supported) {
+  if (findingsWithContext.length === 0) {
+    return { verified, rejected, issues };
+  }
+
+  // Chunk into batches
+  const batches: FindingWithContext[][] = [];
+  for (let i = 0; i < findingsWithContext.length; i += VERIFICATION_BATCH_SIZE) {
+    batches.push(findingsWithContext.slice(i, i + VERIFICATION_BATCH_SIZE));
+  }
+
+  options.log?.(`  Semantic verification: ${findingsWithContext.length} finding(s) in ${batches.length} batch(es) using ${options.model}`);
+
+  // Run all batches in parallel
+  const batchResults = await Promise.all(batches.map(batch => verifyBatch(batch, options)));
+
+  for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+    const batch = batches[batchIdx];
+    const { results, tokensUsed, error } = batchResults[batchIdx];
+
+    if (tokensUsed) {
+      totalTokens = addTokens(totalTokens, tokensUsed);
+      hasTokenData = true;
+    }
+
+    if (error) {
+      options.log?.(`  ✗ Semantic verifier batch ${batchIdx + 1}/${batches.length} failed: ${error}`);
+      // Fall back: accept all findings in this batch (don't penalise for infra errors)
+      for (const { finding } of batch) {
+        issues.push({
+          severity: 'warning',
+          code: 'pr-semantic-verifier-failed',
+          message: `Semantic verifier batch failed for "${finding.title}": ${error}`,
+          stage: 'semantic-verification',
+          reviewerId: finding.reviewerId,
+          reviewerName: finding.reviewerName,
+        });
+        rejected.push({ finding, reason: `Semantic verification batch failed: ${error}` });
+      }
+      continue;
+    }
+
+    for (const { finding } of batch) {
+      const verdict = results.get(finding.id);
+      if (!verdict) {
+        // Finding ID wasn't in the response — accept it (don't discard valid findings due to model slip)
+        verified.push(finding);
+        continue;
+      }
+      if (verdict.supported) {
         verified.push(finding);
       } else {
-        rejected.push({
-          finding,
-          reason: verification.data.reason,
-        });
+        rejected.push({ finding, reason: verdict.reason });
       }
-    } catch (err) {
-      options.log?.(`  ✗ Semantic verifier failed for "${finding.title}": ${(err as Error).message}`);
-      issues.push({
-        severity: 'warning',
-        code: 'pr-semantic-verifier-failed',
-        message: `Semantic verifier failed for "${finding.title}": ${(err as Error).message}`,
-        stage: 'semantic-verification',
-        reviewerId: finding.reviewerId,
-        reviewerName: finding.reviewerName,
-      });
-      rejected.push({
-        finding,
-        reason: `Semantic verification failed: ${(err as Error).message}`,
-      });
     }
   }
 
-  return { verified, rejected, issues };
+  return {
+    verified,
+    rejected,
+    issues,
+    tokensUsed: hasTokenData ? totalTokens : undefined,
+  };
 }

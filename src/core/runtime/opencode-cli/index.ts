@@ -1,19 +1,114 @@
 import { spawn } from 'child_process';
 import { createServer, AddressInfo } from 'net';
+import * as os from 'os';
+import * as path from 'path';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, resolveModelTarget } from '../interface';
+import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, TokenUsage, resolveModelTarget } from '../interface';
 import { buildOpenCodeEnvironment, resolveOpenCodeInvocation } from './command';
+import { buildStructureRepairPrompt, formatZodErrors, tryParseAndValidate } from '../structure-repair';
 
 type OpenCodeServerHandle = {
   url: string;
   child: ReturnType<typeof spawn>;
   envSignature: string;
+  /** Absolute path to the opencode SQLite database used by this server instance. */
+  dbPath: string;
   close: () => void;
 };
 
-const MAX_STRUCTURED_OUTPUT_ATTEMPTS = 3;
-const OPEN_CODE_STRUCTURED_OUTPUT_RETRY_COUNT = 4;
+interface SessionTokenStats {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  cost: number;
+}
+
+type DatabaseSyncLike = {
+  prepare(sql: string): { get: (...args: unknown[]) => unknown };
+  close(): void;
+};
+
+/**
+ * Query the opencode SQLite database for exact per-step token usage of a completed session.
+ * Uses node:sqlite (built-in since Node 22, experimental). Falls back to null on any error.
+ *
+ * Retries up to 3 times with 200ms delay to handle WAL lock contention when many reviewer
+ * sessions complete in parallel and race to open the same DB file.
+ * Does NOT use readOnly mode because on Windows the .db-shm shared-memory file needs write
+ * access even for read-only workloads in WAL mode, which can cause spurious SQLITE_CANTOPEN.
+ */
+function querySessionActualUsage(dbPath: string, sessionId: string): SessionTokenStats | null {
+  type NodeSqlite = { DatabaseSync: new (path: string) => DatabaseSyncLike };
+  let nodeSqlite: NodeSqlite;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    nodeSqlite = require('node:sqlite') as NodeSqlite;
+  } catch {
+    return null; // node:sqlite not available (Node < 22)
+  }
+  const { DatabaseSync } = nodeSqlite;
+
+  const SQL = `
+    SELECT
+      COALESCE(SUM(json_extract(data, '$.tokens.input')), 0)         AS input_tokens,
+      COALESCE(SUM(json_extract(data, '$.tokens.output')), 0)        AS output_tokens,
+      COALESCE(SUM(json_extract(data, '$.tokens.cache.read')), 0)    AS cache_read_tokens,
+      COALESCE(SUM(json_extract(data, '$.tokens.cache.write')), 0)   AS cache_write_tokens,
+      COALESCE(SUM(json_extract(data, '$.cost')), 0)                 AS cost
+    FROM part
+    WHERE session_id = ?
+      AND json_extract(data, '$.type') = 'step-finish'
+  `;
+
+  const MAX_ATTEMPTS = 3;
+  const RETRY_DELAY_MS = 200;
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    // Synchronous sleep for retry — we're already in a synchronous helper.
+    if (attempt > 0) {
+      const deadline = Date.now() + RETRY_DELAY_MS;
+      while (Date.now() < deadline) { /* spin */ }
+    }
+
+    let db: DatabaseSyncLike | null = null;
+    try {
+      db = new DatabaseSync(dbPath);
+      const result = db.prepare(SQL).get(sessionId) as {
+        input_tokens: number;
+        output_tokens: number;
+        cache_read_tokens: number;
+        cache_write_tokens: number;
+        cost: number;
+      } | undefined;
+
+      if (!result || (result.input_tokens === 0 && result.output_tokens === 0 && result.cost === 0)) {
+        return null; // No step-finish parts found for this session
+      }
+
+      return {
+        inputTokens: result.input_tokens,
+        outputTokens: result.output_tokens,
+        cacheReadTokens: result.cache_read_tokens,
+        cacheWriteTokens: result.cache_write_tokens,
+        cost: result.cost,
+      };
+    } catch (err) {
+      if (attempt === MAX_ATTEMPTS - 1) {
+        // Log only on final failure so users know the token data is estimated.
+        console.error(`[opencode] DB token query failed after ${MAX_ATTEMPTS} attempts (path: ${dbPath}, session: ${sessionId}): ${(err as Error).message ?? String(err)}`);
+      }
+    } finally {
+      try { db?.close(); } catch { /* ignore close errors */ }
+    }
+  }
+
+  return null;
+}
+
+const MAX_STRUCTURED_OUTPUT_ATTEMPTS = 2;
+const OPEN_CODE_STRUCTURED_OUTPUT_RETRY_COUNT = 1;
 
 type OpenCodeSession = {
   id: string;
@@ -43,6 +138,13 @@ type OpenCodeMessageResponse = {
         message?: string;
       };
     };
+    /** Some OpenCode providers report cumulative session token usage here */
+    usage?: {
+      inputTokens?: number;
+      outputTokens?: number;
+      input_tokens?: number;
+      output_tokens?: number;
+    };
   };
   parts: OpenCodeMessagePart[];
 };
@@ -50,6 +152,42 @@ type OpenCodeMessageResponse = {
 let activeServerPromise: Promise<OpenCodeServerHandle> | null = null;
 let activeServerSignature: string | null = null;
 let shutdownHooksRegistered = false;
+
+/**
+ * Attempts to extract cumulative token usage from an OpenCode message response.
+ * OpenCode may include usage in `info.usage` or in parts with type `step-finish`.
+ * Returns null if no actual usage data is available.
+ */
+function extractActualUsage(response: OpenCodeMessageResponse): { inputTokens: number; outputTokens: number } | null {
+  // Check info-level usage (some providers expose this)
+  const infoUsage = response.info?.usage;
+  if (infoUsage) {
+    const input = infoUsage.inputTokens ?? infoUsage.input_tokens;
+    const output = infoUsage.outputTokens ?? infoUsage.output_tokens;
+    if (typeof input === 'number' && typeof output === 'number' && (input > 0 || output > 0)) {
+      return { inputTokens: input, outputTokens: output };
+    }
+  }
+
+  // Check parts for step-finish or usage-report parts
+  let totalInput = 0;
+  let totalOutput = 0;
+  let found = false;
+  for (const part of response.parts) {
+    const p = part as Record<string, unknown>;
+    // step-finish parts carry per-turn usage in some providers
+    if (p.type === 'step-finish' || p.type === 'usage') {
+      const usage = p.usage as Record<string, unknown> | undefined;
+      if (usage) {
+        const input = (usage.inputTokens ?? usage.input_tokens) as number | undefined;
+        const output = (usage.outputTokens ?? usage.output_tokens) as number | undefined;
+        if (typeof input === 'number') { totalInput += input; found = true; }
+        if (typeof output === 'number') { totalOutput += output; found = true; }
+      }
+    }
+  }
+  return found ? { inputTokens: totalInput, outputTokens: totalOutput } : null;
+}
 
 function extractJson(rawText: string): string {
   const jsonMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/) ||
@@ -283,7 +421,8 @@ function repairReviewerFindingShape(value: unknown): unknown {
     || asTrimmedString(record.fix)
     || asTrimmedString(record.suggestion)
     || asTrimmedString(record.remediation)
-    || asTrimmedString(record.action);
+    || asTrimmedString(record.action)
+    || (title ? `Review: ${title}` : 'Review this finding.');
   const filePath = asTrimmedString(record.filePath)
     || asTrimmedString(record.path)
     || asTrimmedString(record.file)
@@ -442,10 +581,15 @@ async function startServer(env: NodeJS.ProcessEnv, readinessTimeoutMs = 30_000):
 
   child.unref();
 
+  // Compute the DB path from the same XDG_DATA_HOME the server uses.
+  const xdgDataHome = env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
+  const dbPath = path.join(xdgDataHome, 'opencode', 'opencode.db');
+
   return {
     url,
     child,
     envSignature: buildEnvSignature(env),
+    dbPath,
     close: () => {
       if (child.exitCode === null) {
         child.kill('SIGTERM');
@@ -552,6 +696,13 @@ export class OpenCodeCLIRuntime implements IRuntime {
       'x-opencode-directory': cwd,
     };
     let lastError: unknown;
+    let lastRawJson: string | null = null;
+    // Estimate input tokens from prompt character lengths (1 token ≈ 4 chars)
+    const estimatedInputTokens = Math.ceil((options.systemPrompt.length + options.userMessage.length) / 4);
+    const callId = `${target.transport}/${target.modelId}`;
+
+    const labelTag = options.callLabel ? ` [${options.callLabel}]` : '';
+    console.error(`[opencode]${labelTag} Starting call: model=${callId}, systemPrompt=${options.systemPrompt.length} chars, userMessage=${options.userMessage.length} chars, estInputTokens=~${estimatedInputTokens}, timeout=${Math.round(timeoutMs / 1000)}s`);
 
     for (let attempt = 0; attempt < MAX_STRUCTURED_OUTPUT_ATTEMPTS; attempt++) {
       let sessionID: string | undefined;
@@ -559,6 +710,11 @@ export class OpenCodeCLIRuntime implements IRuntime {
         ? ''
         : `\n\nPREVIOUS ATTEMPT FAILED STRUCTURED OUTPUT VALIDATION. Return ONLY JSON matching the requested schema with all required fields and correct value types. Validation issue: ${formatValidationFeedback(lastError)}`;
 
+      if (attempt > 0) {
+        console.error(`[opencode] Retry attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS} for ${callId}: previous error was ${summarizeSdkError(lastError)}`);
+      }
+
+      let serializedResponse = '';
       try {
         const session = await this.request<OpenCodeSession>(`${server.url}/session`, {
           method: 'POST',
@@ -586,12 +742,19 @@ export class OpenCodeCLIRuntime implements IRuntime {
           }),
         }, timeoutMs);
 
-        const providerError = response.info.error?.data?.message || response.info.error?.message;
+        const providerError = response?.info?.error?.data?.message || response?.info?.error?.message;
         if (providerError) {
           throw new Error(providerError);
         }
 
-        const serializedResponse = serializeOpenCodeResponse(response);
+        if (!response?.info || !response?.parts) {
+          throw new Error(
+            `OpenCode returned an invalid response structure (info=${typeof response?.info}, parts=${typeof response?.parts}). `
+            + `Model: ${target.transport}/${target.modelId}. Raw: ${JSON.stringify(response).slice(0, 500)}`
+          );
+        }
+
+        serializedResponse = serializeOpenCodeResponse(response);
 
         if (!serializedResponse) {
           throw new Error('OpenCode returned no structured text response for the requested JSON payload.');
@@ -601,18 +764,64 @@ export class OpenCodeCLIRuntime implements IRuntime {
         const normalized = repairReviewerPayload(parsed);
         const validated = schema.parse(normalized);
 
+        const durationMs = Date.now() - start;
+
+        // 1st preference: query the opencode DB for exact cumulative token counts for this session.
+        //   This is the only way to get the real total — the HTTP response only carries the final
+        //   answer, not the rolling accumulation across all agentic tool-call turns.
+        // 2nd preference: extract usage from response parts/info (provider-specific, rarely populated).
+        // 3rd preference: estimate from prompt character lengths (first-turn only, wildly low).
+        //
+        // Brief delay: the opencode server may write step-finish parts to the DB asynchronously
+        // after returning the HTTP response.  Without this wait the query often finds zero rows.
+        if (sessionID) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        const dbUsage = sessionID ? querySessionActualUsage(server.dbPath, sessionID) : null;
+        const responseUsage = extractActualUsage(response);
+        const estimatedOutputTokens = Math.ceil(serializedResponse.length / 4);
+
+        let tokensUsed: TokenUsage;
+        if (dbUsage) {
+          tokensUsed = { inputTokens: dbUsage.inputTokens, outputTokens: dbUsage.outputTokens, estimated: false };
+          const cacheStr = (dbUsage.cacheReadTokens > 0 || dbUsage.cacheWriteTokens > 0)
+            ? ` + ${dbUsage.cacheReadTokens.toLocaleString()} cache-read + ${dbUsage.cacheWriteTokens.toLocaleString()} cache-write`
+            : '';
+          const costStr = dbUsage.cost > 0 ? ` | cost: $${dbUsage.cost.toFixed(4)}` : '';
+          console.error(`[opencode]${labelTag} ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ${dbUsage.inputTokens.toLocaleString()} in + ${dbUsage.outputTokens.toLocaleString()} out${cacheStr} (actual from DB${costStr}), attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}`);
+        } else if (responseUsage) {
+          tokensUsed = { inputTokens: responseUsage.inputTokens, outputTokens: responseUsage.outputTokens, estimated: false };
+          console.error(`[opencode]${labelTag} ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ${responseUsage.inputTokens.toLocaleString()} in + ${responseUsage.outputTokens.toLocaleString()} out (actual from response), attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}`);
+        } else {
+          tokensUsed = { inputTokens: estimatedInputTokens, outputTokens: estimatedOutputTokens, estimated: true };
+          console.error(`[opencode]${labelTag} ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ~${estimatedInputTokens} in + ~${estimatedOutputTokens} out (⚠ FIRST-TURN ESTIMATE ONLY — agentic turns not counted), attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}`);
+        }
+
         return {
           data: validated,
           model: options.model,
           runtime: 'cli',
-          durationMs: Date.now() - start,
+          durationMs,
           rawResponse: serializedResponse,
+          tokensUsed,
         };
       } catch (err) {
         lastError = err;
+        const durationMs = Date.now() - start;
+        const willRetry = shouldRetryStructuredOutput(err, attempt);
 
-        if (!shouldRetryStructuredOutput(err, attempt)) {
-          throw new Error(`OpenCode server request failed: ${summarizeSdkError(err)}`, { cause: err });
+        // Track the last raw JSON for AI repair
+        if ((err instanceof z.ZodError || err instanceof SyntaxError) && serializedResponse) {
+          lastRawJson = serializedResponse;
+        }
+
+        console.error(`[opencode] ✗ ${callId} failed after ${(durationMs / 1000).toFixed(1)}s (attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}, retry=${willRetry}): ${summarizeSdkError(err)}`);
+        if (err instanceof z.ZodError) {
+          console.error(`[opencode]   Validation errors: ${formatValidationFeedback(err)}`);
+        }
+
+        if (!willRetry) {
+          break; // Fall through to AI repair attempt
         }
       } finally {
         if (sessionID) {
@@ -623,6 +832,78 @@ export class OpenCodeCLIRuntime implements IRuntime {
             }, 10_000);
           } catch {
             // Best-effort cleanup; stale sessions should not fail the review run.
+          }
+        }
+      }
+    }
+
+    // AI structure repair: use a targeted call to fix malformed JSON
+    if (lastRawJson) {
+      console.error(`[opencode] Attempting AI structure repair for ${callId}...`);
+      let repairSessionID: string | undefined;
+      try {
+        const repair = buildStructureRepairPrompt(lastRawJson, formatZodErrors(lastError));
+        const repairSession = await this.request<OpenCodeSession>(`${server.url}/session`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ title: 'CodeOwl Structure Repair' }),
+        }, 30_000);
+        repairSessionID = repairSession.id;
+
+        const repairResponse = await this.request<OpenCodeMessageResponse>(`${server.url}/session/${repairSessionID}/message`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            model: {
+              providerID: target.transport,
+              modelID: target.modelId,
+            },
+            format: {
+              type: 'json_schema',
+              name: 'CodeOwlRepair',
+              schema: responseSchema,
+              retryCount: 0,
+            },
+            system: repair.systemPrompt,
+            parts: [{ type: 'text', text: repair.userMessage }],
+          }),
+        }, 60_000);
+
+        const repairSerialized = serializeOpenCodeResponse(repairResponse);
+        if (repairSerialized) {
+          const repairParsed = coerceReviewerPayload(JSON.parse(extractJson(repairSerialized)));
+          const repairNormalized = repairReviewerPayload(repairParsed);
+          const repairResult = tryParseAndValidate(JSON.stringify(repairNormalized), schema);
+          if ('data' in repairResult) {
+            const durationMs = Date.now() - start;
+            const estimatedOutputTokens = Math.ceil(repairSerialized.length / 4);
+            console.error(`[opencode] ✓ AI repair succeeded for ${callId} in ${(durationMs / 1000).toFixed(1)}s`);
+            return {
+              data: repairResult.data,
+              model: options.model,
+              runtime: 'cli',
+              durationMs,
+              rawResponse: repairSerialized,
+              tokensUsed: {
+                inputTokens: Math.ceil((repair.systemPrompt.length + repair.userMessage.length) / 4),
+                outputTokens: estimatedOutputTokens,
+                estimated: true,
+              },
+            };
+          }
+          console.error(`[opencode] ✗ AI repair also failed validation: ${('error' in repairResult ? repairResult.error.message : 'unknown').slice(0, 200)}`);
+        }
+      } catch (repairErr) {
+        console.error(`[opencode] ✗ AI repair call failed: ${(repairErr as Error).message.slice(0, 200)}`);
+      } finally {
+        if (repairSessionID) {
+          try {
+            await this.request<boolean>(`${server.url}/session/${repairSessionID}`, {
+              method: 'DELETE',
+              headers,
+            }, 10_000);
+          } catch {
+            // Best-effort cleanup
           }
         }
       }
@@ -666,6 +947,15 @@ export class OpenCodeCLIRuntime implements IRuntime {
       }
 
       return bodyText ? JSON.parse(bodyText) as T : (true as T);
+    } catch (err) {
+      if (
+        (err instanceof DOMException && err.name === 'AbortError') ||
+        (err instanceof Error && (err.message.includes('aborted') || err.name === 'AbortError'))
+      ) {
+        const seconds = Math.round(timeoutMs / 1000);
+        throw new Error(`Timed out after ${seconds}s`, { cause: err });
+      }
+      throw err;
     } finally {
       clearTimeout(timer);
     }

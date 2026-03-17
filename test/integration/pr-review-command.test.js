@@ -90,9 +90,13 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
       },
       {
         data: {
-          supported: true,
-          reason: 'The finding is supported by the current file content and anchored to changed code.',
-          counterEvidence: [],
+          verifications: [
+            {
+              findingId: 'PR_TOOL_PR_1',
+              supported: true,
+              reason: 'The finding is supported by the current file content and anchored to changed code.',
+            },
+          ],
         },
       },
     ],
@@ -205,7 +209,8 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
   assert.deepEqual(toolLog.files, ['src/service.ts']);
 
   const runtimeLog = JSON.parse(fs.readFileSync(logPath, 'utf-8'));
-  assert.equal(runtimeLog.filter(entry => entry.type === 'run').length, 2);
+  // Only 1 non-agentic run: the orchestrator. Semantic verification is skipped for high-confidence (≥0.85) findings.
+  assert.equal(runtimeLog.filter(entry => entry.type === 'run').length, 1);
   assert.equal(runtimeLog.filter(entry => entry.type === 'runAgenticReview').length, 2);
   assert.equal(runtimeLog.find(entry => entry.type === 'runAgenticReview').repoPath, repoPath);
 });
@@ -423,9 +428,13 @@ export function buildRepoIndex(config) {
       },
       {
         data: {
-          supported: false,
-          reason: 'The current file still applies config.exclude inline, so the claimed regression does not exist.',
-          counterEvidence: ['const excludePatterns = [\'dist\', ...(config.exclude || [])];'],
+          verifications: [
+            {
+              findingId: 'BUG_HUNTER_LOCAL_1',
+              supported: false,
+              reason: 'The current file still applies config.exclude inline, so the claimed regression does not exist.',
+            },
+          ],
         },
       },
     ],
@@ -537,9 +546,13 @@ jobs:
       },
       {
         data: {
-          supported: false,
-          reason: 'The current workflow still configures npm cache in actions/setup-node.',
-          counterEvidence: ['cache: \'npm\''],
+          verifications: [
+            {
+              findingId: 'CI_CD_LOCAL_1',
+              supported: false,
+              reason: 'The current workflow still configures npm cache in actions/setup-node.',
+            },
+          ],
         },
       },
     ],
@@ -724,9 +737,13 @@ Report only concrete code quality findings after investigating the current repos
       },
       {
         data: {
-          supported: true,
-          reason: 'The low-severity issue is supported by the current file content.',
-          counterEvidence: [],
+          verifications: [
+            {
+              findingId: 'GITHUB_REVIEWER_1',
+              supported: true,
+              reason: 'The low-severity issue is supported by the current file content.',
+            },
+          ],
         },
       },
     ],

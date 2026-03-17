@@ -11,6 +11,8 @@ export interface RunOptions {
   apiBaseUrl?: string; // Override for OpenAI-compatible gateways
   maxTokens?: number;
   temperature?: number;
+  /** Human-readable label for diagnostics (e.g. reviewer name). Shown in runtime log lines. */
+  callLabel?: string;
 }
 
 export interface AgenticPRReviewOptions extends RunOptions {
@@ -25,6 +27,14 @@ export interface AgenticRepositoryReviewOptions extends RunOptions {
   timeoutMs?: number;
 }
 
+/** Token usage for a single LLM call */
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  /** True when counts are estimated from character length rather than reported by the API */
+  estimated?: boolean;
+}
+
 /** Result wrapper returned by IRuntime.run, including parsed data and execution metadata */
 export interface RunResult<T> {
   data: T;
@@ -32,6 +42,7 @@ export interface RunResult<T> {
   runtime: 'sdk' | 'cli';
   durationMs: number;
   rawResponse: string;
+  tokensUsed?: TokenUsage;
 }
 
 /**
