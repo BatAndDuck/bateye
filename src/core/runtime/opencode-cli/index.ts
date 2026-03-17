@@ -1,5 +1,7 @@
 import { spawn } from 'child_process';
 import { createServer, AddressInfo } from 'net';
+import * as os from 'os';
+import * as path from 'path';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, TokenUsage, resolveModelTarget } from '../interface';
@@ -10,8 +12,70 @@ type OpenCodeServerHandle = {
   url: string;
   child: ReturnType<typeof spawn>;
   envSignature: string;
+  /** Absolute path to the opencode SQLite database used by this server instance. */
+  dbPath: string;
   close: () => void;
 };
+
+interface SessionTokenStats {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  cost: number;
+}
+
+/**
+ * Query the opencode SQLite database for exact per-step token usage of a completed session.
+ * Uses node:sqlite (built-in since Node 22, experimental). Falls back silently on any error.
+ */
+function querySessionActualUsage(dbPath: string, sessionId: string): SessionTokenStats | null {
+  try {
+    // node:sqlite is experimental in Node 22+ but available and stable enough.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { DatabaseSync } = require('node:sqlite') as {
+      DatabaseSync: new (path: string, opts?: { readOnly?: boolean }) => {
+        prepare(sql: string): { get: (...args: unknown[]) => unknown };
+        close(): void;
+      };
+    };
+
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    const result = db.prepare(`
+      SELECT
+        COALESCE(SUM(json_extract(data, '$.tokens.input')), 0)         AS input_tokens,
+        COALESCE(SUM(json_extract(data, '$.tokens.output')), 0)        AS output_tokens,
+        COALESCE(SUM(json_extract(data, '$.tokens.cache.read')), 0)    AS cache_read_tokens,
+        COALESCE(SUM(json_extract(data, '$.tokens.cache.write')), 0)   AS cache_write_tokens,
+        COALESCE(SUM(json_extract(data, '$.cost')), 0)                 AS cost
+      FROM part
+      WHERE session_id = ?
+        AND json_extract(data, '$.type') = 'step-finish'
+    `).get(sessionId) as {
+      input_tokens: number;
+      output_tokens: number;
+      cache_read_tokens: number;
+      cache_write_tokens: number;
+      cost: number;
+    } | undefined;
+
+    db.close();
+
+    if (!result || (result.input_tokens === 0 && result.output_tokens === 0 && result.cost === 0)) {
+      return null; // No step-finish parts yet or empty session
+    }
+
+    return {
+      inputTokens: result.input_tokens,
+      outputTokens: result.output_tokens,
+      cacheReadTokens: result.cache_read_tokens,
+      cacheWriteTokens: result.cache_write_tokens,
+      cost: result.cost,
+    };
+  } catch {
+    return null; // node:sqlite unavailable or DB locked — caller falls back to estimates
+  }
+}
 
 const MAX_STRUCTURED_OUTPUT_ATTEMPTS = 2;
 const OPEN_CODE_STRUCTURED_OUTPUT_RETRY_COUNT = 1;
@@ -486,10 +550,15 @@ async function startServer(env: NodeJS.ProcessEnv, readinessTimeoutMs = 30_000):
 
   child.unref();
 
+  // Compute the DB path from the same XDG_DATA_HOME the server uses.
+  const xdgDataHome = env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
+  const dbPath = path.join(xdgDataHome, 'opencode', 'opencode.db');
+
   return {
     url,
     child,
     envSignature: buildEnvSignature(env),
+    dbPath,
     close: () => {
       if (child.exitCode === null) {
         child.kill('SIGTERM');
@@ -666,16 +735,26 @@ export class OpenCodeCLIRuntime implements IRuntime {
 
         const durationMs = Date.now() - start;
 
-        // Prefer actual usage reported by OpenCode/provider over our estimates.
-        // NOTE: For agentic sessions the estimate is FIRST-TURN ONLY and wildly low —
-        // actual input tokens are 5-20× higher due to re-sending the full conversation
-        // history on every tool call turn. If actualUsage is null, log a clear warning.
-        const actualUsage = extractActualUsage(response);
+        // 1st preference: query the opencode DB for exact cumulative token counts for this session.
+        //   This is the only way to get the real total — the HTTP response only carries the final
+        //   answer, not the rolling accumulation across all agentic tool-call turns.
+        // 2nd preference: extract usage from response parts/info (provider-specific, rarely populated).
+        // 3rd preference: estimate from prompt character lengths (first-turn only, wildly low).
+        const dbUsage = sessionID ? querySessionActualUsage(server.dbPath, sessionID) : null;
+        const responseUsage = extractActualUsage(response);
         const estimatedOutputTokens = Math.ceil(serializedResponse.length / 4);
+
         let tokensUsed: TokenUsage;
-        if (actualUsage) {
-          tokensUsed = { inputTokens: actualUsage.inputTokens, outputTokens: actualUsage.outputTokens, estimated: false };
-          console.error(`[opencode]${labelTag} ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ${actualUsage.inputTokens} in + ${actualUsage.outputTokens} out (actual), attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}`);
+        if (dbUsage) {
+          tokensUsed = { inputTokens: dbUsage.inputTokens, outputTokens: dbUsage.outputTokens, estimated: false };
+          const cacheStr = (dbUsage.cacheReadTokens > 0 || dbUsage.cacheWriteTokens > 0)
+            ? ` + ${dbUsage.cacheReadTokens.toLocaleString()} cache-read + ${dbUsage.cacheWriteTokens.toLocaleString()} cache-write`
+            : '';
+          const costStr = dbUsage.cost > 0 ? ` | cost: $${dbUsage.cost.toFixed(4)}` : '';
+          console.error(`[opencode]${labelTag} ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ${dbUsage.inputTokens.toLocaleString()} in + ${dbUsage.outputTokens.toLocaleString()} out${cacheStr} (actual from DB${costStr}), attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}`);
+        } else if (responseUsage) {
+          tokensUsed = { inputTokens: responseUsage.inputTokens, outputTokens: responseUsage.outputTokens, estimated: false };
+          console.error(`[opencode]${labelTag} ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ${responseUsage.inputTokens.toLocaleString()} in + ${responseUsage.outputTokens.toLocaleString()} out (actual from response), attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}`);
         } else {
           tokensUsed = { inputTokens: estimatedInputTokens, outputTokens: estimatedOutputTokens, estimated: true };
           console.error(`[opencode]${labelTag} ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ~${estimatedInputTokens} in + ~${estimatedOutputTokens} out (⚠ FIRST-TURN ESTIMATE ONLY — agentic turns not counted), attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}`);
