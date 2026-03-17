@@ -23,7 +23,8 @@ function buildRepoProfileSummary(profile: RepoProfile): string {
   if (techStack.length) lines.push(`Tech stack: ${techStack.join(', ')}`);
   if (infra.length) lines.push(`Infrastructure: ${infra.join(', ')}`);
   if (features.length) lines.push(`Detected features: ${features.join(', ')}`);
-  else lines.push('No frontend, database, or container signals detected.');
+  const hasSignals = techStack.length > 0 || infra.length > 0 || features.length > 0;
+  if (!hasSignals) lines.push('No frontend, database, or container signals detected.');
 
   return `## Repository Profile\n${lines.join('\n')}${likely}\n\nUse this profile when evaluating whether a concern is applicable to THIS project. If the profile contradicts the premise of a finding (e.g. no database detected but finding requires a multi-tenant audit log), do NOT report the finding.`;
 }
