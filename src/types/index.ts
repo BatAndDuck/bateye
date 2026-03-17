@@ -89,6 +89,7 @@ export type AuditResult = {
   verificationStats?: {
     rawFindings: number;
     confidenceRejected: number;
+    deterministicRejected: number;
     semanticRejected: number;
     finalFindings: number;
   };
@@ -110,7 +111,9 @@ export type PRReviewResult = {
   rejectedFindings?: number;
   verificationStats?: {
     rawFindings: number;
+    confidenceRejected: number;
     deterministicRejected: number;
+    diffGateRejected: number;
     semanticRejected: number;
     finalFindings: number;
   };

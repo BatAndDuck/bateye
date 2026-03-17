@@ -4,6 +4,7 @@ import { ZodError } from 'zod';
 import { PRFinding } from '../../types/index';
 import { MAX_PR_FINDING_SUPPORT_FILES } from '../config/defaults';
 import { prFindingSchema } from '../validation/schemas';
+import { ParsedDiff } from './diff-parser';
 
 export interface RejectedFinding {
   finding: PRFinding;
@@ -40,6 +41,58 @@ export function collectVerificationTrailFiles(finding: Pick<PRFinding, 'verifica
   }
 
   return [...files];
+}
+
+/**
+ * Lines within this many positions of a diff hunk boundary are considered
+ * "near" the diff for the purpose of the diff-gate check.
+ */
+const DIFF_GATE_TOLERANCE_LINES = 3;
+
+/**
+ * Hard deterministic gate: rejects findings whose anchor file or lines are
+ * not present in (or within DIFF_GATE_TOLERANCE_LINES of) the PR diff.
+ *
+ * This runs BEFORE the semantic verifier so non-diff findings never reach
+ * the expensive LLM call.
+ */
+export function verifyFindingsAgainstDiff(
+  findings: PRFinding[],
+  parsedDiff: ParsedDiff,
+): VerificationResult {
+  const verified: PRFinding[] = [];
+  const rejected: RejectedFinding[] = [];
+
+  for (const finding of findings) {
+    const fileDiff = parsedDiff.files.get(finding.filePath);
+    if (!fileDiff) {
+      rejected.push({
+        finding,
+        reason: `[diff-gate] File "${finding.filePath}" is not in the PR diff`,
+      });
+      continue;
+    }
+
+    const nearHunk = fileDiff.hunks.some(hunk =>
+      hunk.lines.some(line =>
+        line.newLineNumber !== null
+        && line.newLineNumber >= finding.startLine - DIFF_GATE_TOLERANCE_LINES
+        && line.newLineNumber <= finding.endLine + DIFF_GATE_TOLERANCE_LINES,
+      ),
+    );
+
+    if (!nearHunk) {
+      rejected.push({
+        finding,
+        reason: `[diff-gate] Lines ${finding.startLine}-${finding.endLine} in "${finding.filePath}" are not within or near any changed hunk in the PR diff`,
+      });
+      continue;
+    }
+
+    verified.push(finding);
+  }
+
+  return { verified, rejected };
 }
 
 export function verifyFindings(findings: PRFinding[]): VerificationResult {

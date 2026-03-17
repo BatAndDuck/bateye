@@ -26,7 +26,7 @@ import {
 } from '../config/defaults';
 import { GitHubReviewPlatform, getGitHubEnvContext } from '../github/platform';
 import { parseUnifiedDiff, buildReviewerDiffContext, getFilesInDiff } from './diff-parser';
-import { verifyFindings } from './verifier';
+import { verifyFindings, verifyFindingsAgainstDiff } from './verifier';
 import { verifyFindingsSemantically } from './semantic-verifier';
 import { deduplicateFindings } from './deduplicator';
 import { buildConversation, filterAlreadyPosted, PRConversation } from './conversation';
@@ -352,12 +352,25 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
 
   if (deterministic.rejected.length > 0) {
     for (const rejected of deterministic.rejected) {
-      log(`  ✗ Rejected (deterministic): "${rejected.finding.title}" — ${rejected.reason}`);
+      log(`  ✗ Rejected (schema): "${rejected.finding.title}" — ${rejected.reason}`);
+    }
+  }
+
+  // Diff-gate: hard-reject any finding whose anchor file/lines are not in the PR diff.
+  // This runs deterministically (no LLM) and prevents non-diff findings from reaching
+  // the expensive semantic verifier.
+  log('Running diff-gate verification...');
+  const diffGate = verifyFindingsAgainstDiff(deterministic.verified, parsedDiff);
+  log(`Diff-gate: accepted ${diffGate.verified.length}, rejected ${diffGate.rejected.length}`);
+
+  if (diffGate.rejected.length > 0) {
+    for (const rejected of diffGate.rejected) {
+      log(`  ✗ Rejected (diff-gate): "${rejected.finding.title}" — ${rejected.reason}`);
     }
   }
 
   log('Deduplicating verified findings...');
-  const deduped = deduplicateFindings(deterministic.verified);
+  const deduped = deduplicateFindings(diffGate.verified);
   log(`After dedup: ${deduped.length} findings (removed ${deterministic.verified.length - deduped.length} duplicates)`);
   logPRFindingList(log, deduped, 'Pre-semantic findings detail');
 
@@ -406,6 +419,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     rawFindings: allFindings.length,
     confidenceRejected: allFindings.length - confidenceKept.length,
     deterministicRejected: deterministic.rejected.length,
+    diffGateRejected: diffGate.rejected.length,
     semanticRejected: semanticRejectedCount,
     finalFindings: finalFindings.length,
   };
@@ -460,7 +474,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     summary: '',
     findings: finalFindings,
     issues,
-    rejectedFindings: verificationStats.deterministicRejected + verificationStats.semanticRejected,
+    rejectedFindings: verificationStats.deterministicRejected + verificationStats.diffGateRejected + verificationStats.semanticRejected,
     verificationStats,
     tokenUsage: hasGrandTotalData ? grandTotal : undefined,
     generatedAt: new Date().toISOString(),

@@ -196,6 +196,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     verificationStats: {
       rawFindings: rawAllFindings.length,
       confidenceRejected: confidenceDropped,
+      deterministicRejected: 0,
       semanticRejected: semanticRejectedCount,
       finalFindings: verifiedFindings.length,
     },
