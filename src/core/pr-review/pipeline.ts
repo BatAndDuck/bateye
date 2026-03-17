@@ -371,7 +371,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
 
   log('Deduplicating verified findings...');
   const deduped = deduplicateFindings(diffGate.verified);
-  log(`After dedup: ${deduped.length} findings (removed ${deterministic.verified.length - deduped.length} duplicates)`);
+  log(`After dedup: ${deduped.length} findings (removed ${diffGate.verified.length - deduped.length} duplicates)`);
   logPRFindingList(log, deduped, 'Pre-semantic findings detail');
 
   let semanticVerified: PRFinding[] = [];
