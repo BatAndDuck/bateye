@@ -140,9 +140,11 @@ process.stdout.write('AUDIT TOOL OK\\nsecret-pattern-detected');
     },
     encoding: 'utf-8',
   });
+  const combinedOutput = result.stdout + result.stderr;
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.ok(fs.existsSync(reportPath));
+  assert.match(combinedOutput, /\[Audit Tool\] Raw findings: 1/);
 
   const report = JSON.parse(fs.readFileSync(reportPath, 'utf-8'));
   assert.equal(report.command, 'audit');
@@ -248,8 +250,10 @@ Look for duplicated code-quality findings only.
     },
     encoding: 'utf-8',
   });
+  const combinedOutput = result.stdout + result.stderr;
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(combinedOutput, /\[audit-dedup\] Dropped "Duplicate constant naming style"/);
 
   const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'audit.json'), 'utf-8'));
   assert.equal(report.reviewerResults.length, 2);

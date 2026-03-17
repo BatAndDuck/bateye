@@ -89,6 +89,28 @@ function truncate(content: string, limit: number): string {
   return content.slice(0, limit) + '\n\n[...current file truncated...]';
 }
 
+function truncateInline(text: string, limit: number = 120): string {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= limit) return normalized;
+  return normalized.slice(0, limit - 3) + '...';
+}
+
+function logPRFindingList(log: (msg: string) => void, findings: PRFinding[], label: string): void {
+  log(`${label}: ${findings.length}`);
+  if (findings.length === 0) {
+    log('  (none)');
+    return;
+  }
+
+  findings.forEach((finding, index) => {
+    log(
+      `  [${index + 1}/${findings.length}] ${finding.priority.toUpperCase()} ${finding.reviewerName} ` +
+      `${finding.filePath}:${finding.startLine}-${finding.endLine} "${finding.title}" ` +
+      `confidence=${finding.confidence.toFixed(2)} quote="${truncateInline(finding.codeQuote)}"`,
+    );
+  });
+}
+
 function buildCurrentFileContext(repoPath: string, currentDiffFiles: string[]): string {
   if (currentDiffFiles.length === 0) {
     return 'No readable current files were detected for this PR.';
@@ -264,41 +286,32 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
 
   const allFindings = reviewerRunResults.flatMap(r => r.findings);
   log(`Collected ${allFindings.length} raw findings from all reviewers`);
+  logPRFindingList(log, allFindings, 'Raw findings detail');
 
   log('Running deterministic verification...');
-  const deterministic = verifyFindings(allFindings, parsedDiff, repoPath);
+  const deterministic = verifyFindings(allFindings);
   log(`Deterministic verification: accepted ${deterministic.verified.length}, rejected ${deterministic.rejected.length}`);
 
   if (deterministic.rejected.length > 0) {
-    for (const rejected of deterministic.rejected.slice(0, 5)) {
+    for (const rejected of deterministic.rejected) {
       log(`  ✗ Rejected (deterministic): "${rejected.finding.title}" — ${rejected.reason}`);
-    }
-    if (deterministic.rejected.length > 5) {
-      log(`  ... and ${deterministic.rejected.length - 5} more deterministic rejections`);
     }
   }
 
   log('Deduplicating verified findings...');
   const deduped = deduplicateFindings(deterministic.verified);
   log(`After dedup: ${deduped.length} findings (removed ${deterministic.verified.length - deduped.length} duplicates)`);
+  logPRFindingList(log, deduped, 'Pre-semantic findings detail');
 
-  // Cost optimization: skip semantic verification for high-confidence findings that
-  // already passed all deterministic gates. Only send lower-confidence findings to AI.
-  const HIGH_CONFIDENCE_THRESHOLD = 0.92;
-  const highConfidence = deduped.filter(f => f.confidence >= HIGH_CONFIDENCE_THRESHOLD);
-  const needsSemanticCheck = deduped.filter(f => f.confidence < HIGH_CONFIDENCE_THRESHOLD);
-  if (highConfidence.length > 0) {
-    log(`[token-diag] Skipping semantic verification for ${highConfidence.length} high-confidence (≥${HIGH_CONFIDENCE_THRESHOLD}) finding(s) — saves ~${Math.round(highConfidence.length * 800).toLocaleString()} tokens`);
-  }
-
-  let semanticVerified: PRFinding[] = [...highConfidence];
+  let semanticVerified: PRFinding[] = [];
   let semanticRejectedCount = 0;
   let semanticTokens: TokenUsage | undefined;
 
-  if (needsSemanticCheck.length > 0) {
-    log(`Running semantic verification on ${needsSemanticCheck.length} finding(s)...`);
-    const semantic = await verifyFindingsSemantically(needsSemanticCheck, {
+  if (deduped.length > 0) {
+    log(`Running semantic verification on ${deduped.length} finding(s)...`);
+    const semantic = await verifyFindingsSemantically(deduped, {
       repoPath,
+      parsedDiff,
       runtime,
       model: config.model,
       apiKey,
@@ -307,7 +320,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       log,
     });
     issues.push(...semantic.issues);
-    semanticVerified = [...highConfidence, ...semantic.verified];
+    semanticVerified = semantic.verified;
     semanticRejectedCount = semantic.rejected.length;
     semanticTokens = semantic.tokensUsed;
     log(`Semantic verification: accepted ${semantic.verified.length}, rejected ${semantic.rejected.length}`);
@@ -316,15 +329,12 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     }
 
     if (semantic.rejected.length > 0) {
-      for (const rejected of semantic.rejected.slice(0, 5)) {
+      for (const rejected of semantic.rejected) {
         log(`  ✗ Rejected (semantic): "${rejected.finding.title}" — ${rejected.reason}`);
-      }
-      if (semantic.rejected.length > 5) {
-        log(`  ... and ${semantic.rejected.length - 5} more semantic rejections`);
       }
     }
   } else {
-    log('Skipping semantic verification — all findings are high-confidence.');
+    log('Skipping semantic verification — no findings remain after deterministic/schema validation and deduplication.');
   }
 
   let finalFindings = semanticVerified;
@@ -364,7 +374,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     log(`[token-diag] ═══ GRAND TOTAL: ${formatTokenSummary(grandTotal)}${reviewerTokensAreEstimated ? ' (⚠ UNDERESTIMATED — see reviewers line)' : ''} ═══`);
     log(`[token-diag]   orchestrator: ${orchestratorResult.tokensUsed ? formatTokenSummary(orchestratorResult.tokensUsed) : 'n/a'}`);
     log(`[token-diag]   reviewers (${selectedReviewers.length}x): ${hasTokenData ? formatTokenSummary(reviewerTokenTotal) + reviewerSuffix : 'n/a'}`);
-    log(`[token-diag]   semantic verification: ${semanticTokens ? formatTokenSummary(semanticTokens) : 'skipped (high-confidence)'}`);
+    log(`[token-diag]   semantic verification: ${semanticTokens ? formatTokenSummary(semanticTokens) : 'skipped (no findings)'}`);
     if (reviewerTokensAreEstimated) {
       log(`[token-diag] ⚠ Reviewer token counts reflect the initial prompt size only. OpenCode does not`);
       log(`[token-diag]   expose cumulative session usage — each tool call re-sends the full conversation`);

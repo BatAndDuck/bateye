@@ -10,6 +10,7 @@ import {
   buildPRFindingBatchVerificationUserMessage,
 } from '../prompts/pr-review';
 import { collectVerificationTrailFiles, RejectedFinding } from './verifier';
+import { DiffHunk, ParsedDiff } from './diff-parser';
 
 export interface SemanticVerificationResult {
   verified: PRFinding[];
@@ -20,6 +21,7 @@ export interface SemanticVerificationResult {
 
 export interface SemanticVerifierOptions {
   repoPath: string;
+  parsedDiff: ParsedDiff;
   runtime: IRuntime;
   model: string;
   apiKey: string;
@@ -30,12 +32,11 @@ export interface SemanticVerifierOptions {
 
 /** Number of findings to verify per AI call. Batching reduces total call count substantially. */
 const VERIFICATION_BATCH_SIZE = 5;
+const DIFF_TOLERANCE_LINES = 3;
 
 function readFileContent(repoPath: string, filePath: string): string | null {
   try {
     const content = fs.readFileSync(path.join(repoPath, filePath), 'utf-8');
-    // Truncate to keep semantic verification prompts manageable. The verifier only
-    // needs the region around the finding; sending entire large files is wasteful.
     if (content.length > MAX_PR_CURRENT_FILE_CHARS) {
       return content.slice(0, MAX_PR_CURRENT_FILE_CHARS) + `\n... [truncated at ${MAX_PR_CURRENT_FILE_CHARS} chars]`;
     }
@@ -45,22 +46,66 @@ function readFileContent(repoPath: string, filePath: string): string | null {
   }
 }
 
+function formatDiffHunk(hunk: DiffHunk): string {
+  return hunk.lines.map(line => {
+    if (line.type === 'add') {
+      return `[Line ${line.newLineNumber}] + ${line.content}`;
+    }
+    if (line.type === 'remove') {
+      return `[Removed ${line.oldLineNumber}] - ${line.content}`;
+    }
+    return `[Line ${line.newLineNumber}]   ${line.content}`;
+  }).join('\n');
+}
+
+function buildDiffContext(parsedDiff: ParsedDiff, finding: PRFinding): string {
+  const fileDiff = parsedDiff.files.get(finding.filePath);
+  if (!fileDiff) {
+    return `Anchor file "${finding.filePath}" is not present in the PR diff.`;
+  }
+
+  const relevantHunk = fileDiff.hunks.find(hunk =>
+    hunk.lines.some(line =>
+      line.newLineNumber !== null
+      && line.newLineNumber >= finding.startLine - DIFF_TOLERANCE_LINES
+      && line.newLineNumber <= finding.endLine + DIFF_TOLERANCE_LINES,
+    ),
+  );
+
+  if (!relevantHunk) {
+    return `Anchor line range ${finding.startLine}-${finding.endLine} in "${finding.filePath}" is not within or near any changed hunk in the PR diff.`;
+  }
+
+  return `Anchor file: ${finding.filePath}
+Anchor line range: ${finding.startLine}-${finding.endLine}
+
+Relevant PR hunk:
+\`\`\`diff
+${formatDiffHunk(relevantHunk)}
+\`\`\``;
+}
+
 type FindingWithContext = {
   finding: PRFinding;
   currentFileContent: string;
+  diffContext: string;
   supportingFiles: Array<{ filePath: string; content: string }>;
+};
+
+type SemanticVerdict = {
+  supported: boolean;
+  classification: 'direct' | 'companion' | 'unrelated' | 'unclear';
+  reason: string;
 };
 
 async function verifyBatch(
   batch: FindingWithContext[],
   options: SemanticVerifierOptions,
 ): Promise<{
-  results: Map<string, { supported: boolean; reason: string }>;
+  results: Map<string, SemanticVerdict>;
   tokensUsed?: TokenUsage;
   error?: string;
 }> {
-  const model = options.model;
-  // maxTokens scales with batch size: ~400 tokens per finding verdict
   const maxTokens = Math.max(1024, VERIFICATION_BATCH_SIZE * 512);
 
   try {
@@ -68,7 +113,7 @@ async function verifyBatch(
       {
         systemPrompt: buildPRFindingBatchVerificationSystemPrompt(),
         userMessage: buildPRFindingBatchVerificationUserMessage(batch),
-        model,
+        model: options.model,
         apiKey: options.apiKey,
         transport: options.transport,
         apiBaseUrl: options.apiBaseUrl,
@@ -80,9 +125,13 @@ async function verifyBatch(
       prFindingBatchVerificationSchema,
     );
 
-    const resultMap = new Map<string, { supported: boolean; reason: string }>();
+    const resultMap = new Map<string, SemanticVerdict>();
     for (const v of result.data.verifications) {
-      resultMap.set(v.findingId, { supported: v.supported, reason: v.reason });
+      resultMap.set(v.findingId, {
+        supported: v.supported,
+        classification: v.classification,
+        reason: v.reason,
+      });
     }
     return { results: resultMap, tokensUsed: result.tokensUsed };
   } catch (err) {
@@ -100,7 +149,6 @@ export async function verifyFindingsSemantically(
   let totalTokens: TokenUsage = { inputTokens: 0, outputTokens: 0 };
   let hasTokenData = false;
 
-  // Build context for each finding, reject immediately if primary file unreadable
   const findingsWithContext: FindingWithContext[] = [];
   for (const finding of findings) {
     const currentFileContent = readFileContent(options.repoPath, finding.filePath);
@@ -117,14 +165,18 @@ export async function verifyFindingsSemantically(
       .map(filePath => ({ filePath, content: readFileContent(options.repoPath, filePath) }))
       .filter((entry): entry is { filePath: string; content: string } => typeof entry.content === 'string');
 
-    findingsWithContext.push({ finding, currentFileContent, supportingFiles });
+    findingsWithContext.push({
+      finding,
+      currentFileContent,
+      diffContext: buildDiffContext(options.parsedDiff, finding),
+      supportingFiles,
+    });
   }
 
   if (findingsWithContext.length === 0) {
     return { verified, rejected, issues };
   }
 
-  // Chunk into batches
   const batches: FindingWithContext[][] = [];
   for (let i = 0; i < findingsWithContext.length; i += VERIFICATION_BATCH_SIZE) {
     batches.push(findingsWithContext.slice(i, i + VERIFICATION_BATCH_SIZE));
@@ -132,7 +184,6 @@ export async function verifyFindingsSemantically(
 
   options.log?.(`  Semantic verification: ${findingsWithContext.length} finding(s) in ${batches.length} batch(es) using ${options.model}`);
 
-  // Run all batches in parallel
   const batchResults = await Promise.all(batches.map(batch => verifyBatch(batch, options)));
 
   for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
@@ -146,7 +197,6 @@ export async function verifyFindingsSemantically(
 
     if (error) {
       options.log?.(`  ✗ Semantic verifier batch ${batchIdx + 1}/${batches.length} failed: ${error}`);
-      // Fall back: accept all findings in this batch (don't penalise for infra errors)
       for (const { finding } of batch) {
         issues.push({
           severity: 'warning',
@@ -164,14 +214,29 @@ export async function verifyFindingsSemantically(
     for (const { finding } of batch) {
       const verdict = results.get(finding.id);
       if (!verdict) {
-        // Finding ID wasn't in the response — accept it (don't discard valid findings due to model slip)
-        verified.push(finding);
+        const message = `Semantic verifier returned no verdict for "${finding.title}"`;
+        issues.push({
+          severity: 'warning',
+          code: 'pr-semantic-verifier-missing-verdict',
+          message,
+          stage: 'semantic-verification',
+          reviewerId: finding.reviewerId,
+          reviewerName: finding.reviewerName,
+        });
+        rejected.push({
+          finding,
+          reason: 'Semantic verifier returned no verdict for this finding',
+        });
         continue;
       }
+
       if (verdict.supported) {
         verified.push(finding);
       } else {
-        rejected.push({ finding, reason: verdict.reason });
+        rejected.push({
+          finding,
+          reason: `[${verdict.classification}] ${verdict.reason}`,
+        });
       }
     }
   }
