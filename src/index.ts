@@ -1,10 +1,12 @@
 #!/usr/bin/env node
-import { createCLI } from './cli/index';
-
 installProcessWarningFilter();
+void main();
 
-const program = createCLI();
-program.parse(process.argv);
+async function main(): Promise<void> {
+  const { createCLI } = await import('./cli/index');
+  const program = createCLI();
+  program.parse(process.argv);
+}
 
 function installProcessWarningFilter(): void {
   const originalEmitWarning = process.emitWarning as (...args: unknown[]) => void;

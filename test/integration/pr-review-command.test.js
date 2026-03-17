@@ -295,10 +295,76 @@ test('pr-review command broadens built-in reviewer coverage when the orchestrato
 
   const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json'), 'utf-8'));
   const selectedIds = report.selectedReviewers.map(reviewer => reviewer.reviewerId);
-  assert.deepEqual(selectedIds, ['bug-hunter', 'code-quality', 'complexity', 'test-quality']);
+  assert.deepEqual(selectedIds, ['bug-hunter', 'code-quality', 'complexity']);
 
   const runtimeLog = JSON.parse(fs.readFileSync(logPath, 'utf-8'));
-  assert.equal(runtimeLog.filter(entry => entry.type === 'runAgenticReview').length, 4);
+  assert.equal(runtimeLog.filter(entry => entry.type === 'runAgenticReview').length, 3);
+});
+
+test('pr-review command trims overlapping broad reviewers while keeping domain-specific ones', () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-stable-selection-'));
+  initGitRepo(repoPath);
+
+  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+    model: 'anthropic/mock-model',
+    exclude: [],
+  });
+
+  writeText(path.join(repoPath, 'src', 'runtime.ts'), `export async function fetchWithLogs(url: string) {
+  console.log('fetching', url);
+  return fetch(url);
+}
+`);
+  commitAll(repoPath, 'base');
+
+  runOk('git', ['checkout', '-b', 'feature/stable-selection'], { cwd: repoPath });
+  writeText(path.join(repoPath, 'src', 'runtime.ts'), `export async function fetchWithLogs(url: string) {
+  console.log('fetching', url);
+  const response = await fetch(url);
+  return response;
+}
+`);
+  commitAll(repoPath, 'feature change');
+
+  const fixturePath = path.join(repoPath, 'mock-runtime.json');
+  writeJson(fixturePath, {
+    runs: [
+      {
+        data: {
+          selectedReviewers: [
+            { reviewerId: 'error-handling', reason: 'Error path changed.' },
+            { reviewerId: 'log-reviewer', reason: 'Logging changed.' },
+            { reviewerId: 'complexity', reason: 'Complexity changed.' },
+            { reviewerId: 'code-quality', reason: 'General code quality.' },
+            { reviewerId: 'clean-code', reason: 'Readability changed.' },
+            { reviewerId: 'test-quality', reason: 'Tests may need review.' },
+            { reviewerId: 'resiliency', reason: 'Network call changed.' },
+            { reviewerId: 'bug-hunter', reason: 'Logic changed.' },
+          ],
+        },
+      },
+    ],
+    agenticRuns: [
+      { data: { score: 95, summary: 'ok', findings: [] } },
+      { data: { score: 95, summary: 'ok', findings: [] } },
+      { data: { score: 95, summary: 'ok', findings: [] } },
+      { data: { score: 95, summary: 'ok', findings: [] } },
+      { data: { score: 95, summary: 'ok', findings: [] } },
+      { data: { score: 95, summary: 'ok', findings: [] } },
+    ],
+  });
+
+  const result = runPRReview(['--cwd', repoPath, '--base', 'main', '--dry-run'], {
+    CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
+    CODEOWL_RUNTIME: 'mock',
+    CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json'), 'utf-8'));
+  const selectedIds = report.selectedReviewers.map(reviewer => reviewer.reviewerId);
+  assert.deepEqual(selectedIds, ['error-handling', 'log-reviewer', 'complexity', 'code-quality', 'test-quality', 'resiliency']);
 });
 
 test('pr-review command reports degraded status when review coverage is reduced by tool failures', () => {
