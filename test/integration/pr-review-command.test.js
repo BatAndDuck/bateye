@@ -917,6 +917,121 @@ Report only concrete code quality findings after investigating the current repos
   assert.match(updatedSummary.body, /No issues found/);
 });
 
+test('pr-review command falls back to a general PR comment when an inline line cannot be resolved', () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-inline-fallback-'));
+  initGitRepo(repoPath);
+
+  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+    model: 'anthropic/mock-model',
+    exclude: [],
+  });
+
+  writeText(path.join(repoPath, '.codeowl', 'reviewers', 'github-inline-reviewer.md'), `---
+id: github-inline-reviewer
+name: GitHub Inline Reviewer
+mode: pr-review
+category: code-quality
+---
+Report only concrete findings anchored to the changed file.
+`);
+
+  writeText(path.join(repoPath, 'src', 'service.ts'), `export function buildMessage(name: string) {
+  return name.trim();
+}
+`);
+  commitAll(repoPath, 'base');
+
+  runOk('git', ['checkout', '-b', 'feature/github-inline-fallback'], { cwd: repoPath });
+  writeText(path.join(repoPath, 'src', 'service.ts'), `export function buildMessage(name: string) {
+  const normalized = name.trim();
+  return normalized;
+}
+`);
+  commitAll(repoPath, 'feature change');
+
+  const fixturePath = path.join(repoPath, 'mock-runtime.json');
+  writeJson(fixturePath, {
+    runs: [
+      {
+        data: {
+          selectedReviewers: [
+            { reviewerId: 'github-inline-reviewer', reason: 'Changed TypeScript code should be reviewed.' },
+          ],
+        },
+      },
+    ],
+    agenticRuns: [
+      {
+        data: {
+          score: 88,
+          summary: 'One actionable issue found.',
+          findings: [
+            {
+              id: 'GITHUB_INLINE_REVIEWER_1',
+              title: 'Trimmed input is returned directly',
+              description: 'The changed code returns the normalized input directly.',
+              priority: 'medium',
+              confidence: 0.95,
+              filePath: 'src/service.ts',
+              startLine: 2,
+              endLine: 2,
+              codeQuote: '  const normalized = name.trim();',
+              evidence: ['src/service.ts returns the normalized input directly.'],
+              verificationTrail: ['file:src/service.ts', 'search:return normalized'],
+              searchedFor: ['validation'],
+              recommendation: 'Validate the normalized value before returning it.',
+              tags: ['code-quality'],
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  const octokitFixturePath = path.join(repoPath, 'octokit-state.json');
+  writeJson(octokitFixturePath, {
+    pullRequest: {
+      baseRef: 'main',
+      baseSha: 'base-sha',
+      headRef: 'feature/github-inline-fallback',
+      headSha: 'head-sha',
+    },
+    failCreateReviewComment: [{ path: 'src/service.ts', line: 2 }],
+    issueComments: [],
+    reviewComments: [],
+    actions: [],
+  });
+
+  const hookPath = path.join(process.cwd(), 'test', 'integration', 'mock-octokit-hook.cjs');
+  const result = spawnSync('node', ['--require', hookPath, 'dist/index.js', 'pr-review', '--cwd', repoPath, '--base', 'main', '--github', '--pr-number', '9'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
+      CODEOWL_RUNTIME: 'mock',
+      CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+      CODEOWL_OCTOKIT_FIXTURES: octokitFixturePath,
+      GITHUB_TOKEN: 'github-test-token',
+      GITHUB_REPOSITORY: 'CodeOwlOrg/CodeOwl',
+      PR_NUMBER: '9',
+    },
+    encoding: 'utf-8',
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json'), 'utf-8'));
+  assert.equal(report.status, 'complete');
+  assert.equal(report.findings.length, 1);
+  assert.equal(report.issues.length, 0);
+
+  const octokitState = JSON.parse(fs.readFileSync(octokitFixturePath, 'utf-8'));
+  const actionTypes = octokitState.actions.map(action => action.type);
+  assert.ok(actionTypes.includes('createComment'));
+  const fallbackComment = octokitState.issueComments.find(comment => /CodeOwl follow-up/.test(comment.body));
+  assert.ok(fallbackComment);
+});
+
 test('pr-review command fails clearly when non-agentic direct runtime is requested', () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-direct-runtime-'));
   initGitRepo(repoPath);

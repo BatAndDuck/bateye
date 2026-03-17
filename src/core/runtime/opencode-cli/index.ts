@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import { createServer, AddressInfo } from 'net';
+import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { z } from 'zod';
@@ -16,7 +17,7 @@ type OpenCodeServerHandle = {
   envSignature: string;
   /** Absolute path to the opencode SQLite database used by this server instance. */
   dbPath: string;
-  recentLogs: string[];
+  logPath: string;
   close: () => void;
 };
 
@@ -569,18 +570,19 @@ async function waitForServerReady(
 async function startServer(env: NodeJS.ProcessEnv, readinessTimeoutMs = 30_000): Promise<OpenCodeServerHandle> {
   const port = await findAvailablePort();
   const invocation = resolveOpenCodeInvocation();
-  const recentLogs: string[] = [];
+  const logPath = path.join(os.tmpdir(), `codeowl-opencode-${process.pid}-${Date.now()}-${port}.log`);
+  const logFd = fs.openSync(logPath, 'a');
   const child = spawn(
     invocation.command,
     [...invocation.args, 'serve', '--hostname=127.0.0.1', `--port=${port}`],
     {
       cwd: process.cwd(),
       env,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['ignore', logFd, logFd],
       windowsHide: true,
     },
   );
-  attachChildLogBuffer(child, recentLogs);
+  fs.closeSync(logFd);
 
   const url = `http://127.0.0.1:${port}`;
 
@@ -588,7 +590,7 @@ async function startServer(env: NodeJS.ProcessEnv, readinessTimeoutMs = 30_000):
     await waitForServerReady(url, child, readinessTimeoutMs);
   } catch (err) {
     child.kill();
-    const logTail = formatRecentServerLogs(recentLogs);
+    const logTail = formatRecentServerLogs(logPath);
     throw new Error(
       `Failed to start OpenCode server at ${url}: ${formatErrorWithCauses(err)}${logTail ? ` | server logs: ${logTail}` : ''}`,
       { cause: err },
@@ -606,7 +608,7 @@ async function startServer(env: NodeJS.ProcessEnv, readinessTimeoutMs = 30_000):
     child,
     envSignature: buildEnvSignature(env),
     dbPath,
-    recentLogs,
+    logPath,
     close: () => {
       if (child.exitCode === null) {
         child.kill('SIGTERM');
@@ -926,7 +928,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
       }
     }
 
-    const serverLogs = formatRecentServerLogs(server.recentLogs);
+    const serverLogs = formatRecentServerLogs(server.logPath);
     throw new Error(
       `OpenCode server request failed for ${callId} via ${server.url}: ${summarizeSdkError(lastError)}${serverLogs ? ` | server logs: ${serverLogs}` : ''}`,
       { cause: lastError },
@@ -984,26 +986,18 @@ export class OpenCodeCLIRuntime implements IRuntime {
   }
 }
 
-function attachChildLogBuffer(child: ReturnType<typeof spawn>, recentLogs: string[]): void {
-  const listeners = [child.stdout, child.stderr];
-  for (const stream of listeners) {
-    stream?.on('data', chunk => {
-      const text = chunk.toString().trim();
-      if (!text) return;
-      for (const line of text.split(/\r?\n/).map((segment: string) => segment.trim()).filter(Boolean)) {
-        recentLogs.push(line);
-      }
-      if (recentLogs.length > 20) {
-        recentLogs.splice(0, recentLogs.length - 20);
-      }
-    });
-  }
-}
-
-function formatRecentServerLogs(recentLogs: string[]): string {
-  if (recentLogs.length === 0) {
+function formatRecentServerLogs(logPath: string): string {
+  if (!fs.existsSync(logPath)) {
     return '';
   }
 
-  return recentLogs.slice(-5).join(' | ');
+  try {
+    const lines = fs.readFileSync(logPath, 'utf-8')
+      .split(/\r?\n/)
+      .map((line: string) => line.trim())
+      .filter(Boolean);
+    return lines.slice(-5).join(' | ');
+  } catch {
+    return '';
+  }
 }
