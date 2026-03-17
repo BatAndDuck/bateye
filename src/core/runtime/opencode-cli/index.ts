@@ -25,56 +25,86 @@ interface SessionTokenStats {
   cost: number;
 }
 
+type DatabaseSyncLike = {
+  prepare(sql: string): { get: (...args: unknown[]) => unknown };
+  close(): void;
+};
+
 /**
  * Query the opencode SQLite database for exact per-step token usage of a completed session.
- * Uses node:sqlite (built-in since Node 22, experimental). Falls back silently on any error.
+ * Uses node:sqlite (built-in since Node 22, experimental). Falls back to null on any error.
+ *
+ * Retries up to 3 times with 200ms delay to handle WAL lock contention when many reviewer
+ * sessions complete in parallel and race to open the same DB file.
+ * Does NOT use readOnly mode because on Windows the .db-shm shared-memory file needs write
+ * access even for read-only workloads in WAL mode, which can cause spurious SQLITE_CANTOPEN.
  */
 function querySessionActualUsage(dbPath: string, sessionId: string): SessionTokenStats | null {
+  type NodeSqlite = { DatabaseSync: new (path: string) => DatabaseSyncLike };
+  let nodeSqlite: NodeSqlite;
   try {
-    // node:sqlite is experimental in Node 22+ but available and stable enough.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { DatabaseSync } = require('node:sqlite') as {
-      DatabaseSync: new (path: string, opts?: { readOnly?: boolean }) => {
-        prepare(sql: string): { get: (...args: unknown[]) => unknown };
-        close(): void;
-      };
-    };
+    nodeSqlite = require('node:sqlite') as NodeSqlite;
+  } catch {
+    return null; // node:sqlite not available (Node < 22)
+  }
+  const { DatabaseSync } = nodeSqlite;
 
-    const db = new DatabaseSync(dbPath, { readOnly: true });
-    const result = db.prepare(`
-      SELECT
-        COALESCE(SUM(json_extract(data, '$.tokens.input')), 0)         AS input_tokens,
-        COALESCE(SUM(json_extract(data, '$.tokens.output')), 0)        AS output_tokens,
-        COALESCE(SUM(json_extract(data, '$.tokens.cache.read')), 0)    AS cache_read_tokens,
-        COALESCE(SUM(json_extract(data, '$.tokens.cache.write')), 0)   AS cache_write_tokens,
-        COALESCE(SUM(json_extract(data, '$.cost')), 0)                 AS cost
-      FROM part
-      WHERE session_id = ?
-        AND json_extract(data, '$.type') = 'step-finish'
-    `).get(sessionId) as {
-      input_tokens: number;
-      output_tokens: number;
-      cache_read_tokens: number;
-      cache_write_tokens: number;
-      cost: number;
-    } | undefined;
+  const SQL = `
+    SELECT
+      COALESCE(SUM(json_extract(data, '$.tokens.input')), 0)         AS input_tokens,
+      COALESCE(SUM(json_extract(data, '$.tokens.output')), 0)        AS output_tokens,
+      COALESCE(SUM(json_extract(data, '$.tokens.cache.read')), 0)    AS cache_read_tokens,
+      COALESCE(SUM(json_extract(data, '$.tokens.cache.write')), 0)   AS cache_write_tokens,
+      COALESCE(SUM(json_extract(data, '$.cost')), 0)                 AS cost
+    FROM part
+    WHERE session_id = ?
+      AND json_extract(data, '$.type') = 'step-finish'
+  `;
 
-    db.close();
+  const MAX_ATTEMPTS = 3;
+  const RETRY_DELAY_MS = 200;
 
-    if (!result || (result.input_tokens === 0 && result.output_tokens === 0 && result.cost === 0)) {
-      return null; // No step-finish parts yet or empty session
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    // Synchronous sleep for retry — we're already in a synchronous helper.
+    if (attempt > 0) {
+      const deadline = Date.now() + RETRY_DELAY_MS;
+      while (Date.now() < deadline) { /* spin */ }
     }
 
-    return {
-      inputTokens: result.input_tokens,
-      outputTokens: result.output_tokens,
-      cacheReadTokens: result.cache_read_tokens,
-      cacheWriteTokens: result.cache_write_tokens,
-      cost: result.cost,
-    };
-  } catch {
-    return null; // node:sqlite unavailable or DB locked — caller falls back to estimates
+    let db: DatabaseSyncLike | null = null;
+    try {
+      db = new DatabaseSync(dbPath);
+      const result = db.prepare(SQL).get(sessionId) as {
+        input_tokens: number;
+        output_tokens: number;
+        cache_read_tokens: number;
+        cache_write_tokens: number;
+        cost: number;
+      } | undefined;
+
+      if (!result || (result.input_tokens === 0 && result.output_tokens === 0 && result.cost === 0)) {
+        return null; // No step-finish parts found for this session
+      }
+
+      return {
+        inputTokens: result.input_tokens,
+        outputTokens: result.output_tokens,
+        cacheReadTokens: result.cache_read_tokens,
+        cacheWriteTokens: result.cache_write_tokens,
+        cost: result.cost,
+      };
+    } catch (err) {
+      if (attempt === MAX_ATTEMPTS - 1) {
+        // Log only on final failure so users know the token data is estimated.
+        console.error(`[opencode] DB token query failed after ${MAX_ATTEMPTS} attempts (path: ${dbPath}, session: ${sessionId}): ${(err as Error).message ?? String(err)}`);
+      }
+    } finally {
+      try { db?.close(); } catch { /* ignore close errors */ }
+    }
   }
+
+  return null;
 }
 
 const MAX_STRUCTURED_OUTPUT_ATTEMPTS = 2;
