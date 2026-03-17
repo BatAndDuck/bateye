@@ -31,6 +31,22 @@ function codeQuoteOverlaps(a: string, b: string): boolean {
   return aNorm === bNorm || aNorm.includes(bNorm) || bNorm.includes(aNorm);
 }
 
+/**
+ * Returns the fraction of the shorter line range covered by the overlap.
+ * When >= LINE_OVERLAP_FRACTION_THRESHOLD the two findings are essentially
+ * pointing at the same block of code, even if their titles differ.
+ */
+function lineOverlapFraction(s1: number, e1: number, s2: number, e2: number): number {
+  const overlapStart = Math.max(s1, s2);
+  const overlapEnd = Math.min(e1, e2);
+  if (overlapEnd < overlapStart) return 0;
+  const overlapLen = overlapEnd - overlapStart + 1;
+  const minLen = Math.min(e1 - s1 + 1, e2 - s2 + 1);
+  return minLen > 0 ? overlapLen / minLen : 0;
+}
+
+const LINE_OVERLAP_FRACTION_THRESHOLD = 0.9;
+
 function mergeFinding(primary: PRFinding, secondary: PRFinding): PRFinding {
   const keepPrimary = PRIORITY_ORDER[primary.priority] >= PRIORITY_ORDER[secondary.priority];
   const main = keepPrimary ? primary : secondary;
@@ -78,9 +94,14 @@ export function deduplicateFindings(findings: PRFinding[]): PRFinding[] {
 
         const candidate = fileFindings[j];
 
-        // Check line proximity (within 3 lines)
+        // Check line proximity (within 3 lines) OR large range overlap
         const linesClose = Math.abs(keeper.startLine - candidate.startLine) <= 3;
-        if (!linesClose) continue;
+        const fraction = lineOverlapFraction(
+          keeper.startLine, keeper.endLine,
+          candidate.startLine, candidate.endLine,
+        );
+        const rangeOverlaps = linesClose || fraction >= LINE_OVERLAP_FRACTION_THRESHOLD;
+        if (!rangeOverlaps) continue;
 
         // Check title similarity
         const titleSim = jaccardSimilarity(tokenize(keeper.title), tokenize(candidate.title));
@@ -88,7 +109,7 @@ export function deduplicateFindings(findings: PRFinding[]): PRFinding[] {
         // Check code quote overlap
         const quoteOverlap = codeQuoteOverlaps(keeper.codeQuote, candidate.codeQuote);
 
-        if (titleSim > 0.5 || quoteOverlap) {
+        if (titleSim > 0.5 || quoteOverlap || fraction >= LINE_OVERLAP_FRACTION_THRESHOLD) {
           merged.add(j);
           keeper = mergeFinding(keeper, candidate);
         }

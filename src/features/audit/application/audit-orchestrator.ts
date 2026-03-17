@@ -22,7 +22,7 @@ const FALLBACK_MAX_REVIEWERS = 10;
 /** Reviewer IDs that are always included in the fallback set (highest signal/cost ratio). */
 const FALLBACK_CORE_IDS = ['security-api', 'code-quality', 'documentation'];
 
-function buildRepoProfile(index: RepoIndex): RepoProfile {
+export function buildRepoProfile(index: RepoIndex): RepoProfile {
   const extensionCounts: Record<string, number> = {};
   const topDirSet = new Set<string>();
 
