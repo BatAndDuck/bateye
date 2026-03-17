@@ -12,7 +12,7 @@ import {
   buildPRReviewUserMessage,
   buildPRSummaryPrompt,
 } from '../prompts/pr-review';
-import { getGitDiff, getChangedFiles, getCommitSummaries, getRepoOwnerAndName } from '../git/index';
+import { getGitDiff, getChangedFiles, getCommitSummaries, getRepoOwnerAndName, CommitSummary } from '../git/index';
 import { selectReviewers } from './orchestrator';
 import { writePRReviewResult, ensureDir } from '../output/writer';
 import {
@@ -297,6 +297,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       structuredDiff,
       currentDiffFiles,
       currentFileContext,
+      commits,
       repoPath,
       config.model,
       apiKey,
@@ -572,6 +573,7 @@ async function runPRReviewer(
   structuredDiff: string,
   currentDiffFiles: string[],
   currentFileContext: string,
+  commits: CommitSummary[],
   repoPath: string,
   model: string,
   apiKey: string,
@@ -624,7 +626,7 @@ async function runPRReviewer(
   }
 
   const systemPrompt = buildPRReviewSystemPrompt(reviewer.instructions, reviewer.id, reviewer.name, repoProfile);
-  const userMessage = buildPRReviewUserMessage(structuredDiff, currentDiffFiles, currentFileContext, toolContext);
+  const userMessage = buildPRReviewUserMessage(structuredDiff, currentDiffFiles, currentFileContext, toolContext, commits);
   const initialFiles = currentDiffFiles;
 
   try {

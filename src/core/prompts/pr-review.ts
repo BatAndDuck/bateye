@@ -132,6 +132,8 @@ ${buildPRModeOverlay(reviewerId)}
 2. Follow imports and references to understand context outside the diff.
 3. Use search tools to confirm whether a problem actually exists in the current codebase.
 4. For each potential concern, find the EXACT line in the diff that causes the problem.
+5. Read the commit messages in this PR. If a commit message or code comment already explains the design decision behind a potential concern, that concern is intentional — do NOT report it.
+6. Check adjacent documentation (README.md, AGENTS.md, CLAUDE.md, docs/) to see if the behavior you are about to flag is already described there.
 
 ### PHASE 2: DECIDE WHAT TO REPORT (only after investigation)
 5. Ask yourself: "Did I read actual code in the diff that proves this problem exists at a specific line?"
@@ -156,6 +158,8 @@ ${buildPRModeOverlay(reviewerId)}
 10b. For logging/diagnostic code, do not report "use structured logging" or similar style advice unless the changed code demonstrably leaks secrets, PII, credentials, internal endpoints, or other actionable sensitive values.
 10c. For resiliency concerns, do not require retries, backoff, or timeout patterns unless the changed code actually performs the external/network operation in question and the missing guard creates a concrete risk now.
 10d. Do NOT report findings in documentation files (.md, .txt, .rst), template files, example files, or files that DESCRIBE anti-patterns rather than implement them. A file that lists "you should avoid doing X" is not itself a defect — only report findings in actual source code, configuration, or build files.
+10e. COMMIT INTENT: Before reporting that something is "missing", "not handled", or "inconsistent" — read the commit messages provided above. If the commit message explicitly explains the design decision, it is intentional. Do NOT report it as a finding.
+10f. DOCUMENTATION GAPS: If the changed lines introduce or modify user-facing behavior (CLI flags, config fields, API signatures, public interfaces, new commands) — check whether relevant documentation files (README.md, AGENTS.md, CLAUDE.md, docs/) reflect the change. If documentation is stale or missing, report a documentation gap finding anchored to the CHANGED CODE LINES that create the obligation (not to the documentation file itself). Set filePath, startLine, and endLine to the changed code. In the description and recommendation, specify exactly which documentation file and section needs updating.
 11. Every finding MUST include a "verificationTrail" with 1-5 entries. Use exact prefixes:
     - "file:<relative path>" for each file you inspected
     - "search:<query>" for repo-wide searches you performed
@@ -195,16 +199,21 @@ export function buildPRReviewUserMessage(
   structuredDiff: string,
   changedFiles: string[],
   currentFileContext: string,
-  additionalContext?: string
+  additionalContext?: string,
+  commits?: CommitSummary[],
 ): string {
   const maxLen = 24000;
   const diffContent = structuredDiff.length > maxLen
     ? structuredDiff.slice(0, maxLen) + '\n\n[...diff truncated...]'
     : structuredDiff;
 
+  const commitSection = commits && commits.length > 0
+    ? `\n## Commit History for This PR\nUse these to understand the author's intent before flagging anything as missing or broken:\n${commits.map(c => `- ${c.sha.slice(0, 12)} ${c.subject}`).join('\n')}\n`
+    : '';
+
   return `## Files Changed in This PR
 ${changedFiles.map(f => `- ${f}`).join('\n')}
-
+${commitSection}
 ## Code Changes
 
 Below are the exact changes in this PR. Each line is labeled with [Line N] showing its line number in the new file.
