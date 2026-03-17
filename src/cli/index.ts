@@ -24,7 +24,15 @@ export function createCLI(): Command {
   };
 
   program
-    .option('--cwd <path>', 'Working directory (defaults to current directory)');
+    .option('--cwd <path>', 'Working directory (defaults to current directory)')
+    .option('--verbose', 'Enable verbose runtime diagnostics');
+
+  program.hook('preAction', command => {
+    const opts = command.optsWithGlobals();
+    if (opts.verbose) {
+      process.env.CODEOWL_VERBOSE = '1';
+    }
+  });
 
   // ── init ──────────────────────────────────────────────────────────────
   program

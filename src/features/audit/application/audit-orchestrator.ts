@@ -1,7 +1,8 @@
 import * as path from 'path';
-import { Reviewer, OrchestratorResult } from '../../../types/index';
+import { Reviewer, OrchestratorResult, ReviewIssue, TokenUsageSummary } from '../../../types/index';
 import { RepoIndex } from '../../../types/index';
-import { getRuntime } from '../../../core/runtime/factory';
+import { getStructuredRuntime } from '../../../core/runtime/factory';
+import { formatErrorWithCauses } from '../../../core/runtime/error-format';
 import { orchestratorResultSchema } from '../../../core/validation/schemas';
 import {
   buildAuditOrchestratorSystemPrompt,
@@ -86,10 +87,15 @@ export interface SelectAuditReviewersOptions {
   apiBaseUrl?: string;
 }
 
-export async function selectAuditReviewers(options: SelectAuditReviewersOptions): Promise<OrchestratorResult> {
+export interface AuditReviewerSelectionResult extends OrchestratorResult {
+  issues: ReviewIssue[];
+  tokensUsed?: TokenUsageSummary;
+}
+
+export async function selectAuditReviewers(options: SelectAuditReviewersOptions): Promise<AuditReviewerSelectionResult> {
   const { index, availableReviewers, apiKey, transport, apiBaseUrl } = options;
   const model = options.model;
-  const runtime = await getRuntime();
+  const runtime = await getStructuredRuntime();
 
   const profile = buildRepoProfile(index);
 
@@ -106,13 +112,38 @@ export async function selectAuditReviewers(options: SelectAuditReviewersOptions)
 
   try {
     const result = await runtime.run<OrchestratorResult>(
-      { systemPrompt, userMessage, model, apiKey, transport, apiBaseUrl, maxTokens: ORCHESTRATOR_MAX_TOKENS, temperature: ORCHESTRATOR_TEMPERATURE },
+      {
+        systemPrompt,
+        userMessage,
+        model,
+        apiKey,
+        transport,
+        apiBaseUrl,
+        maxTokens: ORCHESTRATOR_MAX_TOKENS,
+        temperature: ORCHESTRATOR_TEMPERATURE,
+        callLabel: 'audit-orchestrator',
+      },
       orchestratorResultSchema,
     );
-    return result.data;
-  } catch {
+    return {
+      ...result.data,
+      issues: [],
+      tokensUsed: result.tokensUsed,
+    };
+  } catch (err) {
     // Orchestrator unavailable — use a conservative core set rather than all reviewers
     // to avoid cost explosion (60+ reviewers × full codebase = expensive).
-    return buildFallbackReviewers(availableReviewers);
+    const fallbackSelection = buildFallbackReviewers(availableReviewers);
+    return {
+      ...fallbackSelection,
+      issues: [
+        {
+          severity: 'warning',
+          code: 'audit-orchestrator-fallback',
+          message: `Audit reviewer orchestrator failed (${formatErrorWithCauses(err)}); using ${fallbackSelection.selectedReviewers.length} core reviewer(s) as fallback.`,
+          stage: 'select-reviewers',
+        },
+      ],
+    };
   }
 }

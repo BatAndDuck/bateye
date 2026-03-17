@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { AuditResult, Finding, ReviewIssue, Reviewer, ReviewerResult } from '../../../types/index';
-import { buildRepoIndex, scopeFilesForReviewer } from '../../../core/indexing/index';
+import { buildRepoIndex, scopeFilesForReviewer, selectAuditSeedFiles } from '../../../core/indexing/index';
 import { reviewerAnalysisSchema, ReviewerAnalysis } from '../../../core/validation/schemas';
 import { buildAuditSystemPrompt, buildAuditUserMessage } from '../../../core/prompts/audit';
 import { computeOverallScore } from '../../../core/scoring/normalizer';
@@ -10,7 +10,6 @@ import { formatToolContext } from '../../../core/tools/format';
 import {
   AUDIT_OUTPUT_FILE,
   OUTPUT_DIR,
-  MAX_FILES_FOR_REVIEWER_CONTEXT,
   MAX_CONCURRENT_AUDIT_REVIEWERS,
   MAX_AUDIT_REVIEWER_TOKENS,
   MAX_AUDIT_REVIEWER_TIMEOUT_MS,
@@ -18,6 +17,7 @@ import {
 import { ensureDir, writeAuditResult } from '../../../core/output/writer';
 import { IRuntime, TokenUsage } from '../../../core/runtime/interface';
 import { getAuditRuntime } from '../../../core/runtime/factory';
+import { formatErrorWithCauses } from '../../../core/runtime/error-format';
 import { addTokens, formatTokenSummary } from '../../../core/runtime/token-utils';
 import { resolveApiKey, resolveConfig } from '../../config/application/config-service';
 import { loadReviewersForMode } from '../../reviewers/application/reviewer-registry';
@@ -37,6 +37,28 @@ export interface AuditDependencies {
 const defaultDependencies: AuditDependencies = {
   getRuntime: getAuditRuntime,
 };
+
+function truncateInline(text: string, limit: number = 120): string {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= limit) return normalized;
+  return normalized.slice(0, limit - 3) + '...';
+}
+
+function logAuditFindingList(log: (msg: string) => void, reviewerName: string, findings: Finding[], label: string): void {
+  log(`  [${reviewerName}] ${label}: ${findings.length}`);
+  if (findings.length === 0) {
+    log(`  [${reviewerName}]   (none)`);
+    return;
+  }
+
+  findings.forEach((finding, index) => {
+    log(
+      `  [${reviewerName}]   [${index + 1}/${findings.length}] ${finding.priority.toUpperCase()} ` +
+      `${finding.filePath}:${finding.startLine}-${finding.endLine} "${finding.title}" ` +
+      `confidence=${finding.confidence.toFixed(2)} evidence="${truncateInline(finding.evidence[0] || finding.description)}"`,
+    );
+  });
+}
 
 /** Run a full repository audit and write the resulting report to disk. */
 export async function runAudit(options: AuditOptions, dependencies: AuditDependencies = defaultDependencies): Promise<AuditResult> {
@@ -65,6 +87,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   log(`Found ${index.totalFiles} files to analyze.`);
 
   let activeReviewers: Reviewer[];
+  let orchestratorTokens: TokenUsage | undefined;
 
   if (options.reviewerIds && options.reviewerIds.length > 0) {
     // Explicit selection — skip orchestrator
@@ -73,28 +96,22 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   } else {
     // AI orchestrator selects which reviewers are relevant to this repo
     log(`Asking the orchestrator to shortlist reviewers (${allReviewers.length} candidates)...`);
-    try {
-      const orchestratorResult = await selectAuditReviewers({
-        index,
-        availableReviewers: allReviewers,
-        model: config.model,
-        apiKey,
-        transport: config.transport,
-        apiBaseUrl: config.apiBaseUrl,
-      });
-      const selectedIds = new Set(orchestratorResult.selectedReviewers.map(r => r.reviewerId));
-      activeReviewers = allReviewers.filter(r => selectedIds.has(r.id));
-      log(`Orchestrator selected ${activeReviewers.length} reviewer(s): ${activeReviewers.map(r => r.name).join(', ')}`);
-    } catch (err) {
-      log(`Orchestrator stumbled (${(err as Error).message}); falling back to the full reviewer set.`);
-      issues.push({
-        severity: 'warning',
-        code: 'audit-orchestrator-fallback',
-        message: `Audit orchestrator failed and the full reviewer set was used instead: ${(err as Error).message}`,
-        stage: 'select-reviewers',
-      });
-      activeReviewers = allReviewers;
+    const orchestratorResult = await selectAuditReviewers({
+      index,
+      availableReviewers: allReviewers,
+      model: config.model,
+      apiKey,
+      transport: config.transport,
+      apiBaseUrl: config.apiBaseUrl,
+    });
+    orchestratorTokens = orchestratorResult.tokensUsed;
+    issues.push(...orchestratorResult.issues);
+    for (const issue of orchestratorResult.issues) {
+      log(`Warning: ${issue.message}`);
     }
+    const selectedIds = new Set(orchestratorResult.selectedReviewers.map(r => r.reviewerId));
+    activeReviewers = allReviewers.filter(r => selectedIds.has(r.id));
+    log(`Orchestrator selected ${activeReviewers.length} reviewer(s): ${activeReviewers.map(r => r.name).join(', ')}`);
   }
 
   if (activeReviewers.length === 0) {
@@ -107,9 +124,8 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     activeReviewers,
     MAX_CONCURRENT_AUDIT_REVIEWERS,
     async reviewer => {
-      log(`Running reviewer: ${reviewer.name}...`);
       try {
-        const result = await runSingleReviewer(reviewer, index, config, apiKey, runtime);
+        const result = await runSingleReviewer(reviewer, index, config, apiKey, runtime, log);
         if (result.execution.toolError) {
           issues.push({
             severity: reviewer.tool?.optional === false ? 'error' : 'warning',
@@ -127,15 +143,15 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
         log(`  ✓ ${reviewer.name}: score=${result.score}, findings=${result.findings.length} (${durationSec}s${tokenSuffix})`);
         return result;
       } catch (err) {
-        const msg = (err as Error).message;
+        const msg = formatErrorWithCauses(err);
         const isTimeout = /timed out after/i.test(msg);
         log(`  Warning: reviewer ${reviewer.name} failed and will be skipped: ${msg}`);
         issues.push({
           severity: 'warning',
           code: isTimeout ? 'audit-reviewer-timeout' : 'audit-reviewer-failed',
           message: isTimeout
-            ? `Reviewer "${reviewer.name}" timed out and was skipped: ${msg}`
-            : `Reviewer "${reviewer.name}" failed and was skipped: ${msg}`,
+            ? `Reviewer "${reviewer.name}" (model=${reviewer.model || config.model}) timed out and was skipped: ${msg}`
+            : `Reviewer "${reviewer.name}" (model=${reviewer.model || config.model}) failed and was skipped: ${msg}`,
           stage: 'run-reviewers',
           reviewerId: reviewer.id,
           reviewerName: reviewer.name,
@@ -152,9 +168,18 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
 
   // Cross-reviewer deduplication
   const allFindings = successfulReviewerResults.flatMap(r => r.findings);
-  const deduped = deduplicateAuditFindings(allFindings);
-  const droppedCount = allFindings.length - deduped.length;
-  if (droppedCount > 0) log(`Deduplication removed ${droppedCount} cross-reviewer duplicate finding(s).`);
+  const deduplication = deduplicateAuditFindings(allFindings);
+  const deduped = deduplication.findings;
+  if (deduplication.dropped.length > 0) {
+    log(`Deduplication removed ${deduplication.dropped.length} cross-reviewer duplicate finding(s).`);
+    for (const dropped of deduplication.dropped) {
+      log(
+        `  [audit-dedup] Dropped "${dropped.dropped.title}" from ${dropped.dropped.reviewerName} ` +
+        `as duplicate of ${dropped.kept.reviewerName} in ${dropped.dropped.filePath}:${dropped.dropped.startLine}-${dropped.dropped.endLine} ` +
+        `(similarity=${dropped.similarity.toFixed(2)})`,
+      );
+    }
+  }
 
   // Rebuild per-reviewer result arrays using deduped findings
   const dedupedIdSet = new Set(deduped.map(f => f.id));
@@ -167,15 +192,18 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   const totalFindings = deduped.length;
   const criticalCount = deduped.filter(f => f.priority === 'critical').length;
 
-  // Aggregate token usage across all successful reviewers
-  let totalTokens: TokenUsage | undefined;
+  // Aggregate token usage across reviewer selection and all successful reviewers
+  let totalTokens: TokenUsage | undefined = orchestratorTokens ? { ...orchestratorTokens } : undefined;
+  if (orchestratorTokens) {
+    log(`Token usage (reviewer selection): ${formatTokenSummary(orchestratorTokens)}`);
+  }
   for (const r of successfulReviewerResults) {
     if (r.tokensUsed) {
       totalTokens = totalTokens ? addTokens(totalTokens, r.tokensUsed) : { ...r.tokensUsed };
     }
   }
   if (totalTokens) {
-    log(`Token usage (all reviewers): ${formatTokenSummary(totalTokens)}`);
+    log(`Token usage (audit run total): ${formatTokenSummary(totalTokens)}`);
   }
 
   // Degrade on error-severity issues, non-transient warnings (tool failures etc.),
@@ -242,11 +270,15 @@ async function runSingleReviewer(
   config: ReturnType<typeof resolveConfig>,
   apiKey: string,
   runtime: IRuntime,
+  log: (msg: string) => void,
 ): Promise<ReviewerResult> {
   const start = Date.now();
   const scopedFiles = scopeFilesForReviewer(index, reviewer.scopeHints);
+  const seedFiles = selectAuditSeedFiles(index, reviewer, scopedFiles);
   const model = reviewer.model || config.model;
-  const seedFiles = scopedFiles.slice(0, MAX_FILES_FOR_REVIEWER_CONTEXT).map(file => file.relativePath);
+  const seedFilePaths = seedFiles.map(file => file.relativePath);
+  const transportLabel = config.transport ? `, transport=${config.transport}` : '';
+  log(`Running reviewer: ${reviewer.name} (model=${model}, scopedFiles=${scopedFiles.length}, seedFiles=${seedFilePaths.length}${transportLabel})...`);
 
   // Run external tool if configured
   let toolContext: string | undefined;
@@ -273,7 +305,13 @@ async function runSingleReviewer(
   }
 
   const systemPrompt = buildAuditSystemPrompt(reviewer.instructions, reviewer.id, reviewer.name);
-  const userMessage = buildAuditUserMessage(seedFiles, index.totalFiles, scopedFiles.length, toolContext);
+  const userMessage = buildAuditUserMessage(
+    seedFilePaths,
+    index.totalFiles,
+    seedFilePaths.length,
+    scopedFiles.length,
+    toolContext,
+  );
 
   let analysis: ReviewerAnalysis;
   let runtimeType: import('../../../types/index').RuntimeType;
@@ -287,7 +325,8 @@ async function runSingleReviewer(
         model,
         apiKey,
         repoPath: index.repoPath,
-        initialFiles: seedFiles,
+        initialFiles: seedFilePaths,
+        callLabel: reviewer.name,
         transport: config.transport,
         apiBaseUrl: config.apiBaseUrl,
         maxTokens: MAX_AUDIT_REVIEWER_TOKENS,
@@ -299,15 +338,34 @@ async function runSingleReviewer(
     runtimeType = result.runtime;
     reviewerTokensUsed = result.tokensUsed;
   } catch (err) {
-    const msg = (err as Error).message;
+    const msg = formatErrorWithCauses(err);
     throw new Error(`Reviewer ${reviewer.id} failed: ${msg}`, { cause: err });
   }
 
-  const findings: Finding[] = analysis.findings.map(finding => ({
+  const rawFindings: Finding[] = analysis.findings.map(finding => ({
     ...finding,
     reviewerId: reviewer.id,
     reviewerName: reviewer.name,
-  })).filter(finding => isActionableAuditFinding(reviewer, finding, index));
+  }));
+  logAuditFindingList(log, reviewer.name, rawFindings, 'Raw findings');
+
+  const findings: Finding[] = [];
+  const droppedFindings: Array<{ finding: Finding; reason: string }> = [];
+  for (const finding of rawFindings) {
+    const dropReason = getAuditFindingDropReason(reviewer, finding, index);
+    if (dropReason) {
+      droppedFindings.push({ finding, reason: dropReason });
+      continue;
+    }
+    findings.push(finding);
+  }
+
+  if (droppedFindings.length > 0) {
+    for (const dropped of droppedFindings) {
+      log(`  [${reviewer.name}]   ✗ Dropped (audit-filter): "${dropped.finding.title}" — ${dropped.reason}`);
+    }
+  }
+  logAuditFindingList(log, reviewer.name, findings, 'Post-filter findings');
 
   return {
     reviewerId: reviewer.id,
@@ -332,27 +390,33 @@ async function runSingleReviewer(
   };
 }
 
-function isActionableAuditFinding(
+function getAuditFindingDropReason(
   reviewer: Reviewer,
   finding: Finding,
   index: import('../../../types/index').RepoIndex,
-): boolean {
+): string | null {
   const normalizedPath = normalizeRepoPath(finding.filePath);
 
   // Filter 1: skip findings pointing at generated output directories
-  if (isGeneratedArtifactPath(normalizedPath)) return false;
+  if (isGeneratedArtifactPath(normalizedPath)) return 'Finding points at generated output rather than source-controlled code';
 
   // Filter 2: skip findings pointing at paths that don't exist in the repo
   const absolutePath = path.resolve(index.repoPath, normalizedPath);
-  if (!fs.existsSync(absolutePath) && !isKnownRepoMetadataPath(normalizedPath)) return false;
+  if (!fs.existsSync(absolutePath) && !isKnownRepoMetadataPath(normalizedPath)) {
+    return 'Finding points at a path that does not exist in the current repository';
+  }
 
   // Filter 3: skip dependency placement noise (package in wrong dep block but present in source)
-  if (shouldDropDependencyPlacementNoiseFinding(reviewer, finding, index.files)) return false;
+  if (shouldDropDependencyPlacementNoiseFinding(reviewer, finding, index.files)) {
+    return 'Dependency placement noise: package is already referenced from source code';
+  }
 
   // Filter 4: skip speculative coverage gap findings from QA reviewers
-  if (reviewer.category === 'qa' && isSpeculativeCoverageGap(finding)) return false;
+  if (reviewer.category === 'qa' && isSpeculativeCoverageGap(finding)) {
+    return 'Speculative coverage-gap finding without concrete current-repo evidence';
+  }
 
-  return true;
+  return null;
 }
 
 function shouldDropDependencyPlacementNoiseFinding(
@@ -487,8 +551,12 @@ function linesOverlap(s1: number, e1: number, s2: number, e2: number, tolerance 
 
 const PRIORITY_ORDER: Record<string, number> = { info: 0, low: 1, medium: 2, high: 3, critical: 4 };
 
-function deduplicateAuditFindings(findings: Finding[]): Finding[] {
+function deduplicateAuditFindings(findings: Finding[]): {
+  findings: Finding[];
+  dropped: Array<{ kept: Finding; dropped: Finding; similarity: number }>;
+} {
   const dropped = new Set<number>();
+  const droppedDiagnostics: Array<{ kept: Finding; dropped: Finding; similarity: number }> = [];
 
   for (let i = 0; i < findings.length; i++) {
     if (dropped.has(i)) continue;
@@ -508,12 +576,21 @@ function deduplicateAuditFindings(findings: Finding[]): Finding[] {
       if (similarity >= DUPLICATE_SIMILARITY_THRESHOLD) {
         const aPri = PRIORITY_ORDER[a.priority] ?? 0;
         const bPri = PRIORITY_ORDER[b.priority] ?? 0;
-        dropped.add(aPri >= bPri ? j : i);
+        if (aPri >= bPri) {
+          dropped.add(j);
+          droppedDiagnostics.push({ kept: a, dropped: b, similarity });
+        } else {
+          dropped.add(i);
+          droppedDiagnostics.push({ kept: b, dropped: a, similarity });
+        }
       }
     }
   }
 
-  return findings.filter((_, i) => !dropped.has(i));
+  return {
+    findings: findings.filter((_, i) => !dropped.has(i)),
+    dropped: droppedDiagnostics,
+  };
 }
 
 function buildAuditSummary(score: number, totalFindings: number, criticalCount: number, reviewerCount: number): string {

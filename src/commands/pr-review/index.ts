@@ -15,9 +15,14 @@ export interface PRReviewCommandOptions {
 export async function runPRReviewCommand(repoPath: string, options: PRReviewCommandOptions): Promise<void> {
   console.log(chalk.cyan('\n🦉 CodeOwl PR Review\n'));
 
-  const spinner = ora({ text: 'Starting PR review...', color: 'cyan' }).start();
+  const interactive = Boolean(process.stdout.isTTY && !process.env.CI);
+  const spinner = interactive ? ora({ text: 'Starting PR review...', color: 'cyan' }).start() : null;
   let lastMessage = 'Starting PR review...';
   const noticePattern = /^\s*(Warning:|⚠|✗)/;
+
+  if (!interactive) {
+    console.log(chalk.gray(`- ${lastMessage}`));
+  }
 
   let result: PRReviewResult;
   try {
@@ -31,21 +36,37 @@ export async function runPRReviewCommand(repoPath: string, options: PRReviewComm
       dryRun: options.dryRun,
       onProgress: msg => {
         if (noticePattern.test(msg)) {
-          spinner.stopAndPersist({ symbol: chalk.yellow('!'), text: msg.trim() });
-          spinner.start(lastMessage);
+          if (spinner) {
+            spinner.stopAndPersist({ symbol: chalk.yellow('!'), text: msg.trim() });
+            spinner.start(lastMessage);
+          } else {
+            console.log(chalk.yellow(`! ${msg.trim()}`));
+          }
           return;
         }
 
         lastMessage = msg;
-        spinner.text = msg;
+        if (spinner) {
+          spinner.text = msg;
+        } else {
+          console.log(chalk.gray(`- ${msg}`));
+        }
       },
     });
   } catch (err) {
-    spinner.fail(chalk.red(`PR review failed: ${(err as Error).message}`));
+    if (spinner) {
+      spinner.fail(chalk.red(`PR review failed: ${(err as Error).message}`));
+    } else {
+      console.error(chalk.red(`PR review failed: ${(err as Error).message}`));
+    }
     process.exit(1);
   }
 
-  spinner.succeed(chalk.green('PR review complete'));
+  if (spinner) {
+    spinner.succeed(chalk.green('PR review complete'));
+  } else {
+    console.log(chalk.green('√ PR review complete'));
+  }
   printPRReviewSummary(result);
 }
 

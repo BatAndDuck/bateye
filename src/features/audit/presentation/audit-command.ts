@@ -2,6 +2,7 @@ import * as path from 'path';
 import chalk from 'chalk';
 import { AuditResult } from '../../../types/index';
 import { scoreToGrade, scoreToLabel } from '../../../core/scoring/normalizer';
+import { formatTokenSummary } from '../../../core/runtime/token-utils';
 import { runAudit } from '../application/audit-service';
 import { runCliTask } from '../../shared/presentation/run-cli-task';
 
@@ -39,6 +40,9 @@ function printAuditSummary(result: AuditResult): void {
   console.log();
   const statusColor = result.status === 'complete' ? chalk.green : chalk.yellow;
   console.log(chalk.gray('  Status: ') + statusColor(result.status.toUpperCase()));
+  if (result.tokenUsage) {
+    console.log(chalk.gray('  Token usage: ') + chalk.white(formatTokenSummary(result.tokenUsage)));
+  }
   console.log();
 
   for (const reviewerResult of result.reviewerResults) {

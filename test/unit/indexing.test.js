@@ -9,6 +9,8 @@ const {
   scopeFilesForReviewer,
   formatFilesForContext,
   buildRepoIndex,
+  calculateAuditSeedFileBudget,
+  selectAuditSeedFiles,
 } = require('../../dist/core/indexing/index');
 
 // Helpers
@@ -95,6 +97,55 @@ test('scopeFilesForReviewer returns all when recommendedGlobs match nothing', ()
   assert.ok(result.length === 2);
 });
 
+test('calculateAuditSeedFileBudget scales with repo size and reviewer type', () => {
+  const smallIndex = makeIndex(Array.from({ length: 18 }, (_, i) => `src/file${i}.ts`));
+  const largeIndex = makeIndex(Array.from({ length: 900 }, (_, i) => `src/file${i}.ts`));
+
+  const smallBudget = calculateAuditSeedFileBudget(
+    smallIndex,
+    { category: 'qa', scopeHints: ['test'] },
+    smallIndex.files.slice(0, 12),
+  );
+  const largeBudget = calculateAuditSeedFileBudget(
+    largeIndex,
+    { category: 'qa', scopeHints: ['test'] },
+    largeIndex.files.slice(0, 250),
+  );
+  const toolBudget = calculateAuditSeedFileBudget(
+    largeIndex,
+    { category: 'qa', scopeHints: ['test'], tool: { command: 'npm', args: ['test'] } },
+    largeIndex.files.slice(0, 250),
+  );
+
+  assert.equal(smallBudget, 6);
+  assert.equal(largeBudget, 26);
+  assert.equal(toolBudget, 12);
+});
+
+test('selectAuditSeedFiles prioritizes relevant config and UI files for performance reviewers', () => {
+  const index = makeIndex([
+    'docs/guide.md',
+    'package.json',
+    'src/app.tsx',
+    'src/components/button.tsx',
+    'src/utils/math.ts',
+    'test/app.test.tsx',
+    'vite.config.ts',
+  ]);
+
+  const selected = selectAuditSeedFiles(
+    index,
+    { category: 'performance', scopeHints: ['vite', 'component', 'page', 'client'] },
+    index.files,
+  ).map(file => file.relativePath);
+
+  assert.ok(selected.includes('vite.config.ts'));
+  assert.ok(selected.includes('src/components/button.tsx'));
+  assert.ok(selected.includes('src/app.tsx'));
+  assert.ok(!selected.includes('docs/guide.md'));
+  assert.ok(!selected.includes('src/utils/math.ts'));
+});
+
 // formatFilesForContext
 test('formatFilesForContext returns empty string for no files', () => {
   const result = formatFilesForContext([]);
@@ -173,6 +224,17 @@ test('buildRepoIndex excludes custom patterns from config', async () => {
 
   const index = await buildRepoIndex(tmpDir, { exclude: ['generated'] });
   assert.ok(!index.files.some(f => normRelPath(f.relativePath).startsWith('generated/')));
+  assert.ok(index.files.some(f => normRelPath(f.relativePath) === 'index.ts'));
+});
+
+test('buildRepoIndex excludes built-in reviewer prompt directories during self-audit', async () => {
+  const tmpDir = makeTmpDir();
+  fs.mkdirSync(path.join(tmpDir, 'src', 'features', 'audit', 'builtin-reviewers'), { recursive: true });
+  fs.writeFileSync(path.join(tmpDir, 'src', 'features', 'audit', 'builtin-reviewers', 'code-quality.md'), '# reviewer');
+  fs.writeFileSync(path.join(tmpDir, 'index.ts'), 'export const x = 1;');
+
+  const index = await buildRepoIndex(tmpDir, { exclude: [] });
+  assert.ok(!index.files.some(f => normRelPath(f.relativePath).startsWith('src/features/audit/builtin-reviewers/')));
   assert.ok(index.files.some(f => normRelPath(f.relativePath) === 'index.ts'));
 });
 

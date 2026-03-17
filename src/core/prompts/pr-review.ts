@@ -30,10 +30,12 @@ Return ONLY this JSON:
 
 - Bias toward broader coverage when the PR touches production code, workflows, tests, dependency manifests, or multiple commits.
 - Scope by file type and subsystem. Include reviewers that match the changed files, surrounding subsystem, or attached tool coverage.
-- For meaningful code changes, prefer at least 4 reviewers when available.
-- For multi-domain PRs, workflow changes, or larger multi-commit PRs, prefer 6 or more reviewers when available.
+- For meaningful code changes, prefer about 3 reviewers when available.
+- For multi-domain PRs, workflow changes, or larger multi-commit PRs, prefer about 5 reviewers when available.
 - Include tool-enhanced scanners when the changed files match the scanner domain and the tool can materially validate the change.
-- Avoid reviewers that are clearly irrelevant to the diff, but when in doubt prefer inclusion over omission.
+- Avoid overlapping broad code-quality reviewers unless the diff clearly spans multiple distinct concerns.
+- Include logging/observability or resiliency reviewers only when the changed lines directly touch logging output, retries, timeouts, networking, or process reliability behavior.
+- Avoid reviewers that are clearly irrelevant to the diff, and when in doubt prefer omission over speculative overlap.
 - Never return an empty array unless the diff contains zero code changes.
 - Return ONLY the JSON`;
 }
@@ -93,6 +95,7 @@ ${buildPRModeOverlay(reviewerId)}
 1. Use the filesystem/search tools available in your environment to inspect the repository before returning findings.
 2. You may ONLY report findings anchored to lines that appear in the diff below. Every line is labeled with [Line N] showing its exact line number.
 3. Every finding MUST include a "codeQuote" field containing the EXACT current code you are flagging. Do not quote deleted code.
+3a. The "codeQuote" MUST come entirely from added/current diff lines. Do not quote unchanged declarations, surrounding helper code, or repo-wide context outside the changed lines.
 4. The "filePath" MUST be one of the files listed in the diff. Supporting evidence may come from other inspected files, but the finding itself must anchor to a diff file.
 5. The "startLine" and "endLine" MUST be line numbers from the [Line N] markers in the diff. Do NOT guess line numbers.
 6. DO NOT speculate about code you did not inspect. If the current repository contradicts the concern, do not report it.
@@ -100,6 +103,9 @@ ${buildPRModeOverlay(reviewerId)}
 8. If you find zero issues, return an empty findings array with a high score. That is a valid and good outcome.
 9. Only report issues you are confident about (confidence >= 0.7). Do not pad findings with low-confidence guesses.
 10. SCOPE DISCIPLINE: Only report findings within your specific area of expertise ("${reviewerName}").
+10a. Only report issues materially caused by the changed lines. Do not turn general cleanup suggestions, architecture preferences, logging style preferences, or best-practice wishes into findings unless the diff introduces a concrete correctness, reliability, security, or user-impacting problem.
+10b. For logging/diagnostic code, do not report "use structured logging" or similar style advice unless the changed code demonstrably leaks secrets, PII, credentials, internal endpoints, or other actionable sensitive values.
+10c. For resiliency concerns, do not require retries, backoff, or timeout patterns unless the changed code actually performs the external/network operation in question and the missing guard creates a concrete risk now.
 11. Every finding MUST include a "verificationTrail" with 1-5 entries. Use exact prefixes:
     - "file:<relative path>" for each file you inspected
     - "search:<query>" for repo-wide searches you performed
@@ -179,13 +185,21 @@ Rules:
 export function buildPRFindingBatchVerificationSystemPrompt(): string {
   return `You are a strict PR finding verifier.
 
-For each finding in the batch, decide whether it is supported by the CURRENT codebase state.
+For each finding in the batch, decide whether it is supported by the CURRENT codebase state AND materially related to the pull request changes.
 
 Rules:
+- Reject findings whose anchor file is not in the PR diff or whose anchor lines are not within/near the changed hunk.
 - Reject findings that depend only on removed code.
-- Reject findings that claim something is missing unless the supplied current files confirm it.
+- Reject findings that claim something is missing unless the supplied current files confirm it and the PR changes created that obligation.
 - Reject findings contradicted by current-file evidence.
+- Reject findings that are general cleanup suggestions, style advice, or architecture preferences not materially caused by the changed lines.
+- Accept companion-change findings only when the changed lines introduce a user-visible or contract-changing behavior and the supplied supporting files show stale, contradictory, or missing companion updates.
 - If evidence is insufficient, return supported=false.
+- Classify every finding as one of:
+  - direct: directly about a defect/risk in the changed lines
+  - companion: a required related update is missing because of the changed lines
+  - unrelated: not materially caused by this PR
+  - unclear: evidence is insufficient
 - You MUST return a verdict for EVERY finding in the input — the output array length must equal the input array length.
 - Return ONLY JSON.`;
 }
@@ -194,17 +208,31 @@ export function buildPRFindingBatchVerificationUserMessage(
   batch: Array<{
     finding: PRFinding;
     currentFileContent: string;
+    diffContext: string;
     supportingFiles: Array<{ filePath: string; content: string }>;
   }>,
 ): string {
-  const items = batch.map(({ finding, currentFileContent, supportingFiles }, i) => {
+  const items = batch.map(({ finding, currentFileContent, diffContext, supportingFiles }, i) => {
     const supportingSections = supportingFiles.length === 0
       ? 'None'
       : supportingFiles.map(file => `#### ${file.filePath}\n\`\`\`\n${file.content}\n\`\`\``).join('\n\n');
     return `### Finding ${i + 1} — id: "${finding.id}"
 \`\`\`json
-${JSON.stringify({ id: finding.id, title: finding.title, description: finding.description, codeQuote: finding.codeQuote, filePath: finding.filePath }, null, 2)}
+${JSON.stringify({
+  id: finding.id,
+  title: finding.title,
+  description: finding.description,
+  codeQuote: finding.codeQuote,
+  filePath: finding.filePath,
+  startLine: finding.startLine,
+  endLine: finding.endLine,
+  verificationTrail: finding.verificationTrail,
+  searchedFor: finding.searchedFor || [],
+}, null, 2)}
 \`\`\`
+
+#### PR Diff Context
+${diffContext}
 
 #### Current File: ${finding.filePath}
 \`\`\`
@@ -223,8 +251,8 @@ Verify each finding. Return JSON:
 \`\`\`json
 {
   "verifications": [
-    { "findingId": "<id>", "supported": true, "reason": "why" },
-    { "findingId": "<id>", "supported": false, "reason": "why not" }
+    { "findingId": "<id>", "supported": true, "classification": "direct", "reason": "why" },
+    { "findingId": "<id>", "supported": false, "classification": "unrelated", "reason": "why not" }
   ]
 }
 \`\`\`

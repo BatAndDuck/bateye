@@ -65,7 +65,8 @@ Rules:
 export function buildAuditUserMessage(
   seedFiles: string[],
   totalFiles: number,
-  scopedFiles: number,
+  seedFileCount: number,
+  scopedFileCount: number,
   additionalContext?: string,
 ): string {
   const seedList = seedFiles.length > 0
@@ -74,7 +75,8 @@ export function buildAuditUserMessage(
 
   return `## Repository Context
 Total files in repository: ${totalFiles}
-Seed files provided for analysis: ${scopedFiles}
+Files matching reviewer scope: ${scopedFileCount}
+Seed files provided for analysis: ${seedFileCount}
 
 ## Seed Files To Inspect First
 

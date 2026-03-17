@@ -39,6 +39,8 @@ export async function runCliTask<TResult>(options: CliTaskOptions<TResult>): Pro
       lastMessage = message;
       if (spinner) {
         spinner.text = message;
+      } else {
+        console.log(chalk.gray(`- ${message}`));
       }
     });
 
@@ -47,7 +49,6 @@ export async function runCliTask<TResult>(options: CliTaskOptions<TResult>): Pro
     }
     options.render(result);
     if (!interactive) {
-      console.log(chalk.gray(`- ${lastMessage}`));
       console.log(chalk.green(`√ ${options.successText}`));
     }
   } catch (err) {

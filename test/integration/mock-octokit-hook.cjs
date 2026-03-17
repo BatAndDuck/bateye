@@ -59,6 +59,13 @@ class MockOctokit {
         },
         createReviewComment: async params => {
           const { fixturePath, state } = readFixtures();
+          const shouldFail = Array.isArray(state.failCreateReviewComment)
+            ? state.failCreateReviewComment.some(entry => entry.path === params.path && entry.line === params.line)
+            : Boolean(state.failCreateReviewComment);
+          if (shouldFail) {
+            const error = new Error('Validation Failed: {"resource":"PullRequestReviewComment","code":"custom","field":"pull_request_review_thread.line","message":"could not be resolved"}');
+            throw error;
+          }
           appendAction(state, { type: 'createReviewComment', params });
           writeFixtures(fixturePath, state);
           return { data: { id: nextCommentId(state) } };

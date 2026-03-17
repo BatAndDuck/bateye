@@ -96,7 +96,23 @@ export class GitHubReviewPlatform implements ReviewPlatform {
       });
       return true;
     } catch (err) {
-      console.warn(`Could not post inline comment for ${comment.path}:${comment.line}: ${(err as Error).message}`);
+      const message = (err as Error).message;
+      if (/could not be resolved|pull_request_review_thread\.line|Validation Failed/i.test(message)) {
+        console.warn(`Could not post inline comment for ${comment.path}:${comment.line}; falling back to a general PR comment: ${message}`);
+        try {
+          await this.octokit.rest.issues.createComment({
+            owner: this.owner,
+            repo: this.repo,
+            issue_number: this.prNumber,
+            body: `**CodeOwl follow-up for \`${comment.path}:${comment.line}\`**\n\n${comment.body}`,
+          });
+          return true;
+        } catch (fallbackErr) {
+          console.warn(`Could not post fallback PR comment for ${comment.path}:${comment.line}: ${(fallbackErr as Error).message}`);
+        }
+      } else {
+        console.warn(`Could not post inline comment for ${comment.path}:${comment.line}: ${message}`);
+      }
       return false;
     }
   }

@@ -54,6 +54,15 @@ const prReviewerFindingSchema = withValidLineRange({
   searchedFor: z.array(z.string()).max(5).optional(),
 });
 
+export const prFindingSchema = withValidLineRange({
+  ...findingRangeFields,
+  reviewerId: z.string(),
+  reviewerName: z.string(),
+  codeQuote: z.string().min(1),
+  verificationTrail: z.array(z.string()).min(1).max(5),
+  searchedFor: z.array(z.string()).max(5).optional(),
+});
+
 export const reviewerResultSchema = z.object({
   reviewerId: z.string(),
   reviewerName: z.string(),
@@ -172,6 +181,7 @@ export const prFindingBatchVerificationSchema = z.object({
   verifications: z.array(z.object({
     findingId: z.string(),
     supported: z.boolean(),
+    classification: z.enum(['direct', 'companion', 'unrelated', 'unclear']),
     reason: z.string(),
   })),
 });
