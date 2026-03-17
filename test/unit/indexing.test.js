@@ -176,6 +176,17 @@ test('buildRepoIndex excludes custom patterns from config', async () => {
   assert.ok(index.files.some(f => normRelPath(f.relativePath) === 'index.ts'));
 });
 
+test('buildRepoIndex excludes built-in reviewer prompt directories during self-audit', async () => {
+  const tmpDir = makeTmpDir();
+  fs.mkdirSync(path.join(tmpDir, 'src', 'features', 'audit', 'builtin-reviewers'), { recursive: true });
+  fs.writeFileSync(path.join(tmpDir, 'src', 'features', 'audit', 'builtin-reviewers', 'code-quality.md'), '# reviewer');
+  fs.writeFileSync(path.join(tmpDir, 'index.ts'), 'export const x = 1;');
+
+  const index = await buildRepoIndex(tmpDir, { exclude: [] });
+  assert.ok(!index.files.some(f => normRelPath(f.relativePath).startsWith('src/features/audit/builtin-reviewers/')));
+  assert.ok(index.files.some(f => normRelPath(f.relativePath) === 'index.ts'));
+});
+
 test('buildRepoIndex skips non-text extensions', async () => {
   const tmpDir = makeTmpDir();
   fs.writeFileSync(path.join(tmpDir, 'image.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));

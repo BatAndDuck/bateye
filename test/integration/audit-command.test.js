@@ -322,6 +322,106 @@ Investigate security issues only.
   assert.ok(report.issues.some(issue => issue.code === 'audit-reviewer-tool-error'));
 });
 
+test('audit command reports degraded status when the orchestrator falls back', () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-audit-orchestrator-fallback-'));
+  fs.mkdirSync(path.join(repoPath, '.git'));
+  fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(repoPath, 'src', 'index.ts'), 'export const value = 1;\n');
+
+  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+    model: 'anthropic/mock-model',
+    exclude: [],
+  });
+
+  const fixturePath = path.join(repoPath, 'mock-runtime.json');
+  writeJson(fixturePath, {
+    runs: [],
+    agenticRuns: [
+      { data: { score: 92, summary: 'No API security issues found.', findings: [] } },
+      { data: { score: 88, summary: 'No code quality issues found.', findings: [] } },
+      { data: { score: 86, summary: 'No documentation issues found.', findings: [] } },
+    ],
+  });
+
+  const result = spawnSync('node', ['dist/index.js', 'audit', '--cwd', repoPath], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
+      CODEOWL_RUNTIME: 'mock',
+      CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+    },
+    encoding: 'utf-8',
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Status:\s+DEGRADED/);
+  assert.match(result.stdout, /audit reviewer orchestrator failed/i);
+
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'audit.json'), 'utf-8'));
+  assert.equal(report.status, 'degraded');
+  assert.ok(report.issues.some(issue => issue.code === 'audit-orchestrator-fallback'));
+});
+
+test('audit command prints and persists aggregated token usage', () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-audit-tokens-int-'));
+  fs.mkdirSync(path.join(repoPath, '.git'));
+  fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(repoPath, 'src', 'index.ts'), 'export const value = 1;\n');
+
+  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+    model: 'anthropic/mock-model',
+    exclude: [],
+  });
+
+  const fixturePath = path.join(repoPath, 'mock-runtime.json');
+  const reportPath = path.join(repoPath, 'audit-report.json');
+  writeJson(fixturePath, {
+    runs: [
+      {
+        data: {
+          selectedReviewers: [
+            { reviewerId: 'code-quality', reason: 'General code quality' },
+            { reviewerId: 'documentation', reason: 'Documentation coverage' },
+          ],
+        },
+        tokensUsed: { inputTokens: 40, outputTokens: 10, estimated: false },
+      },
+    ],
+    agenticRuns: [
+      {
+        data: { score: 90, summary: 'solid', findings: [] },
+        tokensUsed: { inputTokens: 120, outputTokens: 30, estimated: false },
+      },
+      {
+        data: { score: 80, summary: 'documented', findings: [] },
+        tokensUsed: { inputTokens: 80, outputTokens: 20, estimated: false },
+      },
+    ],
+  });
+
+  const result = spawnSync('node', ['dist/index.js', 'audit', '--cwd', repoPath, '--output', reportPath], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
+      CODEOWL_RUNTIME: 'mock',
+      CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+    },
+    encoding: 'utf-8',
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Token usage:\s+300 tokens \(240 in \+ 60 out\) \(actual\)/);
+
+  const report = JSON.parse(fs.readFileSync(reportPath, 'utf-8'));
+  assert.deepEqual(report.tokenUsage, {
+    inputTokens: 240,
+    outputTokens: 60,
+    estimated: false,
+  });
+});
+
 test('audit command fails clearly when non-agentic direct runtime is requested', () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-audit-direct-runtime-'));
   fs.mkdirSync(path.join(repoPath, '.git'));

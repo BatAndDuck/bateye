@@ -5,6 +5,7 @@ import * as path from 'path';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, TokenUsage, resolveModelTarget } from '../interface';
+import { logRuntimeDebug } from '../debug';
 import { buildOpenCodeEnvironment, resolveOpenCodeInvocation } from './command';
 import { buildStructureRepairPrompt, formatZodErrors, tryParseAndValidate } from '../structure-repair';
 
@@ -40,12 +41,8 @@ type DatabaseSyncLike = {
  * access even for read-only workloads in WAL mode, which can cause spurious SQLITE_CANTOPEN.
  */
 function querySessionActualUsage(dbPath: string, sessionId: string): SessionTokenStats | null {
-  type NodeSqlite = { DatabaseSync: new (path: string) => DatabaseSyncLike };
-  let nodeSqlite: NodeSqlite;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    nodeSqlite = require('node:sqlite') as NodeSqlite;
-  } catch {
+  const nodeSqlite = loadNodeSqlite();
+  if (!nodeSqlite) {
     return null; // node:sqlite not available (Node < 22)
   }
   const { DatabaseSync } = nodeSqlite;
@@ -97,7 +94,7 @@ function querySessionActualUsage(dbPath: string, sessionId: string): SessionToke
     } catch (err) {
       if (attempt === MAX_ATTEMPTS - 1) {
         // Log only on final failure so users know the token data is estimated.
-        console.error(`[opencode] DB token query failed after ${MAX_ATTEMPTS} attempts (path: ${dbPath}, session: ${sessionId}): ${(err as Error).message ?? String(err)}`);
+        logRuntimeDebug(`[opencode] DB token query failed after ${MAX_ATTEMPTS} attempts (path: ${dbPath}, session: ${sessionId}): ${(err as Error).message ?? String(err)}`);
       }
     } finally {
       try { db?.close(); } catch { /* ignore close errors */ }
@@ -105,6 +102,33 @@ function querySessionActualUsage(dbPath: string, sessionId: string): SessionToke
   }
 
   return null;
+}
+
+function loadNodeSqlite(): { DatabaseSync: new (path: string) => DatabaseSyncLike } | null {
+  const originalEmitWarning = process.emitWarning as (...args: unknown[]) => void;
+  process.emitWarning = ((warning: unknown, ...args: unknown[]) => {
+    const warningType = typeof args[0] === 'string'
+      ? args[0]
+      : typeof args[0] === 'object' && args[0] !== null && 'type' in args[0]
+        ? String((args[0] as { type?: unknown }).type ?? '')
+        : '';
+    const message = warning instanceof Error ? warning.message : String(warning);
+
+    if (warningType === 'ExperimentalWarning' && /SQLite is an experimental feature/i.test(message)) {
+      return;
+    }
+
+    originalEmitWarning(warning, ...args);
+  }) as typeof process.emitWarning;
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('node:sqlite') as { DatabaseSync: new (path: string) => DatabaseSyncLike };
+  } catch {
+    return null;
+  } finally {
+    process.emitWarning = originalEmitWarning as typeof process.emitWarning;
+  }
 }
 
 const MAX_STRUCTURED_OUTPUT_ATTEMPTS = 2;
@@ -702,7 +726,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
     const callId = `${target.transport}/${target.modelId}`;
 
     const labelTag = options.callLabel ? ` [${options.callLabel}]` : '';
-    console.error(`[opencode]${labelTag} Starting call: model=${callId}, systemPrompt=${options.systemPrompt.length} chars, userMessage=${options.userMessage.length} chars, estInputTokens=~${estimatedInputTokens}, timeout=${Math.round(timeoutMs / 1000)}s`);
+    logRuntimeDebug(`[opencode]${labelTag} Starting call: model=${callId}, systemPrompt=${options.systemPrompt.length} chars, userMessage=${options.userMessage.length} chars, estInputTokens=~${estimatedInputTokens}, timeout=${Math.round(timeoutMs / 1000)}s`);
 
     for (let attempt = 0; attempt < MAX_STRUCTURED_OUTPUT_ATTEMPTS; attempt++) {
       let sessionID: string | undefined;
@@ -711,7 +735,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
         : `\n\nPREVIOUS ATTEMPT FAILED STRUCTURED OUTPUT VALIDATION. Return ONLY JSON matching the requested schema with all required fields and correct value types. Validation issue: ${formatValidationFeedback(lastError)}`;
 
       if (attempt > 0) {
-        console.error(`[opencode] Retry attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS} for ${callId}: previous error was ${summarizeSdkError(lastError)}`);
+        logRuntimeDebug(`[opencode] Retry attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS} for ${callId}: previous error was ${summarizeSdkError(lastError)}`);
       }
 
       let serializedResponse = '';
@@ -788,13 +812,13 @@ export class OpenCodeCLIRuntime implements IRuntime {
             ? ` + ${dbUsage.cacheReadTokens.toLocaleString()} cache-read + ${dbUsage.cacheWriteTokens.toLocaleString()} cache-write`
             : '';
           const costStr = dbUsage.cost > 0 ? ` | cost: $${dbUsage.cost.toFixed(4)}` : '';
-          console.error(`[opencode]${labelTag} ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ${dbUsage.inputTokens.toLocaleString()} in + ${dbUsage.outputTokens.toLocaleString()} out${cacheStr} (actual from DB${costStr}), attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}`);
+          logRuntimeDebug(`[opencode]${labelTag} ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ${dbUsage.inputTokens.toLocaleString()} in + ${dbUsage.outputTokens.toLocaleString()} out${cacheStr} (actual from DB${costStr}), attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}`);
         } else if (responseUsage) {
           tokensUsed = { inputTokens: responseUsage.inputTokens, outputTokens: responseUsage.outputTokens, estimated: false };
-          console.error(`[opencode]${labelTag} ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ${responseUsage.inputTokens.toLocaleString()} in + ${responseUsage.outputTokens.toLocaleString()} out (actual from response), attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}`);
+          logRuntimeDebug(`[opencode]${labelTag} ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ${responseUsage.inputTokens.toLocaleString()} in + ${responseUsage.outputTokens.toLocaleString()} out (actual from response), attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}`);
         } else {
           tokensUsed = { inputTokens: estimatedInputTokens, outputTokens: estimatedOutputTokens, estimated: true };
-          console.error(`[opencode]${labelTag} ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ~${estimatedInputTokens} in + ~${estimatedOutputTokens} out (⚠ FIRST-TURN ESTIMATE ONLY — agentic turns not counted), attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}`);
+          logRuntimeDebug(`[opencode]${labelTag} ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ~${estimatedInputTokens} in + ~${estimatedOutputTokens} out (⚠ FIRST-TURN ESTIMATE ONLY — agentic turns not counted), attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}`);
         }
 
         return {
@@ -815,9 +839,9 @@ export class OpenCodeCLIRuntime implements IRuntime {
           lastRawJson = serializedResponse;
         }
 
-        console.error(`[opencode] ✗ ${callId} failed after ${(durationMs / 1000).toFixed(1)}s (attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}, retry=${willRetry}): ${summarizeSdkError(err)}`);
+        logRuntimeDebug(`[opencode] ✗ ${callId} failed after ${(durationMs / 1000).toFixed(1)}s (attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}, retry=${willRetry}): ${summarizeSdkError(err)}`);
         if (err instanceof z.ZodError) {
-          console.error(`[opencode]   Validation errors: ${formatValidationFeedback(err)}`);
+          logRuntimeDebug(`[opencode]   Validation errors: ${formatValidationFeedback(err)}`);
         }
 
         if (!willRetry) {
@@ -839,7 +863,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
 
     // AI structure repair: use a targeted call to fix malformed JSON
     if (lastRawJson) {
-      console.error(`[opencode] Attempting AI structure repair for ${callId}...`);
+      logRuntimeDebug(`[opencode] Attempting AI structure repair for ${callId}...`);
       let repairSessionID: string | undefined;
       try {
         const repair = buildStructureRepairPrompt(lastRawJson, formatZodErrors(lastError));
@@ -877,7 +901,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
           if ('data' in repairResult) {
             const durationMs = Date.now() - start;
             const estimatedOutputTokens = Math.ceil(repairSerialized.length / 4);
-            console.error(`[opencode] ✓ AI repair succeeded for ${callId} in ${(durationMs / 1000).toFixed(1)}s`);
+            logRuntimeDebug(`[opencode] ✓ AI repair succeeded for ${callId} in ${(durationMs / 1000).toFixed(1)}s`);
             return {
               data: repairResult.data,
               model: options.model,
@@ -891,10 +915,10 @@ export class OpenCodeCLIRuntime implements IRuntime {
               },
             };
           }
-          console.error(`[opencode] ✗ AI repair also failed validation: ${('error' in repairResult ? repairResult.error.message : 'unknown').slice(0, 200)}`);
+          logRuntimeDebug(`[opencode] ✗ AI repair also failed validation: ${('error' in repairResult ? repairResult.error.message : 'unknown').slice(0, 200)}`);
         }
       } catch (repairErr) {
-        console.error(`[opencode] ✗ AI repair call failed: ${(repairErr as Error).message.slice(0, 200)}`);
+        logRuntimeDebug(`[opencode] ✗ AI repair call failed: ${(repairErr as Error).message.slice(0, 200)}`);
       } finally {
         if (repairSessionID) {
           try {

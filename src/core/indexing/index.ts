@@ -20,6 +20,11 @@ const TEXT_EXTENSIONS = new Set([
   '.gitignore', '.editorconfig', '.eslintrc',
 ]);
 
+const INTERNAL_ANALYSIS_EXCLUDES = [
+  'src/features/audit/builtin-reviewers',
+  'dist/features/audit/builtin-reviewers',
+];
+
 function loadGitignore(repoPath: string): ReturnType<typeof ignore> {
   const ig = ignore();
   const gitignorePath = path.join(repoPath, '.gitignore');
@@ -31,6 +36,7 @@ function loadGitignore(repoPath: string): ReturnType<typeof ignore> {
 
 export async function buildRepoIndex(repoPath: string, config: Config): Promise<RepoIndex> {
   const ig = loadGitignore(repoPath);
+  const internalIgnore = buildInternalAnalysisIgnores(repoPath);
 
   // Build glob ignore list
   const globIgnore = [
@@ -38,14 +44,15 @@ export async function buildRepoIndex(repoPath: string, config: Config): Promise<
     ...BUILT_IN_EXCLUDES.map(e => `${e}/**`),
     ...(config.exclude || []).map(e => `**/${e}/**`),
     ...(config.exclude || []).map(e => `${e}/**`),
+    ...internalIgnore,
   ];
 
-  const allFiles = await glob('**/*', {
+  const allFiles = (await glob('**/*', {
     cwd: repoPath,
     nodir: true,
     ignore: globIgnore,
     dot: false,
-  });
+  })).sort((a, b) => a.localeCompare(b));
 
   const repoFiles: RepoFile[] = [];
 
@@ -78,6 +85,12 @@ export async function buildRepoIndex(repoPath: string, config: Config): Promise<
     repoPath,
     totalFiles: repoFiles.length,
   };
+}
+
+function buildInternalAnalysisIgnores(repoPath: string): string[] {
+  return INTERNAL_ANALYSIS_EXCLUDES
+    .filter(relativeDir => fs.existsSync(path.join(repoPath, ...relativeDir.split('/'))))
+    .flatMap(relativeDir => [`${relativeDir}/**`, `**/${relativeDir}/**`]);
 }
 
 export function readFileContent(filePath: string, maxTokens = 8000): string {

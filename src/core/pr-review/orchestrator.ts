@@ -1,5 +1,5 @@
 import { Reviewer, OrchestratorResult, ReviewIssue, TokenUsageSummary } from '../../types/index';
-import { getRuntime } from '../runtime/factory';
+import { getPRReviewRuntime } from '../runtime/factory';
 import { orchestratorResultSchema } from '../validation/schemas';
 import { buildOrchestratorSystemPrompt, buildOrchestratorUserMessage } from '../prompts/pr-review';
 import { CommitSummary } from '../git/index';
@@ -91,7 +91,7 @@ export async function selectReviewers(
   transport?: string,
   apiBaseUrl?: string,
 ): Promise<ReviewerSelectionResult> {
-  const runtime = await getRuntime();
+  const runtime = await getPRReviewRuntime();
 
   const reviewerDescriptions = availableReviewers.map(r => ({
     id: r.id,

@@ -8,12 +8,22 @@ type MockRuntimeFixtures = {
     model?: string;
     runtime?: 'sdk' | 'cli';
     rawResponse?: string;
+    tokensUsed?: {
+      inputTokens: number;
+      outputTokens: number;
+      estimated?: boolean;
+    };
   }>;
   agenticRuns?: Array<{
     data: unknown;
     model?: string;
     runtime?: 'sdk' | 'cli';
     rawResponse?: string;
+    tokensUsed?: {
+      inputTokens: number;
+      outputTokens: number;
+      estimated?: boolean;
+    };
   }>;
   models?: Record<string, string[]>;
 };
@@ -66,6 +76,7 @@ export class MockRuntime implements IRuntime {
       runtime: next.runtime || 'sdk',
       durationMs: 0,
       rawResponse: next.rawResponse || JSON.stringify(next.data),
+      tokensUsed: next.tokensUsed,
     };
   }
 
@@ -91,6 +102,7 @@ export class MockRuntime implements IRuntime {
       runtime: next.runtime || 'cli',
       durationMs: 0,
       rawResponse: next.rawResponse || JSON.stringify(next.data),
+      tokensUsed: next.tokensUsed,
     };
   }
 

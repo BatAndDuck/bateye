@@ -65,6 +65,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   log(`Found ${index.totalFiles} files to analyze.`);
 
   let activeReviewers: Reviewer[];
+  let orchestratorTokens: TokenUsage | undefined;
 
   if (options.reviewerIds && options.reviewerIds.length > 0) {
     // Explicit selection — skip orchestrator
@@ -73,28 +74,22 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   } else {
     // AI orchestrator selects which reviewers are relevant to this repo
     log(`Asking the orchestrator to shortlist reviewers (${allReviewers.length} candidates)...`);
-    try {
-      const orchestratorResult = await selectAuditReviewers({
-        index,
-        availableReviewers: allReviewers,
-        model: config.model,
-        apiKey,
-        transport: config.transport,
-        apiBaseUrl: config.apiBaseUrl,
-      });
-      const selectedIds = new Set(orchestratorResult.selectedReviewers.map(r => r.reviewerId));
-      activeReviewers = allReviewers.filter(r => selectedIds.has(r.id));
-      log(`Orchestrator selected ${activeReviewers.length} reviewer(s): ${activeReviewers.map(r => r.name).join(', ')}`);
-    } catch (err) {
-      log(`Orchestrator stumbled (${(err as Error).message}); falling back to the full reviewer set.`);
-      issues.push({
-        severity: 'warning',
-        code: 'audit-orchestrator-fallback',
-        message: `Audit orchestrator failed and the full reviewer set was used instead: ${(err as Error).message}`,
-        stage: 'select-reviewers',
-      });
-      activeReviewers = allReviewers;
+    const orchestratorResult = await selectAuditReviewers({
+      index,
+      availableReviewers: allReviewers,
+      model: config.model,
+      apiKey,
+      transport: config.transport,
+      apiBaseUrl: config.apiBaseUrl,
+    });
+    orchestratorTokens = orchestratorResult.tokensUsed;
+    issues.push(...orchestratorResult.issues);
+    for (const issue of orchestratorResult.issues) {
+      log(`Warning: ${issue.message}`);
     }
+    const selectedIds = new Set(orchestratorResult.selectedReviewers.map(r => r.reviewerId));
+    activeReviewers = allReviewers.filter(r => selectedIds.has(r.id));
+    log(`Orchestrator selected ${activeReviewers.length} reviewer(s): ${activeReviewers.map(r => r.name).join(', ')}`);
   }
 
   if (activeReviewers.length === 0) {
@@ -167,15 +162,18 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   const totalFindings = deduped.length;
   const criticalCount = deduped.filter(f => f.priority === 'critical').length;
 
-  // Aggregate token usage across all successful reviewers
-  let totalTokens: TokenUsage | undefined;
+  // Aggregate token usage across reviewer selection and all successful reviewers
+  let totalTokens: TokenUsage | undefined = orchestratorTokens ? { ...orchestratorTokens } : undefined;
+  if (orchestratorTokens) {
+    log(`Token usage (reviewer selection): ${formatTokenSummary(orchestratorTokens)}`);
+  }
   for (const r of successfulReviewerResults) {
     if (r.tokensUsed) {
       totalTokens = totalTokens ? addTokens(totalTokens, r.tokensUsed) : { ...r.tokensUsed };
     }
   }
   if (totalTokens) {
-    log(`Token usage (all reviewers): ${formatTokenSummary(totalTokens)}`);
+    log(`Token usage (audit run total): ${formatTokenSummary(totalTokens)}`);
   }
 
   // Degrade on error-severity issues, non-transient warnings (tool failures etc.),
@@ -288,6 +286,7 @@ async function runSingleReviewer(
         apiKey,
         repoPath: index.repoPath,
         initialFiles: seedFiles,
+        callLabel: reviewer.name,
         transport: config.transport,
         apiBaseUrl: config.apiBaseUrl,
         maxTokens: MAX_AUDIT_REVIEWER_TOKENS,
