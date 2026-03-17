@@ -167,7 +167,8 @@ export class GitHubReviewPlatform implements ReviewPlatform {
 
   async listExistingComments(): Promise<ExistingComment[]> {
     try {
-      const { data: comments } = await this.octokit.rest.issues.listComments({
+      // Use paginate to fetch ALL general PR comments, not just the first 100.
+      const comments = await this.octokit.paginate(this.octokit.rest.issues.listComments, {
         owner: this.owner,
         repo: this.repo,
         issue_number: this.prNumber,
@@ -188,7 +189,10 @@ export class GitHubReviewPlatform implements ReviewPlatform {
 
   async listReviewComments(): Promise<ExistingComment[]> {
     try {
-      const { data: comments } = await this.octokit.rest.pulls.listReviewComments({
+      // Use paginate to fetch ALL inline review comments (resolved AND unresolved),
+      // not just the first 100. The GitHub API returns both resolved and unresolved
+      // threads from listReviewComments — resolution state is a UI concern only.
+      const comments = await this.octokit.paginate(this.octokit.rest.pulls.listReviewComments, {
         owner: this.owner,
         repo: this.repo,
         pull_number: this.prNumber,

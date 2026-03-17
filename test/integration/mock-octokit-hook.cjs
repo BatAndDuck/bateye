@@ -32,6 +32,13 @@ function nextCommentId(state) {
 
 class MockOctokit {
   constructor() {
+    // Simulate octokit.paginate: calls the endpoint fn once and returns data array.
+    // The mock fixture is small enough that a single page always covers all items.
+    this.paginate = async (fn, params) => {
+      const result = await fn(params);
+      return result.data;
+    };
+
     this.rest = {
       pulls: {
         get: async params => {
