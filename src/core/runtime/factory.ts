@@ -12,6 +12,7 @@ const OPEN_CODE_RUNTIME_HINT =
 let runtimeInstance: IRuntime | null = null;
 let prReviewRuntimeInstance: IRuntime | null = null;
 let auditRuntimeInstance: IRuntime | null = null;
+let structuredRuntimeInstance: IRuntime | null = null;
 
 export async function createRuntime(preference: RuntimePreference = 'auto'): Promise<IRuntime> {
   const effectivePreference = preference === 'auto' && process.env.CODEOWL_RUNTIME === 'mock'
@@ -40,6 +41,14 @@ export async function getRuntime(): Promise<IRuntime> {
     runtimeInstance = await createRuntime('auto');
   }
   return runtimeInstance;
+}
+
+export async function createStructuredRuntime(): Promise<IRuntime> {
+  if (process.env.CODEOWL_RUNTIME === 'mock') {
+    return new MockRuntime();
+  }
+
+  return new DirectAIRuntime();
 }
 
 export async function createPRReviewRuntime(): Promise<IRuntime> {
@@ -87,8 +96,16 @@ export async function getAuditRuntime(): Promise<IRuntime> {
   return auditRuntimeInstance;
 }
 
+export async function getStructuredRuntime(): Promise<IRuntime> {
+  if (!structuredRuntimeInstance) {
+    structuredRuntimeInstance = await createStructuredRuntime();
+  }
+  return structuredRuntimeInstance;
+}
+
 export function resetRuntime(): void {
   runtimeInstance = null;
   prReviewRuntimeInstance = null;
   auditRuntimeInstance = null;
+  structuredRuntimeInstance = null;
 }

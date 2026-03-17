@@ -541,9 +541,10 @@ async function runPRReviewer(
 
   const systemPrompt = buildPRReviewSystemPrompt(reviewer.instructions, reviewer.id, reviewer.name);
   const userMessage = buildPRReviewUserMessage(structuredDiff, currentDiffFiles, currentFileContext, toolContext);
+  const initialFiles = currentDiffFiles;
 
   try {
-    log(`  Running reviewer: ${reviewer.name} (model=${reviewer.model || model}, changedFiles=${currentDiffFiles.length}, seededFiles=${currentDiffFiles.length})...`);
+    log(`  Running reviewer: ${reviewer.name} (model=${reviewer.model || model}, changedFiles=${currentDiffFiles.length}, seededFiles=${initialFiles.length})...`);
     const runResult = await runtime.runAgenticReview<PRReviewerAnalysis>(
       {
         systemPrompt,
@@ -551,7 +552,7 @@ async function runPRReviewer(
         model: reviewer.model || model,
         apiKey,
         repoPath,
-        initialFiles: currentDiffFiles,
+        initialFiles,
         transport,
         apiBaseUrl,
         maxTokens: 8096,

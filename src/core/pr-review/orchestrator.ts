@@ -1,8 +1,9 @@
 import { Reviewer, OrchestratorResult, ReviewIssue, TokenUsageSummary } from '../../types/index';
-import { getPRReviewRuntime } from '../runtime/factory';
+import { getStructuredRuntime } from '../runtime/factory';
 import { orchestratorResultSchema } from '../validation/schemas';
 import { buildOrchestratorSystemPrompt, buildOrchestratorUserMessage } from '../prompts/pr-review';
 import { CommitSummary } from '../git/index';
+import { formatErrorWithCauses } from '../runtime/error-format';
 
 const BROAD_CODE_REVIEWER_IDS = ['bug-hunter', 'code-quality', 'complexity', 'test-quality', 'clean-code', 'security-api', 'resiliency'];
 const WORKFLOW_REVIEWER_IDS = ['ci-cd'];
@@ -91,7 +92,7 @@ export async function selectReviewers(
   transport?: string,
   apiBaseUrl?: string,
 ): Promise<ReviewerSelectionResult> {
-  const runtime = await getPRReviewRuntime();
+  const runtime = await getStructuredRuntime();
 
   const reviewerDescriptions = availableReviewers.map(r => ({
     id: r.id,
@@ -130,7 +131,7 @@ export async function selectReviewers(
         {
           severity: 'warning',
           code: 'pr-orchestrator-fallback',
-          message: `PR reviewer orchestrator failed (${(err as Error).message}); using ${fallbackSelection.selectedReviewers.length} core reviewer(s) as fallback.`,
+          message: `PR reviewer orchestrator failed (${formatErrorWithCauses(err)}); using ${fallbackSelection.selectedReviewers.length} core reviewer(s) as fallback.`,
           stage: 'select-reviewers',
         },
       ],

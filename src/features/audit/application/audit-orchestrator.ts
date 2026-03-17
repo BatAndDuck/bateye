@@ -1,7 +1,8 @@
 import * as path from 'path';
 import { Reviewer, OrchestratorResult, ReviewIssue, TokenUsageSummary } from '../../../types/index';
 import { RepoIndex } from '../../../types/index';
-import { getAuditRuntime } from '../../../core/runtime/factory';
+import { getStructuredRuntime } from '../../../core/runtime/factory';
+import { formatErrorWithCauses } from '../../../core/runtime/error-format';
 import { orchestratorResultSchema } from '../../../core/validation/schemas';
 import {
   buildAuditOrchestratorSystemPrompt,
@@ -94,7 +95,7 @@ export interface AuditReviewerSelectionResult extends OrchestratorResult {
 export async function selectAuditReviewers(options: SelectAuditReviewersOptions): Promise<AuditReviewerSelectionResult> {
   const { index, availableReviewers, apiKey, transport, apiBaseUrl } = options;
   const model = options.model;
-  const runtime = await getAuditRuntime();
+  const runtime = await getStructuredRuntime();
 
   const profile = buildRepoProfile(index);
 
@@ -139,7 +140,7 @@ export async function selectAuditReviewers(options: SelectAuditReviewersOptions)
         {
           severity: 'warning',
           code: 'audit-orchestrator-fallback',
-          message: `Audit reviewer orchestrator failed (${(err as Error).message}); using ${fallbackSelection.selectedReviewers.length} core reviewer(s) as fallback.`,
+          message: `Audit reviewer orchestrator failed (${formatErrorWithCauses(err)}); using ${fallbackSelection.selectedReviewers.length} core reviewer(s) as fallback.`,
           stage: 'select-reviewers',
         },
       ],
