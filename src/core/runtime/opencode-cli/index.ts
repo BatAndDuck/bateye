@@ -421,7 +421,8 @@ function repairReviewerFindingShape(value: unknown): unknown {
     || asTrimmedString(record.fix)
     || asTrimmedString(record.suggestion)
     || asTrimmedString(record.remediation)
-    || asTrimmedString(record.action);
+    || asTrimmedString(record.action)
+    || (title ? `Review: ${title}` : 'Review this finding.');
   const filePath = asTrimmedString(record.filePath)
     || asTrimmedString(record.path)
     || asTrimmedString(record.file)
@@ -770,6 +771,12 @@ export class OpenCodeCLIRuntime implements IRuntime {
         //   answer, not the rolling accumulation across all agentic tool-call turns.
         // 2nd preference: extract usage from response parts/info (provider-specific, rarely populated).
         // 3rd preference: estimate from prompt character lengths (first-turn only, wildly low).
+        //
+        // Brief delay: the opencode server may write step-finish parts to the DB asynchronously
+        // after returning the HTTP response.  Without this wait the query often finds zero rows.
+        if (sessionID) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
         const dbUsage = sessionID ? querySessionActualUsage(server.dbPath, sessionID) : null;
         const responseUsage = extractActualUsage(response);
         const estimatedOutputTokens = Math.ceil(serializedResponse.length / 4);
