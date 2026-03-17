@@ -52,9 +52,11 @@ function mergeFinding(primary: PRFinding, secondary: PRFinding): PRFinding {
   const main = keepPrimary ? primary : secondary;
   const other = keepPrimary ? secondary : primary;
 
-  // Combine reviewer info if different reviewers
-  const reviewerIds = new Set(main.reviewerId.split(',').concat(other.reviewerId.split(',')));
-  const reviewerNames = new Set(main.reviewerName.split(', ').concat(other.reviewerName.split(', ')));
+  // Combine reviewer info if different reviewers; filter empty tokens that arise
+  // when reviewerId/reviewerName is an empty string (split yields [''])
+  const splitTrim = (s: string, sep: string) => s.split(sep).map(t => t.trim()).filter(Boolean);
+  const reviewerIds = new Set([...splitTrim(main.reviewerId, ','), ...splitTrim(other.reviewerId, ',')]);
+  const reviewerNames = new Set([...splitTrim(main.reviewerName, ', '), ...splitTrim(other.reviewerName, ', ')]);
 
   return {
     ...main,
