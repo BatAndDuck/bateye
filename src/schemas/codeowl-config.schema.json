@@ -28,7 +28,7 @@
       "type": "array",
       "items": { "type": "string" },
       "description": "Additional paths/patterns to exclude from analysis",
-      "examples": [["generated", "vendor", "proto"]]
+      "examples": [["**/generated/**", "**/vendor/**", "**/dist/**", "**/*.pb.go"]]
     },
     "disabledReviewers": {
       "type": "object",

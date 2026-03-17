@@ -1,9 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { AuditResult, Finding, ReviewIssue, Reviewer, ReviewerResult } from '../../../types/index';
+import packageJson from '../../../../package.json';
+import { AuditResult, Finding, Priority, ReviewIssue, Reviewer, ReviewerResult } from '../../../types/index';
 import { buildRepoIndex, scopeFilesForReviewer, selectAuditSeedFiles } from '../../../core/indexing/index';
 import { reviewerAnalysisSchema, ReviewerAnalysis } from '../../../core/validation/schemas';
-import { buildAuditSystemPrompt, buildAuditUserMessage } from '../../../core/prompts/audit';
+import { buildAuditSystemPrompt, buildAuditUserMessage, RepoProfile } from '../../../core/prompts/audit';
 import { computeOverallScore } from '../../../core/scoring/normalizer';
 import { runReviewerTool } from '../../../core/tools/runner';
 import { formatToolContext } from '../../../core/tools/format';
@@ -16,12 +17,27 @@ import {
 } from '../../../core/config/defaults';
 import { ensureDir, writeAuditResult } from '../../../core/output/writer';
 import { IRuntime, TokenUsage } from '../../../core/runtime/interface';
-import { getAuditRuntime } from '../../../core/runtime/factory';
+import { getAuditRuntime, createStructuredRuntime } from '../../../core/runtime/factory';
 import { formatErrorWithCauses } from '../../../core/runtime/error-format';
 import { addTokens, formatTokenSummary } from '../../../core/runtime/token-utils';
 import { resolveApiKey, resolveConfig } from '../../config/application/config-service';
 import { loadReviewersForMode } from '../../reviewers/application/reviewer-registry';
 import { selectAuditReviewers } from './audit-orchestrator';
+import { verifyAuditFindings } from './audit-verifier';
+
+const CODEOWL_VERSION: string = (packageJson as { version: string }).version;
+
+/**
+ * Minimum confidence required to keep a finding, by severity.
+ * Findings that fall below their tier's threshold are dropped before output.
+ */
+const CONFIDENCE_FLOORS: Record<Priority, number> = {
+  critical: 0.75,
+  high:     0.75,
+  medium:   0.60,
+  low:      0.50,
+  info:     0.40,
+};
 
 export interface AuditOptions {
   repoPath: string;
@@ -64,37 +80,24 @@ function logAuditFindingList(log: (msg: string) => void, reviewerName: string, f
 export async function runAudit(options: AuditOptions, dependencies: AuditDependencies = defaultDependencies): Promise<AuditResult> {
   const { repoPath, onProgress } = options;
   const log = (msg: string) => onProgress?.(msg);
-  const issues: ReviewIssue[] = [];
 
-  log('Loading configuration...');
-  const config = resolveConfig(repoPath);
-  const apiKey = resolveApiKey(config);
+  // Phase 1: Load config and reviewers
+  const { config, apiKey, allReviewers, issues } = resolveAuditConfig(options, log);
 
-  log('Loading reviewers into the owlery...');
-  const { reviewers: allReviewers, warnings } = loadReviewersForMode(repoPath, 'audit', config);
-  warnings.forEach(warning => {
-    log(`Warning: ${warning}`);
-    issues.push({
-      severity: 'warning',
-      code: 'reviewer-load-warning',
-      message: warning,
-      stage: 'load-reviewers',
-    });
-  });
-
+  // Phase 2: Index repository
   log('Indexing repository...');
   const index = await buildRepoIndex(repoPath, config);
   log(`Found ${index.totalFiles} files to analyze.`);
 
+  // Phase 3: Select active reviewers via orchestrator
   let activeReviewers: Reviewer[];
   let orchestratorTokens: TokenUsage | undefined;
+  let repoProfile: RepoProfile | undefined;
 
   if (options.reviewerIds && options.reviewerIds.length > 0) {
-    // Explicit selection — skip orchestrator
     activeReviewers = allReviewers.filter(r => options.reviewerIds!.includes(r.id));
     log(`Using ${activeReviewers.length} explicitly selected reviewer(s).`);
   } else {
-    // AI orchestrator selects which reviewers are relevant to this repo
     log(`Asking the orchestrator to shortlist reviewers (${allReviewers.length} candidates)...`);
     const orchestratorResult = await selectAuditReviewers({
       index,
@@ -105,27 +108,151 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       apiBaseUrl: config.apiBaseUrl,
     });
     orchestratorTokens = orchestratorResult.tokensUsed;
+    repoProfile = orchestratorResult.repoProfile;
     issues.push(...orchestratorResult.issues);
     for (const issue of orchestratorResult.issues) {
-      log(`Warning: ${issue.message}`);
+      log(`! Warning: ${issue.message}`);
     }
     const selectedIds = new Set(orchestratorResult.selectedReviewers.map(r => r.reviewerId));
     activeReviewers = allReviewers.filter(r => selectedIds.has(r.id));
-    log(`Orchestrator selected ${activeReviewers.length} reviewer(s): ${activeReviewers.map(r => r.name).join(', ')}`);
+    log(`- Orchestrator selected ${activeReviewers.length} reviewer(s): ${activeReviewers.map(r => r.name).join(', ')}`);
   }
 
   if (activeReviewers.length === 0) {
     throw new Error('No reviewers found. Built-in reviewers should load automatically; add custom reviewers to .codeowl/reviewers if needed.');
   }
 
+  // Phase 4: Run reviewers
   const runtime = await dependencies.getRuntime();
+  const { successfulResults, failedCount } = await executeReviewers(
+    activeReviewers, index, config, apiKey, runtime, repoProfile, issues, log,
+  );
+
+  if (successfulResults.length === 0) {
+    throw new Error('All reviewers failed. Check model/provider configuration or reviewer output constraints.');
+  }
+
+  // Phase 5: Confidence floor filtering
+  const rawAllFindings = successfulResults.flatMap(r => r.findings);
+  const { kept: confidenceKept, dropped: confidenceDropped } = applyConfidenceFloor(rawAllFindings, log);
+
+  // Phase 6: Cross-reviewer deduplication
+  const deduplication = deduplicateAuditFindings(confidenceKept);
+  const deduped = deduplication.findings;
+  if (deduplication.dropped.length > 0) {
+    log(`Deduplication removed ${deduplication.dropped.length} cross-reviewer duplicate finding(s).`);
+    for (const dropped of deduplication.dropped) {
+      log(
+        `  [audit-dedup] Dropped "${dropped.dropped.title}" from ${dropped.dropped.reviewerName} ` +
+        `as duplicate of ${dropped.kept.reviewerName} in ${dropped.dropped.filePath}:${dropped.dropped.startLine}-${dropped.dropped.endLine} ` +
+        `(similarity=${dropped.similarity.toFixed(2)})`,
+      );
+    }
+  }
+
+  // Phase 7: Skeptic verification pass (filter false positives)
+  log('Running skeptic verification pass...');
+  let verifiedFindings = deduped;
+  let semanticRejectedCount = 0;
+  try {
+    const verifierRuntime = await createStructuredRuntime();
+    const verifierResult = await verifyAuditFindings(deduped, {
+      repoPath,
+      model: config.model,
+      apiKey,
+      transport: config.transport,
+      apiBaseUrl: config.apiBaseUrl,
+      runtime: verifierRuntime,
+      log,
+    });
+    verifiedFindings = verifierResult.kept;
+    semanticRejectedCount = verifierResult.rejected.length;
+    if (semanticRejectedCount > 0) {
+      log(`Skeptic verifier rejected ${semanticRejectedCount} finding(s) as speculative or inapplicable.`);
+    }
+  } catch (err) {
+    log(`Warning: skeptic verifier failed, keeping all deduplicated findings: ${formatErrorWithCauses(err)}`);
+  }
+
+  // Phase 8: Rebuild per-reviewer arrays using verified findings, then assemble result
+  const verifiedIdSet = new Set(verifiedFindings.map(f => f.id));
+  const finalReviewerResults = successfulResults.map(rr => ({
+    ...rr,
+    findings: rr.findings.filter(f => verifiedIdSet.has(f.id)),
+  }));
+
+  const totalTokens = aggregateTokens(orchestratorTokens, successfulResults, log);
+  if (totalTokens) {
+    log(`Token usage (audit run total): ${formatTokenSummary(totalTokens)}`);
+  }
+
+  const result = assembleAuditResult({
+    repoPath,
+    activeReviewers,
+    reviewerResults: finalReviewerResults,
+    allResults: successfulResults.concat(Array(failedCount).fill(null)),
+    issues,
+    tokenUsage: totalTokens,
+    verificationStats: {
+      rawFindings: rawAllFindings.length,
+      confidenceRejected: confidenceDropped,
+      deterministicRejected: 0,
+      semanticRejected: semanticRejectedCount,
+      finalFindings: verifiedFindings.length,
+    },
+    failedCount,
+  });
+
+  const outputPath = options.outputPath || path.join(repoPath, AUDIT_OUTPUT_FILE);
+  ensureDir(path.join(repoPath, OUTPUT_DIR));
+  writeAuditResult(outputPath, result);
+  log(`Audit report written to ${outputPath}`);
+
+  return result;
+}
+
+// ---------- Helper: resolve config ----------
+
+function resolveAuditConfig(
+  options: AuditOptions,
+  log: (msg: string) => void,
+): { config: ReturnType<typeof resolveConfig>; apiKey: string; allReviewers: Reviewer[]; issues: ReviewIssue[] } {
+  const { repoPath } = options;
+  const issues: ReviewIssue[] = [];
+
+  log('Loading configuration...');
+  const config = resolveConfig(repoPath);
+  const apiKey = resolveApiKey(config);
+
+  log('Loading reviewers into the owlery...');
+  const { reviewers: allReviewers, warnings } = loadReviewersForMode(repoPath, 'audit', config);
+  warnings.forEach(warning => {
+    log(`Warning: ${warning}`);
+    issues.push({ severity: 'warning', code: 'reviewer-load-warning', message: warning, stage: 'load-reviewers' });
+  });
+
+  return { config, apiKey, allReviewers, issues };
+}
+
+// ---------- Helper: execute reviewers ----------
+
+async function executeReviewers(
+  activeReviewers: Reviewer[],
+  index: import('../../../types/index').RepoIndex,
+  config: ReturnType<typeof resolveConfig>,
+  apiKey: string,
+  runtime: IRuntime,
+  repoProfile: RepoProfile | undefined,
+  issues: ReviewIssue[],
+  log: (msg: string) => void,
+): Promise<{ successfulResults: ReviewerResult[]; failedCount: number }> {
   log(`Running ${activeReviewers.length} reviewer(s) with concurrency ${Math.min(MAX_CONCURRENT_AUDIT_REVIEWERS, activeReviewers.length)}...`);
   const reviewerResults = await runReviewersWithConcurrency(
     activeReviewers,
     MAX_CONCURRENT_AUDIT_REVIEWERS,
     async reviewer => {
       try {
-        const result = await runSingleReviewer(reviewer, index, config, apiKey, runtime, log);
+        const result = await runSingleReviewer(reviewer, index, config, apiKey, runtime, repoProfile, log);
         if (result.execution.toolError) {
           issues.push({
             severity: reviewer.tool?.optional === false ? 'error' : 'warning',
@@ -137,9 +264,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
           });
         }
         const durationSec = (result.execution.durationMs / 1000).toFixed(1);
-        const tokenSuffix = result.tokensUsed
-          ? ` | ${formatTokenSummary(result.tokensUsed)}`
-          : '';
+        const tokenSuffix = result.tokensUsed ? ` | ${formatTokenSummary(result.tokensUsed)}` : '';
         log(`  ✓ ${reviewer.name}: score=${result.score}, findings=${result.findings.length} (${durationSec}s${tokenSuffix})`);
         return result;
       } catch (err) {
@@ -160,80 +285,88 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       }
     },
   );
-  const successfulReviewerResults = reviewerResults.filter((result): result is ReviewerResult => result !== null);
 
-  if (successfulReviewerResults.length === 0) {
-    throw new Error('All reviewers failed. Check model/provider configuration or reviewer output constraints.');
-  }
+  const successfulResults = reviewerResults.filter((r): r is ReviewerResult => r !== null);
+  const failedCount = reviewerResults.filter(r => r === null).length;
+  return { successfulResults, failedCount };
+}
 
-  // Cross-reviewer deduplication
-  const allFindings = successfulReviewerResults.flatMap(r => r.findings);
-  const deduplication = deduplicateAuditFindings(allFindings);
-  const deduped = deduplication.findings;
-  if (deduplication.dropped.length > 0) {
-    log(`Deduplication removed ${deduplication.dropped.length} cross-reviewer duplicate finding(s).`);
-    for (const dropped of deduplication.dropped) {
-      log(
-        `  [audit-dedup] Dropped "${dropped.dropped.title}" from ${dropped.dropped.reviewerName} ` +
-        `as duplicate of ${dropped.kept.reviewerName} in ${dropped.dropped.filePath}:${dropped.dropped.startLine}-${dropped.dropped.endLine} ` +
-        `(similarity=${dropped.similarity.toFixed(2)})`,
-      );
+// ---------- Helper: confidence floor ----------
+
+function applyConfidenceFloor(
+  findings: Finding[],
+  log: (msg: string) => void,
+): { kept: Finding[]; dropped: number } {
+  const kept: Finding[] = [];
+  let dropped = 0;
+  for (const finding of findings) {
+    const floor = CONFIDENCE_FLOORS[finding.priority] ?? 0;
+    if (finding.confidence >= floor) {
+      kept.push(finding);
+    } else {
+      dropped++;
+      log(`  [confidence-filter] Dropped "${finding.title}" (${finding.priority}, confidence=${finding.confidence.toFixed(2)} < ${floor})`);
     }
   }
+  return { kept, dropped };
+}
 
-  // Rebuild per-reviewer result arrays using deduped findings
-  const dedupedIdSet = new Set(deduped.map(f => f.id));
-  const finalReviewerResults = successfulReviewerResults.map(rr => ({
-    ...rr,
-    findings: rr.findings.filter(f => dedupedIdSet.has(f.id)),
-  }));
+// ---------- Helper: token aggregation ----------
 
-  const overallScore = computeOverallScore(finalReviewerResults);
-  const totalFindings = deduped.length;
-  const criticalCount = deduped.filter(f => f.priority === 'critical').length;
-
-  // Aggregate token usage across reviewer selection and all successful reviewers
-  let totalTokens: TokenUsage | undefined = orchestratorTokens ? { ...orchestratorTokens } : undefined;
+function aggregateTokens(
+  orchestratorTokens: TokenUsage | undefined,
+  results: ReviewerResult[],
+  log: (msg: string) => void,
+): TokenUsage | undefined {
+  let total: TokenUsage | undefined = orchestratorTokens ? { ...orchestratorTokens } : undefined;
   if (orchestratorTokens) {
     log(`Token usage (reviewer selection): ${formatTokenSummary(orchestratorTokens)}`);
   }
-  for (const r of successfulReviewerResults) {
+  for (const r of results) {
     if (r.tokensUsed) {
-      totalTokens = totalTokens ? addTokens(totalTokens, r.tokensUsed) : { ...r.tokensUsed };
+      total = total ? addTokens(total, r.tokensUsed) : { ...r.tokensUsed };
     }
   }
-  if (totalTokens) {
-    log(`Token usage (audit run total): ${formatTokenSummary(totalTokens)}`);
-  }
+  return total;
+}
 
-  // Degrade on error-severity issues, non-transient warnings (tool failures etc.),
-  // or majority reviewer failures. Transient timeouts alone don't warrant DEGRADED.
-  const failedCount = reviewerResults.filter(r => r === null).length;
+// ---------- Helper: assemble final result ----------
+
+function assembleAuditResult(params: {
+  repoPath: string;
+  activeReviewers: Reviewer[];
+  reviewerResults: ReviewerResult[];
+  allResults: Array<ReviewerResult | null>;
+  issues: ReviewIssue[];
+  tokenUsage: TokenUsage | undefined;
+  verificationStats: AuditResult['verificationStats'];
+  failedCount: number;
+}): AuditResult {
+  const { repoPath, activeReviewers, reviewerResults, issues, tokenUsage, verificationStats, failedCount } = params;
+
+  const overallScore = computeOverallScore(reviewerResults);
+  const allFinal = reviewerResults.flatMap(r => r.findings);
+  const totalFindings = allFinal.length;
+  const criticalCount = allFinal.filter(f => f.priority === 'critical').length;
+
   const majorityFailed = failedCount > activeReviewers.length / 2;
   const hasErrorIssues = issues.some(i => i.severity === 'error');
-  const hasNonTransientWarnings = issues.some(
-    i => i.severity === 'warning' && !i.code.endsWith('-timeout'),
-  );
+  const hasNonTransientWarnings = issues.some(i => i.severity === 'warning' && !i.code.endsWith('-timeout'));
   const runStatus: AuditResult['status'] = (hasErrorIssues || hasNonTransientWarnings || majorityFailed) ? 'degraded' : 'complete';
 
-  const result: AuditResult = {
+  return {
     command: 'audit',
     repoPath: path.resolve(repoPath),
     status: runStatus,
     overallScore,
     summary: buildAuditSummary(overallScore, totalFindings, criticalCount, activeReviewers.length),
-    reviewerResults: finalReviewerResults,
+    reviewerResults,
     issues,
-    tokenUsage: totalTokens,
+    tokenUsage,
     generatedAt: new Date().toISOString(),
+    codeowlVersion: CODEOWL_VERSION,
+    verificationStats,
   };
-
-  const outputPath = options.outputPath || path.join(repoPath, AUDIT_OUTPUT_FILE);
-  ensureDir(path.join(repoPath, OUTPUT_DIR));
-  writeAuditResult(outputPath, result);
-  log(`Audit report written to ${outputPath}`);
-
-  return result;
 }
 
 async function runReviewersWithConcurrency<TInput, TOutput>(
@@ -270,6 +403,7 @@ async function runSingleReviewer(
   config: ReturnType<typeof resolveConfig>,
   apiKey: string,
   runtime: IRuntime,
+  repoProfile: RepoProfile | undefined,
   log: (msg: string) => void,
 ): Promise<ReviewerResult> {
   const start = Date.now();
@@ -304,7 +438,7 @@ async function runSingleReviewer(
     }
   }
 
-  const systemPrompt = buildAuditSystemPrompt(reviewer.instructions, reviewer.id, reviewer.name);
+  const systemPrompt = buildAuditSystemPrompt(reviewer.instructions, reviewer.id, reviewer.name, repoProfile);
   const userMessage = buildAuditUserMessage(
     seedFilePaths,
     index.totalFiles,
@@ -549,6 +683,27 @@ function linesOverlap(s1: number, e1: number, s2: number, e2: number, tolerance 
   return s1 <= e2 + tolerance && s2 <= e1 + tolerance;
 }
 
+/**
+ * Returns the fraction of the shorter range that is covered by the overlap.
+ * A value >= LINE_OVERLAP_FRACTION_THRESHOLD means both reviewers are
+ * essentially pointing at the same large block of code.
+ */
+function lineOverlapFraction(s1: number, e1: number, s2: number, e2: number): number {
+  const overlapStart = Math.max(s1, s2);
+  const overlapEnd = Math.min(e1, e2);
+  if (overlapEnd < overlapStart) return 0;
+  const overlapLen = overlapEnd - overlapStart + 1;
+  const minLen = Math.min(e1 - s1 + 1, e2 - s2 + 1);
+  return minLen > 0 ? overlapLen / minLen : 0;
+}
+
+/**
+ * When two findings overlap by >= this fraction of the shorter range, they are
+ * treated as duplicates even if their titles are dissimilar. This catches cases
+ * where two reviewers flag the same large function under different names.
+ */
+const LINE_OVERLAP_FRACTION_THRESHOLD = 0.9;
+
 const PRIORITY_ORDER: Record<string, number> = { info: 0, low: 1, medium: 2, high: 3, critical: 4 };
 
 function deduplicateAuditFindings(findings: Finding[]): {
@@ -573,7 +728,9 @@ function deduplicateAuditFindings(findings: Finding[]): {
       ) continue;
 
       const similarity = jaccardSimilarity(tokenize(a.title), tokenize(b.title));
-      if (similarity >= DUPLICATE_SIMILARITY_THRESHOLD) {
+      const fraction = lineOverlapFraction(a.startLine, a.endLine, b.startLine, b.endLine);
+      const isDuplicate = similarity >= DUPLICATE_SIMILARITY_THRESHOLD || fraction >= LINE_OVERLAP_FRACTION_THRESHOLD;
+      if (isDuplicate) {
         const aPri = PRIORITY_ORDER[a.priority] ?? 0;
         const bPri = PRIORITY_ORDER[b.priority] ?? 0;
         if (aPri >= bPri) {

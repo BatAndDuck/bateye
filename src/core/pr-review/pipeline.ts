@@ -1,6 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { PRFinding, PRReviewResult, ReviewIssue, Reviewer } from '../../types/index';
+import { PRFinding, PRReviewResult, ReviewIssue, Reviewer, Priority } from '../../types/index';
+import { buildRepoProfile } from '../../features/audit/application/audit-orchestrator';
+import { RepoProfile } from '../prompts/audit';
 import { resolveConfig, resolveApiKey } from '../config/loader';
 import { loadReviewersForMode } from '../reviewers/loader';
 import { getPRReviewRuntime } from '../runtime/factory';
@@ -10,7 +12,7 @@ import {
   buildPRReviewUserMessage,
   buildPRSummaryPrompt,
 } from '../prompts/pr-review';
-import { getGitDiff, getChangedFiles, getCommitSummaries, getRepoOwnerAndName } from '../git/index';
+import { getGitDiff, getChangedFiles, getCommitSummaries, getRepoOwnerAndName, CommitSummary } from '../git/index';
 import { selectReviewers } from './orchestrator';
 import { writePRReviewResult, ensureDir } from '../output/writer';
 import {
@@ -24,7 +26,7 @@ import {
 } from '../config/defaults';
 import { GitHubReviewPlatform, getGitHubEnvContext } from '../github/platform';
 import { parseUnifiedDiff, buildReviewerDiffContext, getFilesInDiff } from './diff-parser';
-import { verifyFindings } from './verifier';
+import { verifyFindings, verifyFindingsAgainstDiff } from './verifier';
 import { verifyFindingsSemantically } from './semantic-verifier';
 import { deduplicateFindings } from './deduplicator';
 import { buildConversation, filterAlreadyPosted, PRConversation } from './conversation';
@@ -54,6 +56,43 @@ const SEVERITY_ORDER: Record<string, number> = {
   high: 3,
   critical: 4,
 };
+
+/**
+ * Minimum confidence required to keep a PR finding at each priority level.
+ * Mirrors the same thresholds used by the audit pipeline.
+ */
+const CONFIDENCE_FLOORS: Record<Priority, number> = {
+  critical: 0.75,
+  high: 0.75,
+  medium: 0.60,
+  low: 0.50,
+  info: 0.40,
+};
+
+/**
+ * Build a lightweight RepoProfile by scanning the repo directory for
+ * indicator files — no content reading required. Used in PR review where
+ * a full index is not available.
+ */
+function buildPRRepoProfile(repoPath: string, changedFiles: string[]): RepoProfile {
+  const allPaths = changedFiles.map(f => f.toLowerCase());
+
+  // Also scan root-level files for project-type signals (non-recursive, fast)
+  try {
+    const rootEntries = fs.readdirSync(repoPath, { withFileTypes: true });
+    for (const entry of rootEntries) {
+      allPaths.push(entry.name.toLowerCase());
+    }
+  } catch {
+    // ignore scan errors — changedFiles alone is sufficient for basic profiling
+  }
+
+  return buildRepoProfile({
+    files: allPaths.map(p => ({ relativePath: p, absolutePath: path.join(repoPath, p), extension: path.extname(p), sizeBytes: 0 })),
+    repoPath,
+    totalFiles: allPaths.length,
+  });
+}
 
 function extractTrailFiles(finding: Pick<PRFinding, 'verificationTrail'>): string[] {
   return finding.verificationTrail
@@ -203,6 +242,10 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     }
   }
 
+  // Build a lightweight repo profile from the changed files + repo root scan.
+  // Used to contextualise reviewer prompts (e.g. CLI tool vs web service).
+  const repoProfile = buildPRRepoProfile(repoPath, changedFiles);
+
   log('Loading reviewers...');
   const { reviewers } = loadReviewersForMode(repoPath, 'pr-review', config);
 
@@ -254,9 +297,11 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       structuredDiff,
       currentDiffFiles,
       currentFileContext,
+      commits,
       repoPath,
       config.model,
       apiKey,
+      repoProfile,
       config.transport,
       config.apiBaseUrl,
       runtime,
@@ -288,19 +333,46 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   log(`Collected ${allFindings.length} raw findings from all reviewers`);
   logPRFindingList(log, allFindings, 'Raw findings detail');
 
+  // Confidence floor: drop findings below the per-priority minimum threshold.
+  const confidenceKept: PRFinding[] = [];
+  for (const f of allFindings) {
+    const floor = CONFIDENCE_FLOORS[f.priority as Priority] ?? 0.5;
+    if ((f.confidence ?? 1) >= floor) {
+      confidenceKept.push(f);
+    } else {
+      log(`  [confidence-filter] Dropped "${f.title}" (${f.priority}, confidence=${f.confidence} < ${floor})`);
+    }
+  }
+  if (confidenceKept.length < allFindings.length) {
+    log(`Confidence filter: kept ${confidenceKept.length}/${allFindings.length} findings`);
+  }
+
   log('Running deterministic verification...');
-  const deterministic = verifyFindings(allFindings);
+  const deterministic = verifyFindings(confidenceKept);
   log(`Deterministic verification: accepted ${deterministic.verified.length}, rejected ${deterministic.rejected.length}`);
 
   if (deterministic.rejected.length > 0) {
     for (const rejected of deterministic.rejected) {
-      log(`  ✗ Rejected (deterministic): "${rejected.finding.title}" — ${rejected.reason}`);
+      log(`  ✗ Rejected (schema): "${rejected.finding.title}" — ${rejected.reason}`);
+    }
+  }
+
+  // Diff-gate: hard-reject any finding whose anchor file/lines are not in the PR diff.
+  // This runs deterministically (no LLM) and prevents non-diff findings from reaching
+  // the expensive semantic verifier.
+  log('Running diff-gate verification...');
+  const diffGate = verifyFindingsAgainstDiff(deterministic.verified, parsedDiff);
+  log(`Diff-gate: accepted ${diffGate.verified.length}, rejected ${diffGate.rejected.length}`);
+
+  if (diffGate.rejected.length > 0) {
+    for (const rejected of diffGate.rejected) {
+      log(`  ✗ Rejected (diff-gate): "${rejected.finding.title}" — ${rejected.reason}`);
     }
   }
 
   log('Deduplicating verified findings...');
-  const deduped = deduplicateFindings(deterministic.verified);
-  log(`After dedup: ${deduped.length} findings (removed ${deterministic.verified.length - deduped.length} duplicates)`);
+  const deduped = deduplicateFindings(diffGate.verified);
+  log(`After dedup: ${deduped.length} findings (removed ${diffGate.verified.length - deduped.length} duplicates)`);
   logPRFindingList(log, deduped, 'Pre-semantic findings detail');
 
   let semanticVerified: PRFinding[] = [];
@@ -346,7 +418,9 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
 
   const verificationStats = {
     rawFindings: allFindings.length,
+    confidenceRejected: allFindings.length - confidenceKept.length,
     deterministicRejected: deterministic.rejected.length,
+    diffGateRejected: diffGate.rejected.length,
     semanticRejected: semanticRejectedCount,
     finalFindings: finalFindings.length,
   };
@@ -401,7 +475,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     summary: '',
     findings: finalFindings,
     issues,
-    rejectedFindings: verificationStats.deterministicRejected + verificationStats.semanticRejected,
+    rejectedFindings: verificationStats.deterministicRejected + verificationStats.diffGateRejected + verificationStats.semanticRejected,
     verificationStats,
     tokenUsage: hasGrandTotalData ? grandTotal : undefined,
     generatedAt: new Date().toISOString(),
@@ -499,9 +573,11 @@ async function runPRReviewer(
   structuredDiff: string,
   currentDiffFiles: string[],
   currentFileContext: string,
+  commits: CommitSummary[],
   repoPath: string,
   model: string,
   apiKey: string,
+  repoProfile: RepoProfile,
   transport: string,
   apiBaseUrl: string | undefined,
   runtime: IRuntime,
@@ -549,8 +625,8 @@ async function runPRReviewer(
     }
   }
 
-  const systemPrompt = buildPRReviewSystemPrompt(reviewer.instructions, reviewer.id, reviewer.name);
-  const userMessage = buildPRReviewUserMessage(structuredDiff, currentDiffFiles, currentFileContext, toolContext);
+  const systemPrompt = buildPRReviewSystemPrompt(reviewer.instructions, reviewer.id, reviewer.name, repoProfile);
+  const userMessage = buildPRReviewUserMessage(structuredDiff, currentDiffFiles, currentFileContext, toolContext, commits);
   const initialFiles = currentDiffFiles;
 
   try {

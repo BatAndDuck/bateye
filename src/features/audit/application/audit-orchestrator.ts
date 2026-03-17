@@ -10,7 +10,7 @@ import {
   RepoProfile,
 } from '../../../core/prompts/audit';
 
-const ORCHESTRATOR_MAX_TOKENS = 2048;
+const ORCHESTRATOR_MAX_TOKENS = 4096;
 const ORCHESTRATOR_TEMPERATURE = 0;
 
 /**
@@ -22,7 +22,7 @@ const FALLBACK_MAX_REVIEWERS = 10;
 /** Reviewer IDs that are always included in the fallback set (highest signal/cost ratio). */
 const FALLBACK_CORE_IDS = ['security-api', 'code-quality', 'documentation'];
 
-function buildRepoProfile(index: RepoIndex): RepoProfile {
+export function buildRepoProfile(index: RepoIndex): RepoProfile {
   const extensionCounts: Record<string, number> = {};
   const topDirSet = new Set<string>();
 
@@ -90,6 +90,7 @@ export interface SelectAuditReviewersOptions {
 export interface AuditReviewerSelectionResult extends OrchestratorResult {
   issues: ReviewIssue[];
   tokensUsed?: TokenUsageSummary;
+  repoProfile: RepoProfile;
 }
 
 export async function selectAuditReviewers(options: SelectAuditReviewersOptions): Promise<AuditReviewerSelectionResult> {
@@ -129,6 +130,7 @@ export async function selectAuditReviewers(options: SelectAuditReviewersOptions)
       ...result.data,
       issues: [],
       tokensUsed: result.tokensUsed,
+      repoProfile: profile,
     };
   } catch (err) {
     // Orchestrator unavailable — use a conservative core set rather than all reviewers
@@ -144,6 +146,7 @@ export async function selectAuditReviewers(options: SelectAuditReviewersOptions)
           stage: 'select-reviewers',
         },
       ],
+      repoProfile: profile,
     };
   }
 }

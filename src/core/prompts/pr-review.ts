@@ -1,6 +1,9 @@
 import { CODEOWL_SUMMARY_MARKER } from '../config/defaults';
 import { PRFinding, ReviewIssue, ReviewRunStatus } from '../../types/index';
 import { CommitSummary } from '../git/index';
+import { RepoProfile } from './audit';
+
+const DIFF_PREVIEW_MAX_CHARS = 16_000;
 
 export function buildOrchestratorSystemPrompt(availableReviewers: { id: string; name: string; description?: string; scopeHints?: string[] }[]): string {
   const reviewerList = availableReviewers
@@ -14,17 +17,21 @@ ${reviewerList}
 
 ## Output Requirements
 
-Return ONLY this JSON:
-\`\`\`json
+CRITICAL OUTPUT RULE: Your ENTIRE response must be valid JSON. Start your response with { and end with }. Write NO text before or after the JSON. NO markdown code blocks. NO explanation. NO introduction sentences. If your response contains anything other than the JSON object, the system will crash.
+
+Your response must look exactly like this (replace the example values):
 {
   "selectedReviewers": [
     {
-      "reviewerId": "<id from the list above>",
-      "reason": "<why this reviewer is relevant to the changes>"
+      "reviewerId": "code-quality",
+      "reason": "The diff modifies TypeScript functions and introduces new logic paths that should be reviewed for quality."
+    },
+    {
+      "reviewerId": "api-security",
+      "reason": "The diff touches authentication handling and API key management."
     }
   ]
 }
-\`\`\`
 
 ## Selection Rules
 
@@ -41,7 +48,7 @@ Return ONLY this JSON:
 }
 
 export function buildOrchestratorUserMessage(changedFiles: string[], diff: string, commits: CommitSummary[]): string {
-  const diffPreview = diff.length > 16000 ? diff.slice(0, 16000) + '\n\n[...diff truncated...]' : diff;
+  const diffPreview = diff.length > DIFF_PREVIEW_MAX_CHARS ? diff.slice(0, DIFF_PREVIEW_MAX_CHARS) + '\n\n[...diff truncated...]' : diff;
   const commitSection = commits.length === 0
     ? '- No additional commits detected between base and head'
     : commits.map(commit => `- ${commit.sha.slice(0, 12)} ${commit.subject}`).join('\n');
@@ -58,6 +65,27 @@ ${diffPreview}
 \`\`\`
 
 Which reviewers should analyze this PR?`;
+}
+
+function buildPRRepoProfileSummary(profile: RepoProfile): string {
+  const parts: string[] = [];
+  const techStack: string[] = [];
+  if (profile.hasPackageJson) techStack.push('Node.js / TypeScript / JavaScript');
+  if (profile.hasPyProject) techStack.push('Python');
+  if (profile.hasGoMod) techStack.push('Go');
+  if (techStack.length) parts.push(`Tech stack: ${techStack.join(', ')}`);
+
+  const features: string[] = [];
+  if (profile.hasFrontendFiles) features.push('frontend / UI');
+  if (profile.hasSqlFiles) features.push('database / SQL');
+  if (profile.hasDockerfile) features.push('containerized');
+  if (profile.hasAiLibraries) features.push('AI / LLM integration');
+  if (features.length) parts.push(`Features: ${features.join(', ')}`);
+
+  if (!profile.hasFrontendFiles && !profile.hasSqlFiles && !profile.hasDockerfile) {
+    parts.push('Project type: likely a local CLI tool or developer library.');
+  }
+  return parts.join('\n') + '\n\nUse this profile to judge whether a finding applies to THIS project.';
 }
 
 function buildPRModeOverlay(reviewerId: string): string {
@@ -82,13 +110,36 @@ function buildPRModeOverlay(reviewerId: string): string {
   return commonOverlay;
 }
 
-export function buildPRReviewSystemPrompt(reviewerInstructions: string, reviewerId: string, reviewerName: string): string {
+export function buildPRReviewSystemPrompt(
+  reviewerInstructions: string,
+  reviewerId: string,
+  reviewerName: string,
+  repoProfile?: RepoProfile,
+): string {
   const prefix = reviewerId.toUpperCase().replace(/-/g, '_');
+  const profileSection = repoProfile
+    ? `\n## Repository Profile\n${buildPRRepoProfileSummary(repoProfile)}\n`
+    : '';
 
   return `You are a precise code reviewer performing a "${reviewerName}" review on a pull request.
-
+${profileSection}
 ${reviewerInstructions}
 ${buildPRModeOverlay(reviewerId)}
+## HOW TO DO THIS REVIEW — TWO PHASES
+
+### PHASE 1: INVESTIGATE FIRST (form no opinions yet)
+1. Open and read the changed files listed in the diff.
+2. Follow imports and references to understand context outside the diff.
+3. Use search tools to confirm whether a problem actually exists in the current codebase.
+4. For each potential concern, find the EXACT line in the diff that causes the problem.
+5. Read the commit messages in this PR. If a commit message or code comment already explains the design decision behind a potential concern, that concern is intentional — do NOT report it.
+6. Check adjacent documentation (README.md, AGENTS.md, CLAUDE.md, docs/) to see if the behavior you are about to flag is already described there.
+
+### PHASE 2: DECIDE WHAT TO REPORT (only after investigation)
+5. Ask yourself: "Did I read actual code in the diff that proves this problem exists at a specific line?"
+6. If "yes" → report it. If "maybe" or "not sure" → do NOT report it.
+7. Ask yourself: "Does this concern apply to THIS project type?" (see Repository Profile above). If not → do NOT report it.
+8. Zero findings is a VALID and GOOD outcome. Never pad with uncertain concerns.
 
 ## STRICT RULES — MUST FOLLOW
 
@@ -106,6 +157,9 @@ ${buildPRModeOverlay(reviewerId)}
 10a. Only report issues materially caused by the changed lines. Do not turn general cleanup suggestions, architecture preferences, logging style preferences, or best-practice wishes into findings unless the diff introduces a concrete correctness, reliability, security, or user-impacting problem.
 10b. For logging/diagnostic code, do not report "use structured logging" or similar style advice unless the changed code demonstrably leaks secrets, PII, credentials, internal endpoints, or other actionable sensitive values.
 10c. For resiliency concerns, do not require retries, backoff, or timeout patterns unless the changed code actually performs the external/network operation in question and the missing guard creates a concrete risk now.
+10d. Do NOT report findings in documentation files (.md, .txt, .rst), template files, example files, or files that DESCRIBE anti-patterns rather than implement them. A file that lists "you should avoid doing X" is not itself a defect — only report findings in actual source code, configuration, or build files.
+10e. COMMIT INTENT: Before reporting that something is "missing", "not handled", or "inconsistent" — read the commit messages provided above. If the commit message explicitly explains the design decision, it is intentional. Do NOT report it as a finding.
+10f. DOCUMENTATION GAPS: If the changed lines introduce or modify user-facing behavior (CLI flags, config fields, API signatures, public interfaces, new commands) — check whether relevant documentation files (README.md, AGENTS.md, CLAUDE.md, docs/) reflect the change. If documentation is stale or missing, report a documentation gap finding anchored to the CHANGED CODE LINES that create the obligation (not to the documentation file itself). Set filePath, startLine, and endLine to the changed code. In the description and recommendation, specify exactly which documentation file and section needs updating.
 11. Every finding MUST include a "verificationTrail" with 1-5 entries. Use exact prefixes:
     - "file:<relative path>" for each file you inspected
     - "search:<query>" for repo-wide searches you performed
@@ -145,16 +199,21 @@ export function buildPRReviewUserMessage(
   structuredDiff: string,
   changedFiles: string[],
   currentFileContext: string,
-  additionalContext?: string
+  additionalContext?: string,
+  commits?: CommitSummary[],
 ): string {
   const maxLen = 24000;
   const diffContent = structuredDiff.length > maxLen
     ? structuredDiff.slice(0, maxLen) + '\n\n[...diff truncated...]'
     : structuredDiff;
 
+  const commitSection = commits && commits.length > 0
+    ? `\n## Commit History for This PR\nUse these to understand the author's intent before flagging anything as missing or broken:\n${commits.map(c => `- ${c.sha.slice(0, 12)} ${c.subject}`).join('\n')}\n`
+    : '';
+
   return `## Files Changed in This PR
 ${changedFiles.map(f => `- ${f}`).join('\n')}
-
+${commitSection}
 ## Code Changes
 
 Below are the exact changes in this PR. Each line is labeled with [Line N] showing its line number in the new file.

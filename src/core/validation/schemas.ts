@@ -17,6 +17,7 @@ const findingRangeFields = {
   startColumn: z.number().int().min(1).optional(),
   endColumn: z.number().int().min(1).optional(),
   evidence: z.array(z.string()),
+  applicabilityNote: z.string().optional(),
   recommendation: z.string(),
   tags: z.array(z.string()).optional(),
 };

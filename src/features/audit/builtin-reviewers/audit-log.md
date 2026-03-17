@@ -18,6 +18,20 @@ scopeHints:
   - delete
 ---
 
+## When this reviewer applies
+This reviewer is relevant to systems that have ALL of the following characteristics:
+- Multi-user access control (different users with different roles/permissions)
+- Operations with regulatory or compliance accountability requirements (payments, PII access, admin actions)
+- A persistent audit trail backing store (database table, event log, WORM storage)
+
+**Do NOT report findings from this reviewer** if the codebase is:
+- A local CLI tool or developer utility (no user accounts, runs as the developer)
+- A library or SDK (no runtime user operations)
+- A single-user developer tool (no multi-user access control)
+- A build/CI tool (no sensitive user data or compliance requirements)
+
+If the repository does not show evidence of user authentication, role-based access control, payment processing, or PII handling — the concepts in this reviewer do not apply and you should return zero findings.
+
 Focus your review on:
 
 ## Critical Operations Without Audit Entries
