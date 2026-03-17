@@ -197,8 +197,10 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
   assert.equal(report.rejectedFindings, 1);
   assert.deepEqual(report.verificationStats, {
     rawFindings: 3,
+    confidenceRejected: 0,
     deterministicRejected: 0,
-    semanticRejected: 1,
+    diffGateRejected: 1,
+    semanticRejected: 0,
     finalFindings: 1,
   });
   assert.match(report.summary, /Verification/);
@@ -555,7 +557,9 @@ export function buildRepoIndex(config) {
   assert.equal(report.findings.length, 0);
   assert.deepEqual(report.verificationStats, {
     rawFindings: 1,
+    confidenceRejected: 0,
     deterministicRejected: 0,
+    diffGateRejected: 0,
     semanticRejected: 1,
     finalFindings: 0,
   });
@@ -771,7 +775,9 @@ Report only concrete issues that still exist after investigating the current fil
   assert.equal(report.findings.length, 0);
   assert.deepEqual(report.verificationStats, {
     rawFindings: 1,
+    confidenceRejected: 0,
     deterministicRejected: 0,
+    diffGateRejected: 0,
     semanticRejected: 1,
     finalFindings: 0,
   });
@@ -926,7 +932,9 @@ Report only concrete code quality findings after investigating the current repos
   assert.match(report.summary, /No issues found/);
   assert.deepEqual(report.verificationStats, {
     rawFindings: 1,
+    confidenceRejected: 0,
     deterministicRejected: 0,
+    diffGateRejected: 0,
     semanticRejected: 0,
     finalFindings: 0,
   });
