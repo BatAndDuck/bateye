@@ -28,7 +28,7 @@ export const MAX_FILE_SIZE_BYTES = 500 * 1024; // 500 KB
 export const MAX_CONTEXT_FILES = 50;
 export const MAX_TOKENS_PER_FILE = 8000;
 
-/** Maximum number of files to include in a reviewer's context window */
+/** Hard cap for the number of audit seed files to include in a reviewer's initial context window */
 export const MAX_FILES_FOR_REVIEWER_CONTEXT = 40;
 /** Maximum characters to include per file when formatting context for a reviewer */
 export const MAX_CHARS_PER_REVIEWER_FILE = 6000;

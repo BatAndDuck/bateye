@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, TokenUsage, resolveModelTarget } from '../interface';
 import { logRuntimeDebug } from '../debug';
+import { formatErrorWithCauses } from '../error-format';
 import { buildOpenCodeEnvironment, resolveOpenCodeInvocation } from './command';
 import { buildStructureRepairPrompt, formatZodErrors, tryParseAndValidate } from '../structure-repair';
 
@@ -15,6 +16,7 @@ type OpenCodeServerHandle = {
   envSignature: string;
   /** Absolute path to the opencode SQLite database used by this server instance. */
   dbPath: string;
+  recentLogs: string[];
   close: () => void;
 };
 
@@ -220,26 +222,10 @@ function extractJson(rawText: string): string {
 }
 
 function summarizeSdkError(err: unknown): string {
-  const candidate = err as {
-    message?: string;
-    data?: unknown;
-    error?: unknown;
-    cause?: unknown;
-  };
-
-  if (candidate?.message) {
-    return candidate.message;
-  }
-
-  if (candidate?.error) {
-    return JSON.stringify(candidate.error);
-  }
-
-  if (candidate?.data) {
-    return JSON.stringify(candidate.data);
-  }
-
-  return String(err);
+  const candidate = err as { data?: unknown; error?: unknown };
+  if (candidate?.error) return JSON.stringify(candidate.error);
+  if (candidate?.data) return JSON.stringify(candidate.data);
+  return formatErrorWithCauses(err);
 }
 
 function formatValidationFeedback(err: unknown): string {
@@ -583,16 +569,18 @@ async function waitForServerReady(
 async function startServer(env: NodeJS.ProcessEnv, readinessTimeoutMs = 30_000): Promise<OpenCodeServerHandle> {
   const port = await findAvailablePort();
   const invocation = resolveOpenCodeInvocation();
+  const recentLogs: string[] = [];
   const child = spawn(
     invocation.command,
     [...invocation.args, 'serve', '--hostname=127.0.0.1', `--port=${port}`],
     {
       cwd: process.cwd(),
       env,
-      stdio: 'ignore',
+      stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
     },
   );
+  attachChildLogBuffer(child, recentLogs);
 
   const url = `http://127.0.0.1:${port}`;
 
@@ -600,7 +588,11 @@ async function startServer(env: NodeJS.ProcessEnv, readinessTimeoutMs = 30_000):
     await waitForServerReady(url, child, readinessTimeoutMs);
   } catch (err) {
     child.kill();
-    throw err;
+    const logTail = formatRecentServerLogs(recentLogs);
+    throw new Error(
+      `Failed to start OpenCode server at ${url}: ${formatErrorWithCauses(err)}${logTail ? ` | server logs: ${logTail}` : ''}`,
+      { cause: err },
+    );
   }
 
   child.unref();
@@ -614,6 +606,7 @@ async function startServer(env: NodeJS.ProcessEnv, readinessTimeoutMs = 30_000):
     child,
     envSignature: buildEnvSignature(env),
     dbPath,
+    recentLogs,
     close: () => {
       if (child.exitCode === null) {
         child.kill('SIGTERM');
@@ -933,7 +926,11 @@ export class OpenCodeCLIRuntime implements IRuntime {
       }
     }
 
-    throw new Error(`OpenCode server request failed: ${summarizeSdkError(lastError)}`, { cause: lastError });
+    const serverLogs = formatRecentServerLogs(server.recentLogs);
+    throw new Error(
+      `OpenCode server request failed for ${callId} via ${server.url}: ${summarizeSdkError(lastError)}${serverLogs ? ` | server logs: ${serverLogs}` : ''}`,
+      { cause: lastError },
+    );
   }
 
   async listModels(_provider: string, _apiKey: string, _apiBaseUrl?: string): Promise<string[]> {
@@ -972,16 +969,41 @@ export class OpenCodeCLIRuntime implements IRuntime {
 
       return bodyText ? JSON.parse(bodyText) as T : (true as T);
     } catch (err) {
+      const method = init.method || 'GET';
       if (
         (err instanceof DOMException && err.name === 'AbortError') ||
         (err instanceof Error && (err.message.includes('aborted') || err.name === 'AbortError'))
       ) {
         const seconds = Math.round(timeoutMs / 1000);
-        throw new Error(`Timed out after ${seconds}s`, { cause: err });
+        throw new Error(`Timed out after ${seconds}s during ${method} ${url}`, { cause: err });
       }
-      throw err;
+      throw new Error(`Request ${method} ${url} failed: ${formatErrorWithCauses(err)}`, { cause: err });
     } finally {
       clearTimeout(timer);
     }
   }
+}
+
+function attachChildLogBuffer(child: ReturnType<typeof spawn>, recentLogs: string[]): void {
+  const listeners = [child.stdout, child.stderr];
+  for (const stream of listeners) {
+    stream?.on('data', chunk => {
+      const text = chunk.toString().trim();
+      if (!text) return;
+      for (const line of text.split(/\r?\n/).map((segment: string) => segment.trim()).filter(Boolean)) {
+        recentLogs.push(line);
+      }
+      if (recentLogs.length > 20) {
+        recentLogs.splice(0, recentLogs.length - 20);
+      }
+    });
+  }
+}
+
+function formatRecentServerLogs(recentLogs: string[]): string {
+  if (recentLogs.length === 0) {
+    return '';
+  }
+
+  return recentLogs.slice(-5).join(' | ');
 }

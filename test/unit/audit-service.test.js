@@ -32,11 +32,22 @@ function setApiKey(value) {
 test('runAudit throws when a reviewer runtime call fails', async () => {
   const repoPath = makeRepo();
   const restoreApiKey = setApiKey('test-api-key');
+  fs.mkdirSync(path.join(repoPath, '.codeowl', 'reviewers'), { recursive: true });
+  fs.writeFileSync(
+    path.join(repoPath, '.codeowl', 'reviewers', 'failing-reviewer.md'),
+    `---
+id: failing-reviewer
+name: Failing Reviewer
+mode: audit
+---
+Fail on purpose.
+`,
+  );
 
   try {
     await assert.rejects(
       () => runAudit(
-        { repoPath },
+        { repoPath, reviewerIds: ['failing-reviewer'] },
         {
           getRuntime: async () => ({
             async runAgenticReview() {
@@ -303,6 +314,136 @@ Check reviewer ${id}.
 
     assert.equal(result.reviewerResults.length, 1);
     assert.equal(result.reviewerResults[0].reviewerId, 'ok-reviewer');
+  } finally {
+    restoreApiKey();
+  }
+});
+
+test('runAudit seeds audit reviewers with an adaptive file budget and accurate prompt counts', async () => {
+  const repoPath = makeRepo();
+  const restoreApiKey = setApiKey('test-api-key');
+  fs.mkdirSync(path.join(repoPath, '.codeowl', 'reviewers'), { recursive: true });
+  fs.mkdirSync(path.join(repoPath, 'src', 'components'), { recursive: true });
+
+  for (let i = 0; i < 20; i++) {
+    fs.writeFileSync(path.join(repoPath, 'src', 'components', `component-${i}.tsx`), `export const C${i} = () => null;\n`);
+  }
+  fs.writeFileSync(path.join(repoPath, 'vite.config.ts'), 'export default {};\n');
+  fs.writeFileSync(path.join(repoPath, 'package.json'), '{"name":"seed-budget-test"}\n');
+
+  fs.writeFileSync(
+    path.join(repoPath, '.codeowl', 'reviewers', 'frontend-seeding.md'),
+    `---
+id: frontend-seeding
+name: Frontend Seeding
+mode: audit
+category: performance
+scopeHints:
+  - component
+  - vite
+---
+Review frontend bundle signals.
+`,
+  );
+
+  let capturedOptions;
+
+  try {
+    await runAudit(
+      { repoPath, reviewerIds: ['frontend-seeding'] },
+      {
+        getRuntime: async () => ({
+          async runAgenticReview(options, schema) {
+            capturedOptions = options;
+            return {
+              data: schema.parse({ score: 85, summary: 'ok', findings: [] }),
+              model: 'anthropic/mock-model',
+              runtime: 'sdk',
+              durationMs: 0,
+              rawResponse: '',
+            };
+          },
+          async run() {
+            throw new Error('orchestrator runtime should not be used in this test');
+          },
+          async listModels() {
+            return [];
+          },
+          async isAvailable() {
+            return true;
+          },
+        }),
+      },
+    );
+
+    assert.ok(capturedOptions);
+    assert.equal(capturedOptions.initialFiles.length, 6);
+    assert.ok(capturedOptions.initialFiles.includes('vite.config.ts'));
+    assert.ok(capturedOptions.initialFiles.includes('src/components/component-0.tsx'));
+    assert.match(capturedOptions.userMessage, /Files matching reviewer scope: 21/);
+    assert.match(capturedOptions.userMessage, /Seed files provided for analysis: 6/);
+  } finally {
+    restoreApiKey();
+  }
+});
+
+test('runAudit surfaces nested reviewer failure causes in persisted issues', async () => {
+  const repoPath = makeRepo();
+  const restoreApiKey = setApiKey('test-api-key');
+  fs.mkdirSync(path.join(repoPath, '.codeowl', 'reviewers'), { recursive: true });
+  fs.writeFileSync(
+    path.join(repoPath, '.codeowl', 'reviewers', 'failing-reviewer.md'),
+    `---
+id: failing-reviewer
+name: Failing Reviewer
+mode: audit
+---
+Fail on purpose.
+`,
+  );
+
+  try {
+    const result = await runAudit(
+      { repoPath, reviewerIds: ['failing-reviewer', 'code-quality'] },
+      {
+        getRuntime: async () => ({
+          async runAgenticReview(options, schema) {
+            if (options.callLabel === 'Failing Reviewer') {
+              const cause = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:4096'), {
+                code: 'ECONNREFUSED',
+                syscall: 'connect',
+                address: '127.0.0.1',
+                port: 4096,
+              });
+              throw new Error('fetch failed', { cause });
+            }
+
+            return {
+              data: schema.parse({ score: 85, summary: 'ok', findings: [] }),
+              model: 'anthropic/mock-model',
+              runtime: 'sdk',
+              durationMs: 0,
+              rawResponse: '',
+            };
+          },
+          async run() {
+            throw new Error('orchestrator runtime should not be used in this test');
+          },
+          async listModels() {
+            return [];
+          },
+          async isAvailable() {
+            return true;
+          },
+        }),
+      },
+    );
+
+    assert.equal(result.status, 'degraded');
+    assert.match(
+      result.issues.find(issue => issue.code === 'audit-reviewer-failed').message,
+      /ECONNREFUSED/,
+    );
   } finally {
     restoreApiKey();
   }

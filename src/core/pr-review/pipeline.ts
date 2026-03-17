@@ -29,6 +29,7 @@ import { verifyFindingsSemantically } from './semantic-verifier';
 import { deduplicateFindings } from './deduplicator';
 import { buildConversation, filterAlreadyPosted, PRConversation } from './conversation';
 import { IRuntime, TokenUsage } from '../runtime/interface';
+import { formatErrorWithCauses } from '../runtime/error-format';
 import { addTokens, formatTokenSummary } from '../runtime/token-utils';
 import { runReviewerTool } from '../tools/runner';
 import { formatToolContext } from '../tools/format';
@@ -542,7 +543,7 @@ async function runPRReviewer(
   const userMessage = buildPRReviewUserMessage(structuredDiff, currentDiffFiles, currentFileContext, toolContext);
 
   try {
-    log(`  Running reviewer: ${reviewer.name}...`);
+    log(`  Running reviewer: ${reviewer.name} (model=${reviewer.model || model}, changedFiles=${currentDiffFiles.length}, seededFiles=${currentDiffFiles.length})...`);
     const runResult = await runtime.runAgenticReview<PRReviewerAnalysis>(
       {
         systemPrompt,
@@ -574,15 +575,15 @@ async function runPRReviewer(
     log(`  ✓ ${reviewer.name}: ${findings.length} findings (${durationSec}s${tokenSuffix})`);
     return { findings, reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError, issues, tokensUsed: runResult.tokensUsed };
   } catch (err) {
-    const msg = (err as Error).message;
+    const msg = formatErrorWithCauses(err);
     const isTimeout = /timed out after/i.test(msg);
     log(`  ✗ ${reviewer.name} failed: ${msg}`);
     issues.push({
       severity: isTimeout ? 'warning' : 'warning',
       code: isTimeout ? 'pr-reviewer-timeout' : 'pr-reviewer-failed',
       message: isTimeout
-        ? `Reviewer "${reviewer.name}" timed out: ${msg}`
-        : `Reviewer "${reviewer.name}" failed: ${msg}`,
+        ? `Reviewer "${reviewer.name}" (model=${reviewer.model || model}) timed out: ${msg}`
+        : `Reviewer "${reviewer.name}" (model=${reviewer.model || model}) failed: ${msg}`,
       stage: 'run-reviewers',
       reviewerId: reviewer.id,
       reviewerName: reviewer.name,

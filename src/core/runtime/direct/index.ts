@@ -5,6 +5,7 @@ import * as path from 'path';
 import { z } from 'zod';
 import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, TokenUsage, normalizeTransport, resolveModelTarget } from '../interface';
 import { logRuntimeDebug } from '../debug';
+import { formatErrorWithCauses } from '../error-format';
 import { buildStructureRepairPrompt, formatZodErrors, tryParseAndValidate, extractJsonFromText } from '../structure-repair';
 
 const MAX_RETRIES = 3;
@@ -73,14 +74,8 @@ function shouldRetryWithoutResponseFormat(err: unknown): boolean {
 }
 
 function normalizeRuntimeError(err: unknown, baseURL?: string): Error {
-  const candidate = err as {
-    message?: string;
-    error?: {
-      message?: string;
-    };
-  };
-
-  const message = candidate?.error?.message || candidate?.message || String(err);
+  const candidate = err as { error?: { message?: string } };
+  const message = candidate?.error?.message || formatErrorWithCauses(err);
   if (baseURL === VERCEL_AI_GATEWAY_BASE_URL && /Error verifying OIDC token/i.test(message)) {
     return new Error(
       'Vercel AI Gateway rejected the configured bearer token for inference. '

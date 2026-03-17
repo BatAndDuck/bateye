@@ -74,6 +74,7 @@
   .node-rect { rx: 8; ry: 8; filter: drop-shadow(0 2px 8px rgba(0,0,0,0.4)); cursor: pointer; transition: filter 0.15s; }
   .node-rect:hover { filter: drop-shadow(0 4px 12px rgba(124,58,237,0.5)); }
   .node-selected rect { filter: drop-shadow(0 0 12px rgba(167,139,250,0.7)); }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; white-space: nowrap; }
   #summary-bar { padding: 10px 20px; background: var(--surface); border-top: 1px solid var(--border); font-size: 12px; color: var(--text-muted); display: flex; gap: 20px; flex-shrink: 0; }
   #summary-bar span { color: var(--text); font-weight: 500; }
   .tabs { display: flex; gap: 2px; padding: 8px 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
@@ -112,17 +113,19 @@
     </div>
     <div class="legend" id="legend"></div>
   </div>
-<section id="panel" class="hidden" role="region" aria-label="Details panel">
+<section id="panel" class="hidden" aria-label="Details panel">
     <div id="panel-header">
       <div id="panel-title">Details</div>
-      <button id="panel-close" aria-label="Close details panel" onclick="closePanel()" title="Close details panel">×</button>
+      <button id="panel-close" type="button" aria-label="Close details panel" onclick="closePanel()" title="Close details panel">×</button>
     </div>
-    <div class="tabs">
-      <div class="tab active" onclick="showTab('overview')">Overview</div>
-      <div class="tab" onclick="showTab('interfaces')">Interfaces</div>
-      <div class="tab" onclick="showTab('data')">Data</div>
-      <div class="tab" onclick="showTab('risks')">Risks</div>
+    <div class="tabs" role="tablist" aria-label="Panel sections">
+      <button type="button" role="tab" aria-selected="true" class="tab active" onclick="showTab('overview')" aria-controls="panel-body" id="tab-overview">Overview</button>
+      <button type="button" role="tab" aria-selected="false" class="tab" onclick="showTab('interfaces')" aria-controls="panel-body" id="tab-interfaces">Interfaces</button>
+      <button type="button" role="tab" aria-selected="false" class="tab" onclick="showTab('data')" aria-controls="panel-body" id="tab-data">Data</button>
+      <button type="button" role="tab" aria-selected="false" class="tab" onclick="showTab('risks')" aria-controls="panel-body" id="tab-risks">Risks</button>
     </div>
+    <!-- Accessible live region for tab changes -->
+    <div id="aria-status" aria-live="polite" class="sr-only"></div>
     <div id="panel-body">
       <div id="welcome"><div class="icon">🦉</div><p>Click a node to see details</p></div>
     </div>
@@ -341,9 +344,18 @@ function closePanel() {
 
 function showTab(tab, nodeOverride) {
   currentTab = tab;
+  const tabsOrder = ['overview','interfaces','data','risks'];
   document.querySelectorAll('.tab').forEach((t, i) => {
-    t.classList.toggle('active', ['overview','interfaces','data','risks'][i] === tab);
+    const isActive = tabsOrder[i] === tab;
+    t.classList.toggle('active', isActive);
+    // Ensure ARIA state reflects active tab
+    t.setAttribute('aria-selected', String(isActive));
   });
+  // Announce tab change for assistive tech
+  const ariaStatus = document.getElementById('aria-status');
+  if (ariaStatus) {
+    ariaStatus.textContent = `Viewing ${tab.charAt(0).toUpperCase() + tab.slice(1)} tab`;
+  }
   const node = nodeOverride || nodes.find(n => n.id === selectedNode);
   if (!node) return;
   const data = node.data;

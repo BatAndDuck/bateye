@@ -9,6 +9,8 @@ const {
   scopeFilesForReviewer,
   formatFilesForContext,
   buildRepoIndex,
+  calculateAuditSeedFileBudget,
+  selectAuditSeedFiles,
 } = require('../../dist/core/indexing/index');
 
 // Helpers
@@ -93,6 +95,55 @@ test('scopeFilesForReviewer returns all when recommendedGlobs match nothing', ()
   const result = scopeFilesForReviewer(index, undefined, ['nonexistent/**']);
   // When no globs match, falls through to return all candidates
   assert.ok(result.length === 2);
+});
+
+test('calculateAuditSeedFileBudget scales with repo size and reviewer type', () => {
+  const smallIndex = makeIndex(Array.from({ length: 18 }, (_, i) => `src/file${i}.ts`));
+  const largeIndex = makeIndex(Array.from({ length: 900 }, (_, i) => `src/file${i}.ts`));
+
+  const smallBudget = calculateAuditSeedFileBudget(
+    smallIndex,
+    { category: 'qa', scopeHints: ['test'] },
+    smallIndex.files.slice(0, 12),
+  );
+  const largeBudget = calculateAuditSeedFileBudget(
+    largeIndex,
+    { category: 'qa', scopeHints: ['test'] },
+    largeIndex.files.slice(0, 250),
+  );
+  const toolBudget = calculateAuditSeedFileBudget(
+    largeIndex,
+    { category: 'qa', scopeHints: ['test'], tool: { command: 'npm', args: ['test'] } },
+    largeIndex.files.slice(0, 250),
+  );
+
+  assert.equal(smallBudget, 6);
+  assert.equal(largeBudget, 26);
+  assert.equal(toolBudget, 12);
+});
+
+test('selectAuditSeedFiles prioritizes relevant config and UI files for performance reviewers', () => {
+  const index = makeIndex([
+    'docs/guide.md',
+    'package.json',
+    'src/app.tsx',
+    'src/components/button.tsx',
+    'src/utils/math.ts',
+    'test/app.test.tsx',
+    'vite.config.ts',
+  ]);
+
+  const selected = selectAuditSeedFiles(
+    index,
+    { category: 'performance', scopeHints: ['vite', 'component', 'page', 'client'] },
+    index.files,
+  ).map(file => file.relativePath);
+
+  assert.ok(selected.includes('vite.config.ts'));
+  assert.ok(selected.includes('src/components/button.tsx'));
+  assert.ok(selected.includes('src/app.tsx'));
+  assert.ok(!selected.includes('docs/guide.md'));
+  assert.ok(!selected.includes('src/utils/math.ts'));
 });
 
 // formatFilesForContext

@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { AuditResult, Finding, ReviewIssue, Reviewer, ReviewerResult } from '../../../types/index';
-import { buildRepoIndex, scopeFilesForReviewer } from '../../../core/indexing/index';
+import { buildRepoIndex, scopeFilesForReviewer, selectAuditSeedFiles } from '../../../core/indexing/index';
 import { reviewerAnalysisSchema, ReviewerAnalysis } from '../../../core/validation/schemas';
 import { buildAuditSystemPrompt, buildAuditUserMessage } from '../../../core/prompts/audit';
 import { computeOverallScore } from '../../../core/scoring/normalizer';
@@ -10,7 +10,6 @@ import { formatToolContext } from '../../../core/tools/format';
 import {
   AUDIT_OUTPUT_FILE,
   OUTPUT_DIR,
-  MAX_FILES_FOR_REVIEWER_CONTEXT,
   MAX_CONCURRENT_AUDIT_REVIEWERS,
   MAX_AUDIT_REVIEWER_TOKENS,
   MAX_AUDIT_REVIEWER_TIMEOUT_MS,
@@ -18,6 +17,7 @@ import {
 import { ensureDir, writeAuditResult } from '../../../core/output/writer';
 import { IRuntime, TokenUsage } from '../../../core/runtime/interface';
 import { getAuditRuntime } from '../../../core/runtime/factory';
+import { formatErrorWithCauses } from '../../../core/runtime/error-format';
 import { addTokens, formatTokenSummary } from '../../../core/runtime/token-utils';
 import { resolveApiKey, resolveConfig } from '../../config/application/config-service';
 import { loadReviewersForMode } from '../../reviewers/application/reviewer-registry';
@@ -102,9 +102,8 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     activeReviewers,
     MAX_CONCURRENT_AUDIT_REVIEWERS,
     async reviewer => {
-      log(`Running reviewer: ${reviewer.name}...`);
       try {
-        const result = await runSingleReviewer(reviewer, index, config, apiKey, runtime);
+        const result = await runSingleReviewer(reviewer, index, config, apiKey, runtime, log);
         if (result.execution.toolError) {
           issues.push({
             severity: reviewer.tool?.optional === false ? 'error' : 'warning',
@@ -122,15 +121,15 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
         log(`  ✓ ${reviewer.name}: score=${result.score}, findings=${result.findings.length} (${durationSec}s${tokenSuffix})`);
         return result;
       } catch (err) {
-        const msg = (err as Error).message;
+        const msg = formatErrorWithCauses(err);
         const isTimeout = /timed out after/i.test(msg);
         log(`  Warning: reviewer ${reviewer.name} failed and will be skipped: ${msg}`);
         issues.push({
           severity: 'warning',
           code: isTimeout ? 'audit-reviewer-timeout' : 'audit-reviewer-failed',
           message: isTimeout
-            ? `Reviewer "${reviewer.name}" timed out and was skipped: ${msg}`
-            : `Reviewer "${reviewer.name}" failed and was skipped: ${msg}`,
+            ? `Reviewer "${reviewer.name}" (model=${reviewer.model || config.model}) timed out and was skipped: ${msg}`
+            : `Reviewer "${reviewer.name}" (model=${reviewer.model || config.model}) failed and was skipped: ${msg}`,
           stage: 'run-reviewers',
           reviewerId: reviewer.id,
           reviewerName: reviewer.name,
@@ -240,11 +239,15 @@ async function runSingleReviewer(
   config: ReturnType<typeof resolveConfig>,
   apiKey: string,
   runtime: IRuntime,
+  log: (msg: string) => void,
 ): Promise<ReviewerResult> {
   const start = Date.now();
   const scopedFiles = scopeFilesForReviewer(index, reviewer.scopeHints);
+  const seedFiles = selectAuditSeedFiles(index, reviewer, scopedFiles);
   const model = reviewer.model || config.model;
-  const seedFiles = scopedFiles.slice(0, MAX_FILES_FOR_REVIEWER_CONTEXT).map(file => file.relativePath);
+  const seedFilePaths = seedFiles.map(file => file.relativePath);
+  const transportLabel = config.transport ? `, transport=${config.transport}` : '';
+  log(`Running reviewer: ${reviewer.name} (model=${model}, scopedFiles=${scopedFiles.length}, seedFiles=${seedFilePaths.length}${transportLabel})...`);
 
   // Run external tool if configured
   let toolContext: string | undefined;
@@ -271,7 +274,13 @@ async function runSingleReviewer(
   }
 
   const systemPrompt = buildAuditSystemPrompt(reviewer.instructions, reviewer.id, reviewer.name);
-  const userMessage = buildAuditUserMessage(seedFiles, index.totalFiles, scopedFiles.length, toolContext);
+  const userMessage = buildAuditUserMessage(
+    seedFilePaths,
+    index.totalFiles,
+    seedFilePaths.length,
+    scopedFiles.length,
+    toolContext,
+  );
 
   let analysis: ReviewerAnalysis;
   let runtimeType: import('../../../types/index').RuntimeType;
@@ -285,7 +294,7 @@ async function runSingleReviewer(
         model,
         apiKey,
         repoPath: index.repoPath,
-        initialFiles: seedFiles,
+        initialFiles: seedFilePaths,
         callLabel: reviewer.name,
         transport: config.transport,
         apiBaseUrl: config.apiBaseUrl,
@@ -298,7 +307,7 @@ async function runSingleReviewer(
     runtimeType = result.runtime;
     reviewerTokensUsed = result.tokensUsed;
   } catch (err) {
-    const msg = (err as Error).message;
+    const msg = formatErrorWithCauses(err);
     throw new Error(`Reviewer ${reviewer.id} failed: ${msg}`, { cause: err });
   }
 
