@@ -5,17 +5,7 @@ description: Identifies swallowed errors, missing async error handling, improper
 enabled: true
 mode: both
 category: code-quality
-scopeHints:
-  - service
-  - handler
-  - controller
-  - util
-  - async
-  - promise
-  - try
-  - catch
-  - error
-  - exception
+selectWhen: "almost always — select for any async functions, promise chains, try/catch blocks, service/handler code, or code that can throw or reject; skip only for pure documentation, CSS, or trivial config-value changes"
 ---
 
 Focus your review on:

@@ -5,13 +5,7 @@ description: Reviews API handlers, auth, authz, validation and sensitive data ex
 enabled: true
 mode: both
 category: security
-scopeHints:
-  - api
-  - controller
-  - route
-  - auth
-  - middleware
-  - handler
+selectWhen: "almost always — select whenever there are API endpoints, auth or authz logic, input handling, credential management, or data exposure paths; skip only for pure documentation, unit tests that mock everything, or purely internal refactors with no user-facing surface"
 ---
 
 Focus your review on:

@@ -5,12 +5,7 @@ description: Reviews maintainability, complexity, error handling, and code smell
 enabled: true
 mode: both
 category: code-quality
-scopeHints:
-  - service
-  - util
-  - helper
-  - lib
-  - module
+selectWhen: "almost always — select for any non-trivial code change; skip only for documentation-only, CSS-only, or trivial config-value-only changes"
 ---
 
 Focus your review on:

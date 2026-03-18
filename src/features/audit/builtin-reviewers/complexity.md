@@ -5,15 +5,7 @@ description: Detects excessive cyclomatic and cognitive complexity, over-enginee
 enabled: true
 mode: both
 category: code-quality
-scopeHints:
-  - service
-  - controller
-  - handler
-  - util
-  - helper
-  - component
-  - function
-  - class
+selectWhen: "select when code introduces new algorithms, complex control flow, deeply nested logic, or large functions; skip for simple additions, documentation, or configuration changes"
 ---
 
 Focus your review on:

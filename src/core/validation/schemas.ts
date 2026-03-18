@@ -142,6 +142,7 @@ export const orchestratorResultSchema = z.object({
   selectedReviewers: z.array(z.object({
     reviewerId: z.string(),
     reason: z.string(),
+    confidence: z.number().min(0).max(1),
   })),
 });
 

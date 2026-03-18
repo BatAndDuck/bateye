@@ -109,24 +109,11 @@ export function readFileContent(filePath: string, maxTokens = 8000): string {
 
 export function scopeFilesForReviewer(
   index: RepoIndex,
-  scopeHints: string[] | undefined,
 ): RepoFile[] {
-  const candidates = index.files;
-
-  if (scopeHints && scopeHints.length > 0) {
-    // Prioritize files whose paths or names contain scope hints
-    const prioritized = candidates.filter(f =>
-      scopeHints.some(hint => f.relativePath.toLowerCase().includes(hint.toLowerCase()))
-    );
-    if (prioritized.length > 0) {
-      return prioritized;
-    }
-  }
-
-  return candidates;
+  return index.files;
 }
 
-type AuditSeedReviewer = Pick<Reviewer, 'category' | 'scopeHints' | 'tool'>;
+type AuditSeedReviewer = Pick<Reviewer, 'category' | 'tool'>;
 
 export function calculateAuditSeedFileBudget(
   index: RepoIndex,
@@ -138,9 +125,7 @@ export function calculateAuditSeedFileBudget(
   let budget = baseAuditSeedBudget(index.totalFiles);
   const scopeRatio = scopedFiles.length / Math.max(index.totalFiles, 1);
 
-  if (!reviewer.scopeHints?.length) {
-    budget += 4;
-  }
+  budget += 4; // reviewers no longer have scopeHints, always apply broad budget bonus
 
   if (reviewer.category && ['architecture', 'code-quality', 'performance', 'qa', 'security'].includes(reviewer.category)) {
     budget += 2;
@@ -212,8 +197,6 @@ function scoreAuditSeedFile(file: RepoFile, reviewer: AuditSeedReviewer): number
   const normalizedPath = file.relativePath.toLowerCase();
   let score = 0;
 
-  score += countScopeHintMatches(normalizedPath, reviewer.scopeHints) * 40;
-
   if (isLikelyConfigFile(normalizedPath)) score += 25;
   if (isLikelyEntryPoint(normalizedPath)) score += 18;
   if (normalizedPath.startsWith('src/')) score += 10;
@@ -223,11 +206,6 @@ function scoreAuditSeedFile(file: RepoFile, reviewer: AuditSeedReviewer): number
   score -= normalizedPath.split('/').length - 1;
 
   return score;
-}
-
-function countScopeHintMatches(filePath: string, scopeHints: string[] | undefined): number {
-  if (!scopeHints?.length) return 0;
-  return scopeHints.reduce((count, hint) => count + (filePath.includes(hint.toLowerCase()) ? 1 : 0), 0);
 }
 
 function isLikelyConfigFile(filePath: string): boolean {

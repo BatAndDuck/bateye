@@ -5,18 +5,7 @@ description: Identifies missing timeouts, retry/backoff logic, health check issu
 enabled: true
 mode: both
 category: sre
-scopeHints:
-  - http
-  - client
-  - fetch
-  - retry
-  - timeout
-  - circuit
-  - external
-  - api
-  - service
-  - downstream
-  - upstream
+selectWhen: "select when code introduces or modifies external HTTP calls, service clients, API integrations, background workers, queue processors, or any code that depends on external systems; also when retry, timeout, circuit breaker, or health-check logic is touched"
 ---
 
 Focus your review on:

@@ -74,6 +74,7 @@ function buildFallbackReviewers(availableReviewers: Reviewer[]): OrchestratorRes
     selectedReviewers: selected.map(r => ({
       reviewerId: r.id,
       reason: 'Selected by fallback (orchestrator unavailable)',
+      confidence: 0.7,
     })),
   };
 }
@@ -105,7 +106,7 @@ export async function selectAuditReviewers(options: SelectAuditReviewersOptions)
     name: r.name,
     description: r.description,
     category: r.category,
-    scopeHints: r.scopeHints,
+    selectWhen: r.selectWhen,
   }));
 
   const systemPrompt = buildAuditOrchestratorSystemPrompt(reviewerDescriptions);

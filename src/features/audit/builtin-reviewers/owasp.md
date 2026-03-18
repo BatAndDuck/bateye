@@ -5,17 +5,7 @@ description: Scans for common web vulnerabilities including XSS, SQL injection, 
 enabled: true
 mode: both
 category: security
-scopeHints:
-  - api
-  - controller
-  - route
-  - handler
-  - query
-  - template
-  - render
-  - html
-  - sql
-  - db
+selectWhen: "almost always — select whenever there are user inputs, API endpoints, authentication flows, session management, or data persistence; skip only for pure UI cosmetic changes, documentation, or infrastructure-only PRs"
 ---
 
 Focus your review on:

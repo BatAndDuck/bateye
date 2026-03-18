@@ -5,12 +5,17 @@ import { RepoProfile } from './audit';
 
 const DIFF_PREVIEW_MAX_CHARS = 16_000;
 
-export function buildOrchestratorSystemPrompt(availableReviewers: { id: string; name: string; description?: string; scopeHints?: string[] }[]): string {
+export function buildOrchestratorSystemPrompt(availableReviewers: { id: string; name: string; description?: string; selectWhen?: string }[]): string {
   const reviewerList = availableReviewers
-    .map(r => `- id: "${r.id}", name: "${r.name}"${r.description ? ', description: "' + r.description + '"' : ''}${r.scopeHints ? ', scopeHints: [' + r.scopeHints.join(', ') + ']' : ''}`)
+    .map(r => {
+      let line = `- id: "${r.id}", name: "${r.name}"`;
+      if (r.description) line += `, description: "${r.description}"`;
+      if (r.selectWhen) line += `\n  selectWhen: "${r.selectWhen}"`;
+      return line;
+    })
     .join('\n');
 
-  return `You are a PR review orchestrator. Given a pull request diff, changed files, and commit history, select the reviewers that are relevant to investigating this PR.
+  return `You are a PR review orchestrator. Given a pull request diff, changed files, and commit history, select ALL reviewers that are relevant to this PR.
 
 ## Available Reviewers
 ${reviewerList}
@@ -24,26 +29,27 @@ Your response must look exactly like this (replace the example values):
   "selectedReviewers": [
     {
       "reviewerId": "code-quality",
-      "reason": "The diff modifies TypeScript functions and introduces new logic paths that should be reviewed for quality."
+      "reason": "The diff modifies TypeScript functions and introduces new logic paths that should be reviewed for quality.",
+      "confidence": 0.95
     },
     {
-      "reviewerId": "api-security",
-      "reason": "The diff touches authentication handling and API key management."
+      "reviewerId": "error-handling",
+      "reason": "The diff introduces async functions and promise chains without consistent error handling.",
+      "confidence": 0.85
     }
   ]
 }
 
 ## Selection Rules
 
-- Bias toward broader coverage when the PR touches production code, workflows, tests, dependency manifests, or multiple commits.
-- Scope by file type and subsystem. Include reviewers that match the changed files, surrounding subsystem, or attached tool coverage.
-- For meaningful code changes, prefer about 3 reviewers when available.
-- For multi-domain PRs, workflow changes, or larger multi-commit PRs, prefer about 5 reviewers when available.
-- Include tool-enhanced scanners when the changed files match the scanner domain and the tool can materially validate the change.
-- Avoid overlapping broad code-quality reviewers unless the diff clearly spans multiple distinct concerns.
-- Include logging/observability or resiliency reviewers only when the changed lines directly touch logging output, retries, timeouts, networking, or process reliability behavior.
-- Avoid reviewers that are clearly irrelevant to the diff, and when in doubt prefer omission over speculative overlap.
+- **Select all reviewers that are relevant** — there is no target number. A PR touching many concerns should have many reviewers; a trivial change may need only one.
+- **Use the selectWhen field** on each reviewer as the primary guide for whether to include it. If the PR content matches a reviewer's selectWhen condition, include that reviewer.
+- For reviewers without a selectWhen field, use their name and description to judge relevance against the changed files and diff content.
+- **Err toward inclusion** when in doubt. A reviewer that produces zero findings is harmless; a missed reviewer means missed issues.
+- Include reviewers for every concern visible in the diff: code quality, security, error handling, documentation, resilience, logging, tests, CI/CD, etc.
+- Exclude a reviewer only when the diff clearly has no overlap with the reviewer's domain (e.g., do not include a database reviewer for a pure UI change).
 - Never return an empty array unless the diff contains zero code changes.
+- **confidence** (0–1): rate your certainty that this reviewer is relevant. Use ≥ 0.9 when the match is obvious, 0.7–0.89 when probable, 0.5–0.69 when possible. Only include reviewers with confidence ≥ 0.5.
 - Return ONLY the JSON`;
 }
 
