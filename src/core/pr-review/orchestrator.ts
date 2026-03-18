@@ -97,6 +97,10 @@ export async function selectReviewers(
     }
   }
 
+  // No fallback to a hardcoded reviewer list — intentional design decision.
+  // A silent fallback would mask orchestrator failures and produce reviews with
+  // incomplete coverage without surfacing the underlying problem to the user.
+  // Callers should let this propagate so CI pipelines catch the failure visibly.
   throw new Error(
     `PR reviewer orchestrator failed after ${MAX_ORCHESTRATOR_ATTEMPTS} attempts: ${formatErrorWithCauses(lastError)}`,
   );
