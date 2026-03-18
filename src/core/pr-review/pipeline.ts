@@ -16,6 +16,8 @@ import { getGitDiff, getChangedFiles, getCommitSummaries, getRepoOwnerAndName, C
 import { selectReviewers } from './orchestrator';
 import { writePRReviewResult, ensureDir } from '../output/writer';
 import {
+  MAX_CONCURRENT_PR_REVIEWERS,
+  MAX_CONCURRENT_PR_REVIEWERS_THINKING,
   MAX_PR_CURRENT_CONTEXT_CHARS,
   MAX_PR_CURRENT_FILE_CHARS,
   MAX_PR_REVIEWER_TIMEOUT_MS,
@@ -202,6 +204,26 @@ function buildCurrentFileContext(repoPath: string, currentDiffFiles: string[]): 
   }).join('\n\n');
 }
 
+async function runWithConcurrency<TInput, TOutput>(
+  items: TInput[],
+  maxConcurrency: number,
+  worker: (item: TInput) => Promise<TOutput>,
+): Promise<TOutput[]> {
+  if (items.length === 0) return [];
+  const concurrency = Math.max(1, Math.min(maxConcurrency, items.length));
+  const results = new Array<TOutput>(items.length);
+  let nextIndex = 0;
+  async function runWorker(): Promise<void> {
+    while (true) {
+      const i = nextIndex++;
+      if (i >= items.length) return;
+      results[i] = await worker(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, runWorker));
+  return results;
+}
+
 export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Promise<PRReviewResult> {
   const { repoPath, onProgress } = options;
   const log = (msg: string) => onProgress?.(msg);
@@ -310,13 +332,17 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   const estTotalInput = estInputPerReviewer * selectedReviewers.length;
   log(`[token-diag] Estimated cost preview: ${selectedReviewers.length} reviewers × ~${estInputPerReviewer.toLocaleString()} input tokens/ea = ~${estTotalInput.toLocaleString()} total input tokens (agentic calls may multiply this 2-5×)`);
 
-  log(`Running ${selectedReviewers.length} agentic reviewer(s) in parallel (model: ${config.model})...`);
+  const isThinkingModel = /thinking|reasoner/i.test(config.model);
+  const maxConcurrency = isThinkingModel ? MAX_CONCURRENT_PR_REVIEWERS_THINKING : MAX_CONCURRENT_PR_REVIEWERS;
+  log(`Running ${selectedReviewers.length} agentic reviewer(s) with concurrency ${Math.min(maxConcurrency, selectedReviewers.length)} (model: ${config.model})...`);
   log(`[token-diag] Per-reviewer estimated input context: structured diff (~${Math.round(Math.min(structuredDiff.length, MAX_STRUCTURED_DIFF_CHARS) / 4).toLocaleString()} tokens) + file context (~${Math.round(currentFileContext.length / 4).toLocaleString()} tokens) + system prompt (~600 tokens)`);
 
   const intentSummary = orchestratorResult.intentSummary;
 
-  const reviewerPromises = selectedReviewers.map(reviewer =>
-    runPRReviewer(
+  const reviewerRunResults = await runWithConcurrency(
+    selectedReviewers,
+    maxConcurrency,
+    reviewer => runPRReviewer(
       reviewer,
       structuredDiff,
       currentDiffFiles,
@@ -334,7 +360,6 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       intentSummary,
     ),
   );
-  const reviewerRunResults = await Promise.all(reviewerPromises);
   const toolSummaries = reviewerRunResults
     .filter(r => r.hasTool)
     .map(r => ({ reviewerName: r.reviewerName, toolRan: r.toolRan, findingCount: r.findings.length, error: r.toolError }));

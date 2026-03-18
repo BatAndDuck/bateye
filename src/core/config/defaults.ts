@@ -42,6 +42,15 @@ export const MAX_AUDIT_REVIEWER_TIMEOUT_MS = 1_200_000;
 export const MAX_PR_REVIEWER_TIMEOUT_MS = 1_200_000;
 /** Hard cap on number of reviewers to run in a single PR review. Prevents cost explosion. */
 export const MAX_PR_REVIEWERS = 10;
+/** Maximum number of PR reviewers to run concurrently for regular (non-thinking) models. */
+export const MAX_CONCURRENT_PR_REVIEWERS = 20;
+/**
+ * Maximum number of PR reviewers to run concurrently when using a thinking/reasoning model.
+ * Thinking models are slow (2-5 min per call) and the single-threaded OpenCode server
+ * queues requests internally; too many parallel sessions cause UND_ERR_HEADERS_TIMEOUT
+ * before the server even starts sending response headers.
+ */
+export const MAX_CONCURRENT_PR_REVIEWERS_THINKING = 3;
 /** Maximum number of files an agentic PR reviewer should inspect. */
 export const MAX_PR_REVIEWER_FILES_TO_INSPECT = 20;
 /** Maximum number of supporting files a PR finding should rely on. */
