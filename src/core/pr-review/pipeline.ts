@@ -258,7 +258,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   issues.push(...orchestratorResult.issues);
 
   const selectedReviewerIds = new Set(orchestratorResult.selectedReviewers.map(r => r.reviewerId));
-  let selectedReviewers = reviewers.filter(r => selectedReviewerIds.has(r.id));
+  const selectedReviewers = reviewers.filter(r => selectedReviewerIds.has(r.id));
   if (orchestratorResult.tokensUsed) {
     log(`[token-diag] Orchestrator (${config.model}): ${formatTokenSummary(orchestratorResult.tokensUsed)}`);
   }
