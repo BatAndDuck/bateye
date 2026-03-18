@@ -253,7 +253,7 @@ test('pr-review command fails when there are no changed files between the reques
   assert.equal(fs.existsSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json')), false);
 });
 
-test('pr-review command broadens built-in reviewer coverage when the orchestrator shortlist is too narrow', () => {
+test('pr-review command uses exactly the reviewers the orchestrator selected, no more', () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-broad-coverage-'));
   initGitRepo(repoPath);
 
@@ -290,9 +290,6 @@ test('pr-review command broadens built-in reviewer coverage when the orchestrato
     ],
     agenticRuns: [
       { data: { score: 92, summary: 'No bug issues found.', findings: [] } },
-      { data: { score: 90, summary: 'No code quality issues found.', findings: [] } },
-      { data: { score: 88, summary: 'No complexity issues found.', findings: [] } },
-      { data: { score: 89, summary: 'No test-quality issues found.', findings: [] } },
     ],
   });
 
@@ -307,13 +304,13 @@ test('pr-review command broadens built-in reviewer coverage when the orchestrato
 
   const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json'), 'utf-8'));
   const selectedIds = report.selectedReviewers.map(reviewer => reviewer.reviewerId);
-  assert.deepEqual(selectedIds, ['bug-hunter', 'code-quality', 'complexity']);
+  assert.deepEqual(selectedIds, ['bug-hunter']);
 
   const runtimeLog = JSON.parse(fs.readFileSync(logPath, 'utf-8'));
-  assert.equal(runtimeLog.filter(entry => entry.type === 'runAgenticReview').length, 3);
+  assert.equal(runtimeLog.filter(entry => entry.type === 'runAgenticReview').length, 1);
 });
 
-test('pr-review command trims overlapping broad reviewers while keeping domain-specific ones', () => {
+test('pr-review command runs all reviewers the orchestrator selected without filtering', () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-stable-selection-'));
   initGitRepo(repoPath);
 
@@ -363,6 +360,8 @@ test('pr-review command trims overlapping broad reviewers while keeping domain-s
       { data: { score: 95, summary: 'ok', findings: [] } },
       { data: { score: 95, summary: 'ok', findings: [] } },
       { data: { score: 95, summary: 'ok', findings: [] } },
+      { data: { score: 95, summary: 'ok', findings: [] } },
+      { data: { score: 95, summary: 'ok', findings: [] } },
     ],
   });
 
@@ -376,7 +375,7 @@ test('pr-review command trims overlapping broad reviewers while keeping domain-s
 
   const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json'), 'utf-8'));
   const selectedIds = report.selectedReviewers.map(reviewer => reviewer.reviewerId);
-  assert.deepEqual(selectedIds, ['error-handling', 'log-reviewer', 'complexity', 'code-quality', 'test-quality', 'resiliency']);
+  assert.deepEqual(selectedIds, ['error-handling', 'log-reviewer', 'complexity', 'code-quality', 'clean-code', 'test-quality', 'resiliency', 'bug-hunter']);
 });
 
 test('pr-review command reports degraded status when review coverage is reduced by tool failures', () => {

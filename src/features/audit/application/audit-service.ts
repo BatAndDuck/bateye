@@ -33,7 +33,7 @@ const CODEOWL_VERSION: string = (packageJson as { version: string }).version;
  */
 const CONFIDENCE_FLOORS: Record<Priority, number> = {
   critical: 0.75,
-  high:     0.75,
+  high:     0.60,
   medium:   0.60,
   low:      0.50,
   info:     0.40,

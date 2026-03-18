@@ -19,7 +19,6 @@ import {
   MAX_PR_CURRENT_CONTEXT_CHARS,
   MAX_PR_CURRENT_FILE_CHARS,
   MAX_PR_REVIEWER_TIMEOUT_MS,
-  MAX_PR_REVIEWERS,
   MAX_STRUCTURED_DIFF_CHARS,
   OUTPUT_DIR,
   PR_REVIEW_OUTPUT_FILE,
@@ -57,13 +56,9 @@ const SEVERITY_ORDER: Record<string, number> = {
   critical: 4,
 };
 
-/**
- * Minimum confidence required to keep a PR finding at each priority level.
- * Mirrors the same thresholds used by the audit pipeline.
- */
 const CONFIDENCE_FLOORS: Record<Priority, number> = {
   critical: 0.75,
-  high: 0.75,
+  high: 0.60,
   medium: 0.60,
   low: 0.50,
   info: 0.40,
@@ -263,21 +258,9 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   issues.push(...orchestratorResult.issues);
 
   const selectedReviewerIds = new Set(orchestratorResult.selectedReviewers.map(r => r.reviewerId));
-  let selectedReviewers = reviewers.filter(r => selectedReviewerIds.has(r.id));
+  const selectedReviewers = reviewers.filter(r => selectedReviewerIds.has(r.id));
   if (orchestratorResult.tokensUsed) {
     log(`[token-diag] Orchestrator (${config.model}): ${formatTokenSummary(orchestratorResult.tokensUsed)}`);
-  }
-
-  // Hard cap to prevent cost explosion (e.g. orchestrator fallback or misconfigured reviewers)
-  if (selectedReviewers.length > MAX_PR_REVIEWERS) {
-    log(`⚠ WARNING: ${selectedReviewers.length} reviewers selected — exceeds hard cap of ${MAX_PR_REVIEWERS}. Trimming to first ${MAX_PR_REVIEWERS}.`);
-    issues.push({
-      severity: 'warning',
-      code: 'pr-reviewer-cap-exceeded',
-      message: `Reviewer count (${selectedReviewers.length}) exceeded hard cap (${MAX_PR_REVIEWERS}); only first ${MAX_PR_REVIEWERS} reviewers will run.`,
-      stage: 'select-reviewers',
-    });
-    selectedReviewers = selectedReviewers.slice(0, MAX_PR_REVIEWERS);
   }
 
   log(`Selected ${selectedReviewers.length} reviewer(s): ${selectedReviewers.map(r => r.name).join(', ')}`);
