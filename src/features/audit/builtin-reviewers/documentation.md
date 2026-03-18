@@ -3,14 +3,9 @@ id: documentation
 name: Documentation
 description: Reviews code documentation, README quality, and API docs completeness.
 enabled: true
-mode: audit
+mode: both
 category: documentation
-scopeHints:
-  - readme
-  - docs
-  - api
-  - interface
-  - types
+selectWhen: "almost always — select whenever new functions, exports, API endpoints, config fields, CLI flags, or user-facing behaviors are added or changed; skip only for pure test-only changes, trivial CI/CD fixes, or dependency bumps with no behavior change"
 ---
 
 Focus your review on:

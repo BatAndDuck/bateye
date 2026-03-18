@@ -5,17 +5,7 @@ description: Validates ARIA attributes, semantic HTML, color contrast, and keybo
 enabled: true
 mode: both
 category: ux
-scopeHints:
-  - component
-  - ui
-  - view
-  - page
-  - form
-  - button
-  - modal
-  - nav
-  - header
-  - dialog
+selectWhen: "select when changed files include UI components, HTML templates, JSX/TSX views, form elements, navigation, modals, or any user-facing interface code; skip for pure backend, CLI, infrastructure, or non-UI code changes"
 ---
 
 Focus your review on:

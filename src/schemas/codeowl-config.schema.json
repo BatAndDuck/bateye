@@ -30,6 +30,33 @@
       "description": "Additional paths/patterns to exclude from analysis",
       "examples": [["**/generated/**", "**/vendor/**", "**/dist/**", "**/*.pb.go"]]
     },
+    "prReview": {
+      "type": "object",
+      "description": "Configuration for the PR review command.",
+      "properties": {
+        "maxReviewers": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum number of reviewers to run in a single PR review. When the orchestrator selects more reviewers than this limit, the ones with the highest confidence scores are kept. Defaults to no limit (up to the absolute hard cap of 10).",
+          "examples": [5, 8]
+        },
+        "autoApprove": {
+          "type": "object",
+          "description": "Automatically approve the PR on GitHub if all findings are below the configured severity.",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "maxSeverity": {
+              "type": "string",
+              "enum": ["info", "low", "medium"],
+              "description": "Maximum finding severity that still allows auto-approval."
+            }
+          },
+          "required": ["enabled"],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "disabledReviewers": {
       "type": "object",
       "description": "Per-mode list of reviewer IDs to disable.",

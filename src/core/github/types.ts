@@ -45,6 +45,8 @@ export interface ReviewPlatform {
   publishStartComment(): Promise<void>;
   /** Update the summary comment if it already exists, otherwise create it */
   updateOrCreateSummary(body: string): Promise<void>;
+  /** Update the breaking-changes comment if it already exists, otherwise create it */
+  updateOrCreateBreakingChangesComment(body: string): Promise<void>;
   /** Submits a formal approval. Returns true on success, false if the token lacks permission. */
   approvePR(body: string): Promise<boolean>;
   listExistingComments(): Promise<ExistingComment[]>;

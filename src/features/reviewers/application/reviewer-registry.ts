@@ -47,7 +47,7 @@ function parseReviewerFile(
         name: String(data.name),
         description: data.description ? String(data.description) : undefined,
         enabled: data.enabled !== false,
-        scopeHints: Array.isArray(data.scopeHints) ? data.scopeHints.map(String) : undefined,
+        selectWhen: data.selectWhen ? String(data.selectWhen) : undefined,
         model: data.model ? String(data.model) : undefined,
         mode,
         category: data.category ? String(data.category) as Reviewer['category'] : undefined,

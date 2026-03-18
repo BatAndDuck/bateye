@@ -5,15 +5,7 @@ description: Reviews code for naming clarity, function design, code readability,
 enabled: true
 mode: both
 category: code-quality
-scopeHints:
-  - service
-  - util
-  - helper
-  - component
-  - handler
-  - model
-  - class
-  - function
+selectWhen: "select for any non-trivial code change where naming, readability, or code organization is relevant; skip for documentation-only, infrastructure-only, or trivial single-line changes"
 ---
 
 Focus your review on:

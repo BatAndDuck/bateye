@@ -83,8 +83,8 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
       {
         data: {
           selectedReviewers: [
-            { reviewerId: 'pr-tool', reason: 'Changed TypeScript logic needs a security scan.' },
-            { reviewerId: 'pr-follow-up', reason: 'The updated function should get a code quality pass.' },
+            { reviewerId: 'pr-tool', reason: 'Changed TypeScript logic needs a security scan.' , confidence: 0.9 },
+            { reviewerId: 'pr-follow-up', reason: 'The updated function should get a code quality pass.' , confidence: 0.9 },
           ],
         },
       },
@@ -283,7 +283,7 @@ test('pr-review command uses exactly the reviewers the orchestrator selected, no
       {
         data: {
           selectedReviewers: [
-            { reviewerId: 'bug-hunter', reason: 'Changed TypeScript logic should get a bug pass.' },
+            { reviewerId: 'bug-hunter', reason: 'Changed TypeScript logic should get a bug pass.' , confidence: 0.9 },
           ],
         },
       },
@@ -341,14 +341,14 @@ test('pr-review command runs all reviewers the orchestrator selected without fil
       {
         data: {
           selectedReviewers: [
-            { reviewerId: 'error-handling', reason: 'Error path changed.' },
-            { reviewerId: 'log-reviewer', reason: 'Logging changed.' },
-            { reviewerId: 'complexity', reason: 'Complexity changed.' },
-            { reviewerId: 'code-quality', reason: 'General code quality.' },
-            { reviewerId: 'clean-code', reason: 'Readability changed.' },
-            { reviewerId: 'test-quality', reason: 'Tests may need review.' },
-            { reviewerId: 'resiliency', reason: 'Network call changed.' },
-            { reviewerId: 'bug-hunter', reason: 'Logic changed.' },
+            { reviewerId: 'error-handling', reason: 'Error path changed.' , confidence: 0.9 },
+            { reviewerId: 'log-reviewer', reason: 'Logging changed.' , confidence: 0.9 },
+            { reviewerId: 'complexity', reason: 'Complexity changed.' , confidence: 0.9 },
+            { reviewerId: 'code-quality', reason: 'General code quality.' , confidence: 0.9 },
+            { reviewerId: 'clean-code', reason: 'Readability changed.' , confidence: 0.9 },
+            { reviewerId: 'test-quality', reason: 'Tests may need review.' , confidence: 0.9 },
+            { reviewerId: 'resiliency', reason: 'Network call changed.' , confidence: 0.9 },
+            { reviewerId: 'bug-hunter', reason: 'Logic changed.' , confidence: 0.9 },
           ],
         },
       },
@@ -427,8 +427,8 @@ Investigate code quality issues only.
       {
         data: {
           selectedReviewers: [
-            { reviewerId: 'failing-tool-reviewer', reason: 'Security pass.' },
-            { reviewerId: 'plain-reviewer', reason: 'Code quality pass.' },
+            { reviewerId: 'failing-tool-reviewer', reason: 'Security pass.' , confidence: 0.9 },
+            { reviewerId: 'plain-reviewer', reason: 'Code quality pass.' , confidence: 0.9 },
           ],
         },
       },
@@ -499,7 +499,7 @@ export function buildRepoIndex(config) {
       {
         data: {
           selectedReviewers: [
-            { reviewerId: 'bug-hunter-local', reason: 'Potential logic regression in config handling.' },
+            { reviewerId: 'bug-hunter-local', reason: 'Potential logic regression in config handling.' , confidence: 0.9 },
           ],
         },
       },
@@ -620,7 +620,7 @@ jobs:
       {
         data: {
           selectedReviewers: [
-            { reviewerId: 'ci-cd-local', reason: 'Workflow file changed.' },
+            { reviewerId: 'ci-cd-local', reason: 'Workflow file changed.' , confidence: 0.9 },
           ],
         },
       },
@@ -717,7 +717,7 @@ Report only concrete issues that still exist after investigating the current fil
       {
         data: {
           selectedReviewers: [
-            { reviewerId: 'removed-code-reviewer', reason: 'Changed function body.' },
+            { reviewerId: 'removed-code-reviewer', reason: 'Changed function body.' , confidence: 0.9 },
           ],
         },
       },
@@ -826,7 +826,7 @@ Report only concrete code quality findings after investigating the current repos
       {
         data: {
           selectedReviewers: [
-            { reviewerId: 'github-reviewer', reason: 'Updated TypeScript code should be reviewed.' },
+            { reviewerId: 'github-reviewer', reason: 'Updated TypeScript code should be reviewed.' , confidence: 0.9 },
           ],
         },
       },
@@ -987,7 +987,7 @@ Report only concrete findings anchored to the changed file.
       {
         data: {
           selectedReviewers: [
-            { reviewerId: 'github-inline-reviewer', reason: 'Changed TypeScript code should be reviewed.' },
+            { reviewerId: 'github-inline-reviewer', reason: 'Changed TypeScript code should be reviewed.' , confidence: 0.9 },
           ],
         },
       },

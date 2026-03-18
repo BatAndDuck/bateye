@@ -5,16 +5,7 @@ description: Ensures external payloads and user inputs are properly sanitized an
 enabled: true
 mode: both
 category: security
-scopeHints:
-  - api
-  - controller
-  - route
-  - handler
-  - form
-  - request
-  - body
-  - params
-  - query
+selectWhen: "select when code adds or modifies user-facing input handlers, API request parsing, form processing, query parameter handling, or any code that accepts external data; skip for purely internal transformations or read-only code"
 ---
 
 Focus your review on:

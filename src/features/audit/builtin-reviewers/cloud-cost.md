@@ -3,23 +3,9 @@ id: cloud-cost
 name: Cloud Cost
 description: Identifies over-provisioned resources, inefficient architecture choices, and forgotten or orphaned cloud resources that unnecessarily inflate infrastructure costs.
 enabled: true
-mode: audit
+mode: both
 category: infrastructure
-scopeHints:
-  - aws
-  - azure
-  - gcp
-  - lambda
-  - ec2
-  - rds
-  - s3
-  - storage
-  - instance
-  - tier
-  - size
-  - resource
-  - iac
-  - terraform
+selectWhen: "select when the PR touches cloud infrastructure definitions (Terraform, CloudFormation, CDK, Bicep, Kubernetes, Helm), cloud SDK resource provisioning calls, or configuration files that govern cloud resource sizing, tiers, or billing; skip for pure application logic changes with no infrastructure impact"
 ---
 
 Focus your review on:

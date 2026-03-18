@@ -5,19 +5,7 @@ description: Reviews CI/CD pipeline correctness, performance, security, and reli
 enabled: true
 mode: both
 category: devex
-scopeHints:
-  - ci
-  - cd
-  - pipeline
-  - workflow
-  - action
-  - deploy
-  - build
-  - test
-  - lint
-  - github
-  - gitlab
-  - jenkins
+selectWhen: "select when the PR modifies CI/CD workflow files (.github/workflows/, Jenkinsfile, .circleci/, etc.), build scripts, Dockerfile, docker-compose, Makefile, or package.json scripts; skip for pure application source code changes with no build/deploy impact"
 ---
 
 Focus your review on:

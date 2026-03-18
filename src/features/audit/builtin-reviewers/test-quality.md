@@ -5,19 +5,7 @@ description: Reviews tests for flakiness, weak assertions, mock quality problems
 enabled: true
 mode: both
 category: qa
-scopeHints:
-  - test
-  - spec
-  - jest
-  - mocha
-  - pytest
-  - vitest
-  - describe
-  - it
-  - expect
-  - assert
-  - mock
-  - stub
+selectWhen: "select when the PR adds, modifies, or removes tests, or when new features/fixes are added without corresponding tests; skip for pure documentation or infrastructure changes with no testable logic"
 ---
 
 Focus your review on:

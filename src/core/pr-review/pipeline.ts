@@ -22,6 +22,7 @@ import {
   MAX_STRUCTURED_DIFF_CHARS,
   OUTPUT_DIR,
   PR_REVIEW_OUTPUT_FILE,
+  CODEOWL_BREAKING_CHANGES_MARKER,
 } from '../config/defaults';
 import { GitHubReviewPlatform, getGitHubEnvContext } from '../github/platform';
 import { parseUnifiedDiff, buildReviewerDiffContext, getFilesInDiff } from './diff-parser';
@@ -34,6 +35,7 @@ import { formatErrorWithCauses } from '../runtime/error-format';
 import { addTokens, formatTokenSummary } from '../runtime/token-utils';
 import { runReviewerTool } from '../tools/runner';
 import { formatToolContext } from '../tools/format';
+import { logPrompt } from '../output/prompt-logger';
 
 export interface PRReviewPipelineOptions {
   repoPath: string;
@@ -116,6 +118,36 @@ function formatFindingComment(finding: PRFinding): string {
   }
 
   return comment;
+}
+
+/**
+ * Formats all breaking-change findings into a single aggregated PR comment.
+ * Each finding becomes a collapsible bullet entry rather than a separate inline thread.
+ */
+function formatBreakingChangesComment(findings: PRFinding[]): string {
+  const severityIcon = (p: string) => ({ critical: '🔴', high: '🟠', medium: '🟡', low: '🟢', info: 'ℹ️' }[p] || '•');
+
+  const entries = findings.map((f, i) => {
+    const icon = severityIcon(f.priority);
+    const loc = `\`${f.filePath}:${f.startLine}\``;
+    let entry = `### ${i + 1}. ${icon} ${f.title}\n\n`;
+    entry += `**Location:** ${loc}\n\n`;
+    entry += `${f.description}\n\n`;
+    if (f.recommendation) {
+      entry += `**Recommendation:** ${f.recommendation}\n\n`;
+    }
+    if (f.codeQuote) {
+      entry += `\`\`\`\n${f.codeQuote}\n\`\`\`\n\n`;
+    }
+    return entry.trimEnd();
+  }).join('\n\n---\n\n');
+
+  return `${CODEOWL_BREAKING_CHANGES_MARKER}
+## 🦉 CodeOwl — Breaking Changes Detected
+
+This PR introduces **${findings.length} breaking change${findings.length === 1 ? '' : 's'}**. These are listed here for visibility. Auto-approve is disabled until breaking changes are reviewed and resolved or explicitly acknowledged.
+
+${entries}`;
 }
 
 function truncate(content: string, limit: number): string {
@@ -241,8 +273,14 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   // Used to contextualise reviewer prompts (e.g. CLI tool vs web service).
   const repoProfile = buildPRRepoProfile(repoPath, changedFiles);
 
+  // Validate that the agentic runtime is available before calling the orchestrator.
+  // This surfaces errors like "cannot use CODEOWL_RUNTIME=direct" immediately.
+  const runtime = await getPRReviewRuntime();
+
   log('Loading reviewers...');
   const { reviewers } = loadReviewersForMode(repoPath, 'pr-review', config);
+
+  const promptLogDir = path.join(repoPath, OUTPUT_DIR, 'prompts');
 
   log('Selecting relevant reviewers...');
   const orchestratorResult = await selectReviewers(
@@ -252,8 +290,10 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     reviewers,
     config.model,
     apiKey,
+    config.prReview?.maxReviewers,
     config.transport,
     config.apiBaseUrl,
+    promptLogDir,
   );
   issues.push(...orchestratorResult.issues);
 
@@ -270,9 +310,10 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   const estTotalInput = estInputPerReviewer * selectedReviewers.length;
   log(`[token-diag] Estimated cost preview: ${selectedReviewers.length} reviewers × ~${estInputPerReviewer.toLocaleString()} input tokens/ea = ~${estTotalInput.toLocaleString()} total input tokens (agentic calls may multiply this 2-5×)`);
 
-  const runtime = await getPRReviewRuntime();
   log(`Running ${selectedReviewers.length} agentic reviewer(s) in parallel (model: ${config.model})...`);
   log(`[token-diag] Per-reviewer estimated input context: structured diff (~${Math.round(Math.min(structuredDiff.length, MAX_STRUCTURED_DIFF_CHARS) / 4).toLocaleString()} tokens) + file context (~${Math.round(currentFileContext.length / 4).toLocaleString()} tokens) + system prompt (~600 tokens)`);
+
+  const intentSummary = orchestratorResult.intentSummary;
 
   const reviewerPromises = selectedReviewers.map(reviewer =>
     runPRReviewer(
@@ -289,6 +330,8 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       config.apiBaseUrl,
       runtime,
       log,
+      promptLogDir,
+      intentSummary,
     ),
   );
   const reviewerRunResults = await Promise.all(reviewerPromises);
@@ -373,6 +416,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       transport: config.transport,
       apiBaseUrl: config.apiBaseUrl,
       log,
+      promptLogDir,
     });
     issues.push(...semantic.issues);
     semanticVerified = semantic.verified;
@@ -464,11 +508,16 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     generatedAt: new Date().toISOString(),
   };
 
+  // Separate breaking-change findings: these are aggregated into a single comment
+  // rather than posted as individual inline findings.
+  const breakingChangeFindings = finalFindings.filter(f => f.reviewerId === 'breaking-change');
+  const regularFindings = finalFindings.filter(f => f.reviewerId !== 'breaking-change');
+
   if (platform && !options.dryRun) {
-    log(`Posting ${finalFindings.length} inline comments to GitHub...`);
+    log(`Posting ${regularFindings.length} inline comments to GitHub...`);
 
     const postedFindings: PRFinding[] = [];
-    for (const finding of finalFindings) {
+    for (const finding of regularFindings) {
       const posted = await platform.publishInlineComment({
         body: formatFindingComment(finding),
         path: finding.filePath,
@@ -477,23 +526,32 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       if (posted) postedFindings.push(finding);
     }
 
-    if (postedFindings.length < finalFindings.length) {
-      log(`Warning: ${finalFindings.length - postedFindings.length} comment(s) could not be posted (line not in diff or GitHub API error).`);
+    if (postedFindings.length < regularFindings.length) {
+      log(`Warning: ${regularFindings.length - postedFindings.length} comment(s) could not be posted (line not in diff or GitHub API error).`);
       issues.push({
         severity: 'warning',
         code: 'pr-inline-comment-post-failed',
-        message: `${finalFindings.length - postedFindings.length} inline comment(s) could not be posted to GitHub.`,
+        message: `${regularFindings.length - postedFindings.length} inline comment(s) could not be posted to GitHub.`,
         stage: 'publish-comments',
       });
     }
 
+    // Post or update the aggregated breaking-changes comment when present.
+    if (breakingChangeFindings.length > 0) {
+      log(`Posting aggregated breaking-changes comment (${breakingChangeFindings.length} finding(s))...`);
+      const breakingBody = formatBreakingChangesComment(breakingChangeFindings);
+      await platform.updateOrCreateBreakingChangesComment(breakingBody);
+    }
+
     result.verificationStats = {
       ...verificationStats,
-      finalFindings: postedFindings.length,
+      // Count both posted inline findings and breaking-change findings in the total
+      finalFindings: postedFindings.length + breakingChangeFindings.length,
     };
     result.status = issues.length > 0 ? 'degraded' : 'complete';
-    result.summary = buildPRSummaryPrompt(postedFindings, result.status, issues, result.verificationStats, toolSummaries);
-    result.findings = postedFindings;
+    const allReportedFindings = [...postedFindings, ...breakingChangeFindings];
+    result.summary = buildPRSummaryPrompt(allReportedFindings, result.status, issues, result.verificationStats, toolSummaries);
+    result.findings = allReportedFindings;
 
     log('Updating summary comment...');
     await platform.updateOrCreateSummary(result.summary);
@@ -503,12 +561,15 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       : `<!-- codeowl-status -->\n🦉 **CodeOwl** review complete — ${postedFindings.length} findings posted.`;
     await platform.updateStatusComment(statusBody);
 
+    const hasBreakingChanges = breakingChangeFindings.length > 0;
     if (config.prReview?.autoApprove?.enabled && result.status === 'complete') {
       const maxSev = config.prReview.autoApprove.maxSeverity || 'low';
       const threshold = SEVERITY_ORDER[maxSev] ?? 1;
       const hasBlocker = postedFindings.some(f => SEVERITY_ORDER[f.priority] > threshold);
 
-      if (!hasBlocker) {
+      if (hasBreakingChanges) {
+        log('Auto-approve skipped — breaking changes detected.');
+      } else if (!hasBlocker) {
         log('Auto-approving PR (no findings exceed threshold)...');
         const approved = await platform.approvePR(
           `🦉 **CodeOwl Auto-Approve**: No findings above "${maxSev}" severity. ✅`
@@ -531,7 +592,8 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
 
     log('✓ GitHub comments posted');
   } else {
-    result.summary = buildPRSummaryPrompt(finalFindings, result.status, issues, verificationStats, toolSummaries);
+    const allReportedFindings = [...regularFindings, ...breakingChangeFindings];
+    result.summary = buildPRSummaryPrompt(allReportedFindings, result.status, issues, verificationStats, toolSummaries);
   }
 
   const outputPath = path.join(repoPath, PR_REVIEW_OUTPUT_FILE);
@@ -564,7 +626,9 @@ async function runPRReviewer(
   transport: string,
   apiBaseUrl: string | undefined,
   runtime: IRuntime,
-  log: (msg: string) => void
+  log: (msg: string) => void,
+  promptLogDir?: string,
+  intentSummary?: string,
 ): Promise<PRReviewerRunResult> {
   const issues: ReviewIssue[] = [];
   let toolContext: string | undefined;
@@ -609,8 +673,12 @@ async function runPRReviewer(
   }
 
   const systemPrompt = buildPRReviewSystemPrompt(reviewer.instructions, reviewer.id, reviewer.name, repoProfile);
-  const userMessage = buildPRReviewUserMessage(structuredDiff, currentDiffFiles, currentFileContext, toolContext, commits);
+  const userMessage = buildPRReviewUserMessage(structuredDiff, currentDiffFiles, currentFileContext, toolContext, commits, intentSummary);
   const initialFiles = currentDiffFiles;
+
+  if (promptLogDir) {
+    logPrompt(promptLogDir, `reviewer-${reviewer.id}`, systemPrompt, userMessage);
+  }
 
   try {
     log(`  Running reviewer: ${reviewer.name} (model=${reviewer.model || model}, changedFiles=${currentDiffFiles.length}, seededFiles=${initialFiles.length})...`);

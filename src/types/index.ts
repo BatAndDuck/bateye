@@ -104,6 +104,7 @@ export type PRReviewResult = {
   selectedReviewers: {
     reviewerId: string;
     reason: string;
+    confidence: number;
   }[];
   summary: string;
   findings: PRFinding[];
@@ -265,6 +266,11 @@ export type PRReviewConfig = {
     enabled: boolean;
     maxSeverity?: "info" | "low" | "medium";
   };
+  /** Maximum number of reviewers to run in a single PR review.
+   * When the orchestrator selects more reviewers than this limit, the ones with
+   * the highest confidence scores are kept. Defaults to no limit (up to the
+   * absolute hard cap MAX_PR_REVIEWERS). */
+  maxReviewers?: number;
 };
 
 /** Repository-level configuration loaded from `.codeowl/config.json`. */
@@ -326,7 +332,10 @@ export type ReviewerMetadata = {
   name: string;
   description?: string;
   enabled?: boolean;
-  scopeHints?: string[];
+  /** Short natural-language rule describing when this reviewer should be selected.
+   * Used by the orchestrator to decide relevance for a given PR or audit.
+   * Example: "almost always — skip only for pure documentation or trivial config changes" */
+  selectWhen?: string;
   model?: string;
   /** Which modes this reviewer participates in. Defaults to 'both'. */
   mode?: ReviewerMode;
@@ -389,7 +398,14 @@ export type OrchestratorResult = {
   selectedReviewers: {
     reviewerId: string;
     reason: string;
+    /** 0–1 confidence that this reviewer is relevant. Used for trimming when maxReviewers is set. */
+    confidence: number;
   }[];
+  /**
+   * Brief description of what this PR is trying to accomplish and which changes are deliberate.
+   * Passed to every reviewer so they can avoid flagging intentional decisions.
+   */
+  intentSummary?: string;
 };
 
 export type PRContext = {

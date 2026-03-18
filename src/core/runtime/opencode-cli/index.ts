@@ -693,7 +693,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
   }
 
   async run<T>(options: RunOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>> {
-    return this.executePrompt(options, schema, options.cwd || process.cwd(), 120_000);
+    return this.executePrompt(options, schema, options.cwd || process.cwd(), options.timeoutMs ?? 120_000);
   }
 
   async runAgenticReview<T>(options: AgenticRepositoryReviewOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>> {

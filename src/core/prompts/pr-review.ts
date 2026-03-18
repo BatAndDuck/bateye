@@ -5,12 +5,17 @@ import { RepoProfile } from './audit';
 
 const DIFF_PREVIEW_MAX_CHARS = 16_000;
 
-export function buildOrchestratorSystemPrompt(availableReviewers: { id: string; name: string; description?: string; scopeHints?: string[] }[]): string {
+export function buildOrchestratorSystemPrompt(availableReviewers: { id: string; name: string; description?: string; selectWhen?: string }[]): string {
   const reviewerList = availableReviewers
-    .map(r => `- id: "${r.id}", name: "${r.name}"${r.description ? ', description: "' + r.description + '"' : ''}${r.scopeHints ? ', scopeHints: [' + r.scopeHints.join(', ') + ']' : ''}`)
+    .map(r => {
+      let line = `- id: "${r.id}", name: "${r.name}"`;
+      if (r.description) line += `, description: "${r.description}"`;
+      if (r.selectWhen) line += `\n  selectWhen: "${r.selectWhen}"`;
+      return line;
+    })
     .join('\n');
 
-  return `You are a PR review orchestrator. Given a pull request diff, changed files, and commit history, select the reviewers that are relevant to investigating this PR.
+  return `You are a PR review orchestrator. Given a pull request diff, changed files, and commit history, select ALL reviewers that are relevant to this PR.
 
 ## Available Reviewers
 ${reviewerList}
@@ -21,29 +26,39 @@ CRITICAL OUTPUT RULE: Your ENTIRE response must be valid JSON. Start your respon
 
 Your response must look exactly like this (replace the example values):
 {
+  "intentSummary": "This PR introduces prompt logging to CI artifacts (all LLM calls written to .codeowl/out/prompts/) and raises the built-in reviewer cap to 20. The removal of the fallback reviewer list is deliberate — errors now propagate to surface real problems rather than silently substituting defaults.",
   "selectedReviewers": [
     {
       "reviewerId": "code-quality",
-      "reason": "The diff modifies TypeScript functions and introduces new logic paths that should be reviewed for quality."
+      "reason": "The diff modifies TypeScript functions and introduces new logic paths that should be reviewed for quality.",
+      "confidence": 0.95
     },
     {
-      "reviewerId": "api-security",
-      "reason": "The diff touches authentication handling and API key management."
+      "reviewerId": "error-handling",
+      "reason": "The diff introduces async functions and promise chains without consistent error handling.",
+      "confidence": 0.85
     }
   ]
 }
 
+## intentSummary
+
+Before selecting reviewers, write a concise (2-4 sentence) \`intentSummary\` that captures:
+1. What this PR is trying to accomplish (the primary goal).
+2. Which changes look deliberate / intentional — e.g., "logging is intentionally verbose for CI diagnostics", "fallback removed on purpose to surface errors", "API signature changed as part of a planned migration".
+
+Reviewers will receive this summary so they can skip findings about deliberate design decisions.
+
 ## Selection Rules
 
-- Bias toward broader coverage when the PR touches production code, workflows, tests, dependency manifests, or multiple commits.
-- Scope by file type and subsystem. Include reviewers that match the changed files, surrounding subsystem, or attached tool coverage.
-- For meaningful code changes, prefer about 3 reviewers when available.
-- For multi-domain PRs, workflow changes, or larger multi-commit PRs, prefer about 5 reviewers when available.
-- Include tool-enhanced scanners when the changed files match the scanner domain and the tool can materially validate the change.
-- Avoid overlapping broad code-quality reviewers unless the diff clearly spans multiple distinct concerns.
-- Include logging/observability or resiliency reviewers only when the changed lines directly touch logging output, retries, timeouts, networking, or process reliability behavior.
-- Avoid reviewers that are clearly irrelevant to the diff, and when in doubt prefer omission over speculative overlap.
+- **Select all reviewers that are relevant** — there is no target number. A PR touching many concerns should have many reviewers; a trivial change may need only one.
+- **Use the selectWhen field** on each reviewer as the primary guide for whether to include it. If the PR content matches a reviewer's selectWhen condition, include that reviewer.
+- For reviewers without a selectWhen field, use their name and description to judge relevance against the changed files and diff content.
+- **Err toward inclusion** when in doubt. A reviewer that produces zero findings is harmless; a missed reviewer means missed issues.
+- Include reviewers for every concern visible in the diff: code quality, security, error handling, documentation, resilience, logging, tests, CI/CD, etc.
+- Exclude a reviewer only when the diff clearly has no overlap with the reviewer's domain (e.g., do not include a database reviewer for a pure UI change).
 - Never return an empty array unless the diff contains zero code changes.
+- **confidence** (0–1): rate your certainty that this reviewer is relevant. Use ≥ 0.9 when the match is obvious, 0.7–0.89 when probable, 0.5–0.69 when possible. Only include reviewers with confidence ≥ 0.5.
 
 ## Signal-to-Reviewer Quick Reference
 
@@ -143,6 +158,7 @@ ${buildPRModeOverlay(reviewerId)}
 ## HOW TO DO THIS REVIEW — TWO PHASES
 
 ### PHASE 1: INVESTIGATE FIRST (form no opinions yet)
+0. **Read the "PR INTENT" section in the user message first.** It describes what the author deliberately changed and why. Any concern that matches something described there is NOT a finding — skip it immediately, before any other investigation.
 1. Open and read the changed files listed in the diff.
 2. Follow imports and references to understand context outside the diff.
 3. Use search tools to confirm whether a problem actually exists in the current codebase.
@@ -174,6 +190,7 @@ ${buildPRModeOverlay(reviewerId)}
 10c. For resiliency concerns, do not require retries, backoff, or timeout patterns unless the changed code actually performs the external/network operation in question and the missing guard creates a concrete risk now.
 10d. Do NOT report findings in documentation files (.md, .txt, .rst), template files, example files, or files that DESCRIBE anti-patterns rather than implement them. A file that lists "you should avoid doing X" is not itself a defect — only report findings in actual source code, configuration, or build files.
 10e. COMMIT INTENT: Before reporting that something is "missing", "not handled", or "inconsistent" — read the commit messages provided above. If the commit message explicitly explains the design decision, it is intentional. Do NOT report it as a finding.
+10f. PR INTENT BLOCK: The user message contains a "PR INTENT" section written by the PR orchestrator. If anything you are about to report is described there as a deliberate, planned, or expected change — DO NOT report it. Examples of things to suppress: "logging is intentional", "fallback was removed on purpose", "interface was extended by design", "cap is intentional for cost control". When in doubt, check the PR INTENT and default to NOT reporting.
 10f. DOCUMENTATION GAPS: If the changed lines introduce or modify user-facing behavior (CLI flags, config fields, API signatures, public interfaces, new commands) — check whether relevant documentation files (README.md, AGENTS.md, CLAUDE.md, docs/) reflect the change. If documentation is stale or missing, report a documentation gap finding anchored to the CHANGED CODE LINES that create the obligation (not to the documentation file itself). Set filePath, startLine, and endLine to the changed code. In the description and recommendation, specify exactly which documentation file and section needs updating.
 11. Every finding MUST include a "verificationTrail" with 1-5 entries. Use exact prefixes:
     - "file:<relative path>" for each file you inspected
@@ -216,6 +233,7 @@ export function buildPRReviewUserMessage(
   currentFileContext: string,
   additionalContext?: string,
   commits?: CommitSummary[],
+  intentSummary?: string,
 ): string {
   const maxLen = 24000;
   const diffContent = structuredDiff.length > maxLen
@@ -226,9 +244,13 @@ export function buildPRReviewUserMessage(
     ? `\n## Commit History for This PR\nUse these to understand the author's intent before flagging anything as missing or broken:\n${commits.map(c => `- ${c.sha.slice(0, 12)} ${c.subject}`).join('\n')}\n`
     : '';
 
+  const intentSection = intentSummary
+    ? `\n## ⚠ PR INTENT — READ BEFORE REPORTING ANYTHING\n\n${intentSummary}\n\nMANDATORY CHECK: Before writing any finding, ask: "Is this already described as deliberate in the PR Intent above?" If YES — skip it entirely. Do not mention it, do not soften it into a suggestion, do not report it as a risk. Silence is the correct output for intentional changes.\n`
+    : '';
+
   return `## Files Changed in This PR
 ${changedFiles.map(f => `- ${f}`).join('\n')}
-${commitSection}
+${intentSection}${commitSection}
 ## Code Changes
 
 Below are the exact changes in this PR. Each line is labeled with [Line N] showing its line number in the new file.

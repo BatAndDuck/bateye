@@ -141,14 +141,14 @@ Investigate the current repository using tools as needed, starting from the seed
 }
 
 export function buildAuditOrchestratorSystemPrompt(
-  availableReviewers: { id: string; name: string; description?: string; category?: string; scopeHints?: string[] }[],
+  availableReviewers: { id: string; name: string; description?: string; category?: string; selectWhen?: string }[],
 ): string {
   const reviewerList = availableReviewers
     .map(r => {
       const parts = [`- id: "${r.id}", name: "${r.name}"`];
       if (r.description) parts.push(`description: "${r.description}"`);
       if (r.category) parts.push(`category: "${r.category}"`);
-      if (r.scopeHints?.length) parts.push(`scopeHints: [${r.scopeHints.join(', ')}]`);
+      if (r.selectWhen) parts.push(`selectWhen: "${r.selectWhen}"`);
       return parts.join(', ');
     })
     .join('\n');
@@ -178,11 +178,13 @@ Your response must look exactly like this (replace the example values):
   "selectedReviewers": [
     {
       "reviewerId": "code-quality",
-      "reason": "Repository contains TypeScript source files with complex functions that benefit from code quality review."
+      "reason": "Repository contains TypeScript source files with complex functions that benefit from code quality review.",
+      "confidence": 0.95
     },
     {
       "reviewerId": "api-security",
-      "reason": "Repository makes external API calls and handles API keys that require security review."
+      "reason": "Repository makes external API calls and handles API keys that require security review.",
+      "confidence": 0.85
     }
   ]
 }`;

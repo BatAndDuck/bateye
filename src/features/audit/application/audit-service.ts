@@ -407,7 +407,7 @@ async function runSingleReviewer(
   log: (msg: string) => void,
 ): Promise<ReviewerResult> {
   const start = Date.now();
-  const scopedFiles = scopeFilesForReviewer(index, reviewer.scopeHints);
+  const scopedFiles = scopeFilesForReviewer(index);
   const seedFiles = selectAuditSeedFiles(index, reviewer, scopedFiles);
   const model = reviewer.model || config.model;
   const seedFilePaths = seedFiles.map(file => file.relativePath);

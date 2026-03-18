@@ -4,77 +4,33 @@ import { orchestratorResultSchema } from '../validation/schemas';
 import { buildOrchestratorSystemPrompt, buildOrchestratorUserMessage } from '../prompts/pr-review';
 import { CommitSummary } from '../git/index';
 import { formatErrorWithCauses } from '../runtime/error-format';
+import { logPrompt } from '../output/prompt-logger';
 
-const BROAD_CODE_REVIEWER_IDS = ['bug-hunter', 'code-quality', 'complexity', 'test-quality', 'clean-code', 'security-api', 'resiliency'];
-const WORKFLOW_REVIEWER_IDS = ['ci-cd'];
-const DOCS_ONLY_PATTERN = /(^|\/)(docs?|changes?)\/|\.mdx?$/i;
-const SOURCE_FILE_PATTERN = /\.(cjs|cts|go|java|js|jsx|mjs|mts|php|py|rb|rs|sh|sql|ts|tsx|ya?ml)$/i;
-const TEST_FILE_PATTERN = /(^|\/)(test|tests|spec|specs|__tests__)\/|(\.test\.|\.(spec|e2e)\.)/i;
-const WORKFLOW_FILE_PATTERN = /(^|\/)\.github\/workflows\/|(^|\/)(docker-compose|Dockerfile|Makefile|package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i;
+/** Absolute hard cap on built-in reviewer count — prevents runaway costs if orchestrator over-selects */
+const ABSOLUTE_MAX_PR_REVIEWERS = 20;
 
-function isDocsOnlyChange(changedFiles: string[]): boolean {
-  return changedFiles.length > 0 && changedFiles.every(file => DOCS_ONLY_PATTERN.test(file));
-}
+/** Maximum number of orchestrator call attempts before propagating the error */
+const MAX_ORCHESTRATOR_ATTEMPTS = 3;
 
-function needsWorkflowCoverage(changedFiles: string[]): boolean {
-  return changedFiles.some(file => WORKFLOW_FILE_PATTERN.test(file));
-}
-
-function needsCodeCoverage(changedFiles: string[]): boolean {
-  return changedFiles.some(file => SOURCE_FILE_PATTERN.test(file) && !DOCS_ONLY_PATTERN.test(file));
-}
-
-function minimumReviewerCount(changedFiles: string[], commits: CommitSummary[]): number {
-  if (isDocsOnlyChange(changedFiles)) return 2;
-
-  const workflowCoverage = needsWorkflowCoverage(changedFiles);
-  const codeCoverage = needsCodeCoverage(changedFiles);
-  const testCoverage = changedFiles.some(file => TEST_FILE_PATTERN.test(file));
-  const multiDomain = [workflowCoverage, codeCoverage, testCoverage].filter(Boolean).length >= 2;
-  const largerPr = changedFiles.length >= 8 || commits.length >= 4;
-
-  if (multiDomain || largerPr) return 5;
-  if (codeCoverage || workflowCoverage || changedFiles.length > 0) return 3;
-  return 2;
-}
-
-function broadenReviewerSelection(
-  initial: OrchestratorResult,
+/**
+ * Trim the built-in reviewer selection to `limit`, preferring those with the highest confidence.
+ * Custom reviewers (isBuiltIn=false) always bypass this cap and are included unconditionally.
+ */
+function trimByConfidence(
+  selection: OrchestratorResult['selectedReviewers'],
   availableReviewers: Reviewer[],
-  changedFiles: string[],
-  commits: CommitSummary[],
-): OrchestratorResult {
-  if (availableReviewers.some(reviewer => !reviewer.isBuiltIn)) {
-    return initial;
-  }
+  limit: number,
+): OrchestratorResult['selectedReviewers'] {
+  const isBuiltInMap = new Map(availableReviewers.map(r => [r.id, r.isBuiltIn]));
 
-  const selected = [...initial.selectedReviewers];
-  const selectedIds = new Set(selected.map(reviewer => reviewer.reviewerId));
-  const minimum = minimumReviewerCount(changedFiles, commits);
+  const custom = selection.filter(s => isBuiltInMap.get(s.reviewerId) === false);
+  const builtIn = selection.filter(s => isBuiltInMap.get(s.reviewerId) === true);
 
-  const preferredIds = [
-    ...BROAD_CODE_REVIEWER_IDS,
-    ...(needsWorkflowCoverage(changedFiles) ? WORKFLOW_REVIEWER_IDS : []),
-  ];
+  const cappedBuiltIn = builtIn.length <= limit
+    ? builtIn
+    : [...builtIn].sort((a, b) => b.confidence - a.confidence).slice(0, limit);
 
-  for (const reviewerId of preferredIds) {
-    if (selectedIds.has(reviewerId)) continue;
-
-    const reviewer = availableReviewers.find(candidate => candidate.id === reviewerId);
-    if (!reviewer) continue;
-
-    selected.push({
-      reviewerId,
-      reason: 'Added automatically to broaden baseline PR coverage for this change set.',
-    });
-    selectedIds.add(reviewerId);
-
-    if (selected.length >= minimum) {
-      break;
-    }
-  }
-
-  return { selectedReviewers: selected };
+  return [...custom, ...cappedBuiltIn];
 }
 
 export interface ReviewerSelectionResult extends OrchestratorResult {
@@ -89,8 +45,10 @@ export async function selectReviewers(
   availableReviewers: Reviewer[],
   model: string,
   apiKey: string,
+  maxReviewers?: number,
   transport?: string,
   apiBaseUrl?: string,
+  promptLogDir?: string,
 ): Promise<ReviewerSelectionResult> {
   const runtime = await getStructuredRuntime();
 
@@ -98,43 +56,52 @@ export async function selectReviewers(
     id: r.id,
     name: r.name,
     description: r.description,
-    scopeHints: r.scopeHints,
+    selectWhen: r.selectWhen,
   }));
 
   const systemPrompt = buildOrchestratorSystemPrompt(reviewerDescriptions);
   const userMessage = buildOrchestratorUserMessage(changedFiles, diff, commits);
 
-  try {
-    const result = await runtime.run<OrchestratorResult>(
-      { systemPrompt, userMessage, model, apiKey, transport, apiBaseUrl, maxTokens: 4096, temperature: 0, callLabel: 'orchestrator' },
-      orchestratorResultSchema
-    );
-    return {
-      ...result.data,
-      issues: [],
-      tokensUsed: result.tokensUsed,
-    };
-  } catch (err) {
-    // Orchestrator failed — fall back to a SMALL core set using the same
-    // broadening logic that normally supplements the AI's selection.
-    // NEVER fall back to ALL reviewers: that causes catastrophic cost explosion.
-    const fallbackSelection = broadenReviewerSelection(
-      { selectedReviewers: [] },
-      availableReviewers,
-      changedFiles,
-      commits,
-    );
+  const effectiveLimit = maxReviewers ?? ABSOLUTE_MAX_PR_REVIEWERS;
+  const availableIds = new Set(availableReviewers.map(r => r.id));
 
-    return {
-      ...fallbackSelection,
-      issues: [
-        {
-          severity: 'warning',
-          code: 'pr-orchestrator-fallback',
-          message: `PR reviewer orchestrator failed (${formatErrorWithCauses(err)}); using ${fallbackSelection.selectedReviewers.length} core reviewer(s) as fallback.`,
-          stage: 'select-reviewers',
-        },
-      ],
-    };
+  if (promptLogDir) {
+    logPrompt(promptLogDir, 'orchestrator', systemPrompt, userMessage);
   }
+
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= MAX_ORCHESTRATOR_ATTEMPTS; attempt++) {
+    try {
+      const result = await runtime.run<OrchestratorResult>(
+        { systemPrompt, userMessage, model, apiKey, transport, apiBaseUrl, maxTokens: 4096, temperature: 0, callLabel: 'orchestrator' },
+        orchestratorResultSchema,
+      );
+
+      // Filter to reviewers that actually exist in the available set
+      const validSelection = result.data.selectedReviewers.filter(s => availableIds.has(s.reviewerId));
+
+      // Apply configured or hard cap; custom reviewers bypass the built-in cap
+      const trimmed = trimByConfidence(validSelection, availableReviewers, effectiveLimit);
+
+      return {
+        selectedReviewers: trimmed,
+        issues: [],
+        tokensUsed: result.tokensUsed,
+      };
+    } catch (err) {
+      lastError = err;
+      if (attempt < MAX_ORCHESTRATOR_ATTEMPTS) {
+        await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+      }
+    }
+  }
+
+  // No fallback to a hardcoded reviewer list — intentional design decision.
+  // A silent fallback would mask orchestrator failures and produce reviews with
+  // incomplete coverage without surfacing the underlying problem to the user.
+  // Callers should let this propagate so CI pipelines catch the failure visibly.
+  throw new Error(
+    `PR reviewer orchestrator failed after ${MAX_ORCHESTRATOR_ATTEMPTS} attempts: ${formatErrorWithCauses(lastError)}`,
+  );
 }

@@ -1,7 +1,7 @@
 import { Octokit } from 'octokit';
 import { ReviewPlatform, PullRequestContext, InlineComment, ExistingComment } from './types';
 import { getGitDiff, getChangedFiles } from '../git/index';
-import { CODEOWL_SUMMARY_MARKER, CODEOWL_STATUS_MARKER } from '../config/defaults';
+import { CODEOWL_SUMMARY_MARKER, CODEOWL_STATUS_MARKER, CODEOWL_BREAKING_CHANGES_MARKER } from '../config/defaults';
 
 export class GitHubReviewPlatform implements ReviewPlatform {
   private octokit: Octokit;
@@ -158,6 +158,16 @@ export class GitHubReviewPlatform implements ReviewPlatform {
 
   async updateOrCreateSummary(body: string): Promise<void> {
     const existing = await this.findSummaryComment();
+    if (existing) {
+      await this.updateComment(existing.id, body);
+    } else {
+      await this.publishSummaryComment(body);
+    }
+  }
+
+  async updateOrCreateBreakingChangesComment(body: string): Promise<void> {
+    const comments = await this.listExistingComments();
+    const existing = comments.find(c => c.body.includes(CODEOWL_BREAKING_CHANGES_MARKER));
     if (existing) {
       await this.updateComment(existing.id, body);
     } else {

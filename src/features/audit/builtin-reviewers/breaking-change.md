@@ -5,15 +5,7 @@ description: Identifies changes that break backward compatibility for API consum
 enabled: true
 mode: pr-review
 category: architecture
-scopeHints:
-  - api
-  - interface
-  - type
-  - schema
-  - route
-  - contract
-  - export
-  - public
+selectWhen: "select when public APIs, exported interfaces, CLI command signatures, config file schemas, database schemas, or event contracts are modified; skip for pure internal refactors with no external contract changes"
 ---
 
 Focus your review on:

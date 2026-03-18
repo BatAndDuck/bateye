@@ -13,6 +13,8 @@ export interface RunOptions {
   temperature?: number;
   /** Human-readable label for diagnostics (e.g. reviewer name). Shown in runtime log lines. */
   callLabel?: string;
+  /** Per-call timeout in milliseconds. Defaults to 120 000 when not set. */
+  timeoutMs?: number;
 }
 
 export interface AgenticPRReviewOptions extends RunOptions {

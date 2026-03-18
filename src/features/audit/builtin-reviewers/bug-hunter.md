@@ -5,17 +5,7 @@ description: Hunts for logic errors, null/undefined safety issues, unhandled edg
 enabled: true
 mode: both
 category: qa
-scopeHints:
-  - logic
-  - condition
-  - calculation
-  - validation
-  - edge
-  - case
-  - null
-  - undefined
-  - boundary
-  - overflow
+selectWhen: "almost always — select for any logic, validation, data transformation, control flow, or state-management changes; skip only for pure documentation, CSS, or infrastructure-only changes with no application logic"
 ---
 
 Focus your review on:

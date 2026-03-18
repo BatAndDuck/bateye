@@ -11,6 +11,7 @@ import {
 } from '../prompts/pr-review';
 import { collectVerificationTrailFiles, RejectedFinding } from './verifier';
 import { DiffHunk, ParsedDiff } from './diff-parser';
+import { logPrompt } from '../output/prompt-logger';
 
 export interface SemanticVerificationResult {
   verified: PRFinding[];
@@ -28,11 +29,28 @@ export interface SemanticVerifierOptions {
   transport: string;
   apiBaseUrl?: string;
   log?: (message: string) => void;
+  promptLogDir?: string;
 }
 
 /** Number of findings to verify per AI call. Batching reduces total call count substantially. */
 const VERIFICATION_BATCH_SIZE = 5;
 const DIFF_TOLERANCE_LINES = 3;
+/** Per-batch LLM call timeout — longer than the default 120s to survive cold-start DB migrations. */
+const SEMANTIC_VERIFIER_TIMEOUT_MS = 240_000;
+/** Maximum retry attempts per batch when a transient error (timeout, connection reset) occurs. */
+const BATCH_MAX_ATTEMPTS = 3;
+
+function isTransientError(err: unknown): boolean {
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return (
+    msg.includes('timed out') ||
+    msg.includes('timeout') ||
+    msg.includes('econnreset') ||
+    msg.includes('socket hang up') ||
+    msg.includes('aborted') ||
+    msg.includes('network')
+  );
+}
 
 function readFileContent(repoPath: string, filePath: string): string | null {
   try {
@@ -101,42 +119,64 @@ type SemanticVerdict = {
 async function verifyBatch(
   batch: FindingWithContext[],
   options: SemanticVerifierOptions,
+  batchIndex: number,
 ): Promise<{
   results: Map<string, SemanticVerdict>;
   tokensUsed?: TokenUsage;
   error?: string;
 }> {
   const maxTokens = Math.max(1024, VERIFICATION_BATCH_SIZE * 512);
+  const systemPrompt = buildPRFindingBatchVerificationSystemPrompt();
+  const userMessage = buildPRFindingBatchVerificationUserMessage(batch);
 
-  try {
-    const result = await options.runtime.run(
-      {
-        systemPrompt: buildPRFindingBatchVerificationSystemPrompt(),
-        userMessage: buildPRFindingBatchVerificationUserMessage(batch),
-        model: options.model,
-        apiKey: options.apiKey,
-        transport: options.transport,
-        apiBaseUrl: options.apiBaseUrl,
-        maxTokens,
-        temperature: 0,
-        cwd: options.repoPath,
-        callLabel: 'semantic-verifier',
-      },
-      prFindingBatchVerificationSchema,
-    );
-
-    const resultMap = new Map<string, SemanticVerdict>();
-    for (const v of result.data.verifications) {
-      resultMap.set(v.findingId, {
-        supported: v.supported,
-        classification: v.classification,
-        reason: v.reason,
-      });
-    }
-    return { results: resultMap, tokensUsed: result.tokensUsed };
-  } catch (err) {
-    return { results: new Map(), error: (err as Error).message };
+  if (options.promptLogDir) {
+    logPrompt(options.promptLogDir, `semantic-verifier-batch${batchIndex}`, systemPrompt, userMessage);
   }
+
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= BATCH_MAX_ATTEMPTS; attempt++) {
+    try {
+      const result = await options.runtime.run(
+        {
+          systemPrompt,
+          userMessage,
+          model: options.model,
+          apiKey: options.apiKey,
+          transport: options.transport,
+          apiBaseUrl: options.apiBaseUrl,
+          maxTokens,
+          temperature: 0,
+          cwd: options.repoPath,
+          callLabel: `semantic-verifier-b${batchIndex}`,
+          timeoutMs: SEMANTIC_VERIFIER_TIMEOUT_MS,
+        },
+        prFindingBatchVerificationSchema,
+      );
+
+      const resultMap = new Map<string, SemanticVerdict>();
+      for (const v of result.data.verifications) {
+        resultMap.set(v.findingId, {
+          supported: v.supported,
+          classification: v.classification,
+          reason: v.reason,
+        });
+      }
+      return { results: resultMap, tokensUsed: result.tokensUsed };
+    } catch (err) {
+      lastError = err;
+      const transient = isTransientError(err);
+      if (transient && attempt < BATCH_MAX_ATTEMPTS) {
+        const delayMs = 5_000 * attempt; // 5s, 10s
+        options.log?.(`  ⚠ Semantic verifier batch ${batchIndex + 1} attempt ${attempt}/${BATCH_MAX_ATTEMPTS} failed (transient), retrying in ${delayMs / 1000}s: ${(err as Error).message.slice(0, 120)}`);
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+        continue;
+      }
+      break;
+    }
+  }
+
+  return { results: new Map(), error: (lastError as Error).message };
 }
 
 export async function verifyFindingsSemantically(
@@ -184,7 +224,13 @@ export async function verifyFindingsSemantically(
 
   options.log?.(`  Semantic verification: ${findingsWithContext.length} finding(s) in ${batches.length} batch(es) using ${options.model}`);
 
-  const batchResults = await Promise.all(batches.map(batch => verifyBatch(batch, options)));
+  // Run batches sequentially so the OpenCode server processes one at a time.
+  // Parallel batches compete for the single-threaded server and risk hitting the
+  // per-request timeout when a cold-start DB migration is still in progress.
+  const batchResults: Awaited<ReturnType<typeof verifyBatch>>[] = [];
+  for (let i = 0; i < batches.length; i++) {
+    batchResults.push(await verifyBatch(batches[i], options, i));
+  }
 
   for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
     const batch = batches[batchIdx];

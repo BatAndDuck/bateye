@@ -5,20 +5,7 @@ description: Reviews log level appropriateness, log content quality, PII and sec
 enabled: true
 mode: both
 category: sre
-scopeHints:
-  - log
-  - logger
-  - logging
-  - console
-  - winston
-  - pino
-  - bunyan
-  - logrus
-  - zap
-  - slog
-  - error
-  - warning
-  - info
+selectWhen: "select when changed code adds, modifies, or removes logging statements, console output, logger calls, or observability instrumentation; skip for changes that contain no logging-related code"
 ---
 
 Focus your review on:

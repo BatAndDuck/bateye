@@ -65,4 +65,10 @@ export const DEFAULT_TOOL_MAX_OUTPUT_CHARS = 50_000;
 
 export const CODEOWL_SUMMARY_MARKER = '<!-- codeowl-summary -->';
 export const CODEOWL_STATUS_MARKER = '<!-- codeowl-status -->';
+/**
+ * HTML comment marker injected at the start of the aggregated breaking-changes PR comment.
+ * The pipeline uses this marker to locate and update the comment on re-runs rather than
+ * creating a duplicate. When present, auto-approve is disabled for the PR.
+ */
+export const CODEOWL_BREAKING_CHANGES_MARKER = '<!-- codeowl-breaking-changes -->';
 export const CODEOWL_COMMENT_MARKER = '[CodeOwl';

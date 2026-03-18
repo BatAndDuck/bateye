@@ -5,19 +5,7 @@ description: Reviews how sensitive and personal data is stored, whether data min
 enabled: true
 mode: both
 category: database
-scopeHints:
-  - user
-  - profile
-  - personal
-  - email
-  - phone
-  - address
-  - password
-  - secret
-  - sensitive
-  - pii
-  - store
-  - persist
+selectWhen: "select when code handles personal data, user profiles, emails, IP addresses, payment info, health records, or any PII; also when adding analytics, logging, or external data transmission; skip for pure infrastructure or non-data-touching changes"
 ---
 
 Focus your review on:
