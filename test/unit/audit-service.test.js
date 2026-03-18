@@ -338,9 +338,7 @@ id: frontend-seeding
 name: Frontend Seeding
 mode: audit
 category: performance
-scopeHints:
-  - component
-  - vite
+selectWhen: "select when the PR touches frontend build config or UI components"
 ---
 Review frontend bundle signals.
 `,
@@ -377,11 +375,11 @@ Review frontend bundle signals.
     );
 
     assert.ok(capturedOptions);
-    assert.equal(capturedOptions.initialFiles.length, 6);
+    assert.equal(capturedOptions.initialFiles.length, 10);
     assert.ok(capturedOptions.initialFiles.includes('vite.config.ts'));
     assert.ok(capturedOptions.initialFiles.includes('src/components/component-0.tsx'));
-    assert.match(capturedOptions.userMessage, /Files matching reviewer scope: 21/);
-    assert.match(capturedOptions.userMessage, /Seed files provided for analysis: 6/);
+    assert.match(capturedOptions.userMessage, /Files matching reviewer scope: 23/);
+    assert.match(capturedOptions.userMessage, /Seed files provided for analysis: 10/);
   } finally {
     restoreApiKey();
   }

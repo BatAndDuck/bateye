@@ -210,8 +210,8 @@ test('serviceDesignDocSchema rejects invalid public interface type', () => {
 test('orchestratorResultSchema accepts valid data with reviewers', () => {
   const result = orchestratorResultSchema.safeParse({
     selectedReviewers: [
-      { reviewerId: 'code-quality', reason: 'Relevant for this PR' },
-      { reviewerId: 'security-api', reason: 'API changes detected' },
+      { reviewerId: 'code-quality', reason: 'Relevant for this PR', confidence: 0.95 },
+      { reviewerId: 'security-api', reason: 'API changes detected', confidence: 0.8 },
     ],
   });
   assert.ok(result.success);
