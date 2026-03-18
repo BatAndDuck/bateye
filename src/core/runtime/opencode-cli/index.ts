@@ -742,23 +742,31 @@ export class OpenCodeCLIRuntime implements IRuntime {
         }, 30_000);
         sessionID = session.id;
 
+        // Thinking / reasoning models (e.g. deepseek-reasoner, *-thinking) do not support
+        // tool_choice, which OpenCode uses internally to enforce json_schema structured output.
+        // For those models we omit the format field and rely on prompt-based JSON extraction.
+        const isThinkingModel = /thinking|reasoner/i.test(target.modelId);
+        const messageBody: Record<string, unknown> = {
+          model: {
+            providerID: target.transport,
+            modelID: target.modelId,
+          },
+          system: options.systemPrompt + validationRetryNote,
+          parts: [{ type: 'text', text: options.userMessage }],
+        };
+        if (!isThinkingModel) {
+          messageBody.format = {
+            type: 'json_schema',
+            name: 'CodeOwlResponse',
+            schema: responseSchema,
+            retryCount: OPEN_CODE_STRUCTURED_OUTPUT_RETRY_COUNT,
+          };
+        }
+
         const response = await this.request<OpenCodeMessageResponse>(`${server.url}/session/${sessionID}/message`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({
-            model: {
-              providerID: target.transport,
-              modelID: target.modelId,
-            },
-            format: {
-              type: 'json_schema',
-              name: 'CodeOwlResponse',
-              schema: responseSchema,
-              retryCount: OPEN_CODE_STRUCTURED_OUTPUT_RETRY_COUNT,
-            },
-            system: options.systemPrompt + validationRetryNote,
-            parts: [{ type: 'text', text: options.userMessage }],
-          }),
+          body: JSON.stringify(messageBody),
         }, timeoutMs);
 
         const providerError = response?.info?.error?.data?.message || response?.info?.error?.message;
