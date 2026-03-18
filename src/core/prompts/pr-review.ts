@@ -26,6 +26,7 @@ CRITICAL OUTPUT RULE: Your ENTIRE response must be valid JSON. Start your respon
 
 Your response must look exactly like this (replace the example values):
 {
+  "intentSummary": "This PR introduces prompt logging to CI artifacts (all LLM calls written to .codeowl/out/prompts/) and raises the built-in reviewer cap to 20. The removal of the fallback reviewer list is deliberate — errors now propagate to surface real problems rather than silently substituting defaults.",
   "selectedReviewers": [
     {
       "reviewerId": "code-quality",
@@ -39,6 +40,14 @@ Your response must look exactly like this (replace the example values):
     }
   ]
 }
+
+## intentSummary
+
+Before selecting reviewers, write a concise (2-4 sentence) \`intentSummary\` that captures:
+1. What this PR is trying to accomplish (the primary goal).
+2. Which changes look deliberate / intentional — e.g., "logging is intentionally verbose for CI diagnostics", "fallback removed on purpose to surface errors", "API signature changed as part of a planned migration".
+
+Reviewers will receive this summary so they can skip findings about deliberate design decisions.
 
 ## Selection Rules
 
@@ -222,6 +231,7 @@ export function buildPRReviewUserMessage(
   currentFileContext: string,
   additionalContext?: string,
   commits?: CommitSummary[],
+  intentSummary?: string,
 ): string {
   const maxLen = 24000;
   const diffContent = structuredDiff.length > maxLen
@@ -232,9 +242,13 @@ export function buildPRReviewUserMessage(
     ? `\n## Commit History for This PR\nUse these to understand the author's intent before flagging anything as missing or broken:\n${commits.map(c => `- ${c.sha.slice(0, 12)} ${c.subject}`).join('\n')}\n`
     : '';
 
+  const intentSection = intentSummary
+    ? `\n## PR Intent (orchestrator analysis)\n${intentSummary}\nIf a finding you are about to report is already described as intentional above, do NOT report it.\n`
+    : '';
+
   return `## Files Changed in This PR
 ${changedFiles.map(f => `- ${f}`).join('\n')}
-${commitSection}
+${commitSection}${intentSection}
 ## Code Changes
 
 Below are the exact changes in this PR. Each line is labeled with [Line N] showing its line number in the new file.

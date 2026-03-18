@@ -144,6 +144,7 @@ export const orchestratorResultSchema = z.object({
     reason: z.string(),
     confidence: z.number().min(0).max(1),
   })),
+  intentSummary: z.string().optional(),
 });
 
 export const systemSynthesisSchema = z.object({

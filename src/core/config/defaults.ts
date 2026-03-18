@@ -65,4 +65,5 @@ export const DEFAULT_TOOL_MAX_OUTPUT_CHARS = 50_000;
 
 export const CODEOWL_SUMMARY_MARKER = '<!-- codeowl-summary -->';
 export const CODEOWL_STATUS_MARKER = '<!-- codeowl-status -->';
+export const CODEOWL_BREAKING_CHANGES_MARKER = '<!-- codeowl-breaking-changes -->';
 export const CODEOWL_COMMENT_MARKER = '[CodeOwl';

@@ -401,6 +401,11 @@ export type OrchestratorResult = {
     /** 0–1 confidence that this reviewer is relevant. Used for trimming when maxReviewers is set. */
     confidence: number;
   }[];
+  /**
+   * Brief description of what this PR is trying to accomplish and which changes are deliberate.
+   * Passed to every reviewer so they can avoid flagging intentional decisions.
+   */
+  intentSummary?: string;
 };
 
 export type PRContext = {
