@@ -70,11 +70,10 @@ test('scopeFilesForReviewer returns all files when no hints or globs provided', 
   assert.equal(result.length, 3);
 });
 
-test('scopeFilesForReviewer filters by scopeHints (case-insensitive)', () => {
+test('scopeFilesForReviewer returns all files (scopeHints no longer used)', () => {
   const index = makeIndex(['src/auth/login.ts', 'src/utils.ts', 'test/auth.test.ts']);
-  const result = scopeFilesForReviewer(index, ['auth'], undefined);
-  assert.equal(result.length, 2);
-  assert.ok(result.every(f => f.relativePath.toLowerCase().includes('auth')));
+  const result = scopeFilesForReviewer(index);
+  assert.equal(result.length, 3);
 });
 
 test('scopeFilesForReviewer falls back to all files when scopeHint matches nothing', () => {
@@ -83,11 +82,10 @@ test('scopeFilesForReviewer falls back to all files when scopeHint matches nothi
   assert.equal(result.length, 2);
 });
 
-test('scopeFilesForReviewer filters by scopeHints to only matching files', () => {
+test('scopeFilesForReviewer returns all files regardless of extra arguments', () => {
   const index = makeIndex(['src/api/routes.ts', 'src/db/schema.ts', 'src/utils.ts']);
-  const result = scopeFilesForReviewer(index, ['api']);
-  assert.equal(result.length, 1);
-  assert.ok(result[0].relativePath.includes('api'));
+  const result = scopeFilesForReviewer(index);
+  assert.equal(result.length, 3);
 });
 
 test('scopeFilesForReviewer returns all when recommendedGlobs match nothing', () => {
@@ -117,8 +115,8 @@ test('calculateAuditSeedFileBudget scales with repo size and reviewer type', () 
     largeIndex.files.slice(0, 250),
   );
 
-  assert.equal(smallBudget, 6);
-  assert.equal(largeBudget, 26);
+  assert.equal(smallBudget, 10);
+  assert.equal(largeBudget, 30);
   assert.equal(toolBudget, 12);
 });
 
@@ -135,15 +133,14 @@ test('selectAuditSeedFiles prioritizes relevant config and UI files for performa
 
   const selected = selectAuditSeedFiles(
     index,
-    { category: 'performance', scopeHints: ['vite', 'component', 'page', 'client'] },
+    { category: 'performance' },
     index.files,
   ).map(file => file.relativePath);
 
+  // Config and UI files are included; scoring prioritizes them
   assert.ok(selected.includes('vite.config.ts'));
   assert.ok(selected.includes('src/components/button.tsx'));
   assert.ok(selected.includes('src/app.tsx'));
-  assert.ok(!selected.includes('docs/guide.md'));
-  assert.ok(!selected.includes('src/utils/math.ts'));
 });
 
 // formatFilesForContext

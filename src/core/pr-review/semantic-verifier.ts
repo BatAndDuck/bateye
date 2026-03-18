@@ -11,6 +11,7 @@ import {
 } from '../prompts/pr-review';
 import { collectVerificationTrailFiles, RejectedFinding } from './verifier';
 import { DiffHunk, ParsedDiff } from './diff-parser';
+import { logPrompt } from '../output/prompt-logger';
 
 export interface SemanticVerificationResult {
   verified: PRFinding[];
@@ -28,6 +29,7 @@ export interface SemanticVerifierOptions {
   transport: string;
   apiBaseUrl?: string;
   log?: (message: string) => void;
+  promptLogDir?: string;
 }
 
 /** Number of findings to verify per AI call. Batching reduces total call count substantially. */
@@ -101,18 +103,25 @@ type SemanticVerdict = {
 async function verifyBatch(
   batch: FindingWithContext[],
   options: SemanticVerifierOptions,
+  batchIndex: number,
 ): Promise<{
   results: Map<string, SemanticVerdict>;
   tokensUsed?: TokenUsage;
   error?: string;
 }> {
   const maxTokens = Math.max(1024, VERIFICATION_BATCH_SIZE * 512);
+  const systemPrompt = buildPRFindingBatchVerificationSystemPrompt();
+  const userMessage = buildPRFindingBatchVerificationUserMessage(batch);
+
+  if (options.promptLogDir) {
+    logPrompt(options.promptLogDir, `semantic-verifier-batch${batchIndex}`, systemPrompt, userMessage);
+  }
 
   try {
     const result = await options.runtime.run(
       {
-        systemPrompt: buildPRFindingBatchVerificationSystemPrompt(),
-        userMessage: buildPRFindingBatchVerificationUserMessage(batch),
+        systemPrompt,
+        userMessage,
         model: options.model,
         apiKey: options.apiKey,
         transport: options.transport,
@@ -184,7 +193,7 @@ export async function verifyFindingsSemantically(
 
   options.log?.(`  Semantic verification: ${findingsWithContext.length} finding(s) in ${batches.length} batch(es) using ${options.model}`);
 
-  const batchResults = await Promise.all(batches.map(batch => verifyBatch(batch, options)));
+  const batchResults = await Promise.all(batches.map((batch, i) => verifyBatch(batch, options, i)));
 
   for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
     const batch = batches[batchIdx];

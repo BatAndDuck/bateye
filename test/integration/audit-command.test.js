@@ -26,9 +26,9 @@ test('audit command uses built-in reviewers and reaches the mocked runtime', () 
       {
         data: {
           selectedReviewers: [
-            { reviewerId: 'code-quality',  reason: 'General code quality' },
-            { reviewerId: 'documentation', reason: 'Documentation coverage' },
-            { reviewerId: 'security-api',  reason: 'API security' },
+            { reviewerId: 'code-quality',  reason: 'General code quality' , confidence: 0.9 },
+            { reviewerId: 'documentation', reason: 'Documentation coverage' , confidence: 0.9 },
+            { reviewerId: 'security-api',  reason: 'API security' , confidence: 0.9 },
           ],
         },
       },
@@ -385,8 +385,8 @@ test('audit command prints and persists aggregated token usage', () => {
       {
         data: {
           selectedReviewers: [
-            { reviewerId: 'code-quality', reason: 'General code quality' },
-            { reviewerId: 'documentation', reason: 'Documentation coverage' },
+            { reviewerId: 'code-quality', reason: 'General code quality' , confidence: 0.9 },
+            { reviewerId: 'documentation', reason: 'Documentation coverage' , confidence: 0.9 },
           ],
         },
         tokensUsed: { inputTokens: 40, outputTokens: 10, estimated: false },

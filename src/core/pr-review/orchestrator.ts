@@ -4,25 +4,33 @@ import { orchestratorResultSchema } from '../validation/schemas';
 import { buildOrchestratorSystemPrompt, buildOrchestratorUserMessage } from '../prompts/pr-review';
 import { CommitSummary } from '../git/index';
 import { formatErrorWithCauses } from '../runtime/error-format';
+import { logPrompt } from '../output/prompt-logger';
 
-/** Absolute hard cap — prevents runaway costs if orchestrator returns unusually many reviewers */
-const ABSOLUTE_MAX_PR_REVIEWERS = 10;
+/** Absolute hard cap on built-in reviewer count — prevents runaway costs if orchestrator over-selects */
+const ABSOLUTE_MAX_PR_REVIEWERS = 20;
 
-/** Fallback reviewer IDs used when the orchestrator itself fails */
-const FALLBACK_REVIEWER_IDS = ['bug-hunter', 'code-quality', 'security-api', 'error-handling'];
+/** Maximum number of orchestrator call attempts before propagating the error */
+const MAX_ORCHESTRATOR_ATTEMPTS = 3;
 
 /**
- * Trim the selection to `limit` reviewers, preferring those with the highest confidence.
- * Reviewers already sorted by confidence desc will be sliced; others are sorted first.
+ * Trim the built-in reviewer selection to `limit`, preferring those with the highest confidence.
+ * Custom reviewers (isBuiltIn=false) always bypass this cap and are included unconditionally.
  */
 function trimByConfidence(
   selection: OrchestratorResult['selectedReviewers'],
+  availableReviewers: Reviewer[],
   limit: number,
 ): OrchestratorResult['selectedReviewers'] {
-  if (selection.length <= limit) return selection;
-  return [...selection]
-    .sort((a, b) => b.confidence - a.confidence)
-    .slice(0, limit);
+  const isBuiltInMap = new Map(availableReviewers.map(r => [r.id, r.isBuiltIn]));
+
+  const custom = selection.filter(s => isBuiltInMap.get(s.reviewerId) === false);
+  const builtIn = selection.filter(s => isBuiltInMap.get(s.reviewerId) === true);
+
+  const cappedBuiltIn = builtIn.length <= limit
+    ? builtIn
+    : [...builtIn].sort((a, b) => b.confidence - a.confidence).slice(0, limit);
+
+  return [...custom, ...cappedBuiltIn];
 }
 
 export interface ReviewerSelectionResult extends OrchestratorResult {
@@ -40,6 +48,7 @@ export async function selectReviewers(
   maxReviewers?: number,
   transport?: string,
   apiBaseUrl?: string,
+  promptLogDir?: string,
 ): Promise<ReviewerSelectionResult> {
   const runtime = await getStructuredRuntime();
 
@@ -54,42 +63,41 @@ export async function selectReviewers(
   const userMessage = buildOrchestratorUserMessage(changedFiles, diff, commits);
 
   const effectiveLimit = maxReviewers ?? ABSOLUTE_MAX_PR_REVIEWERS;
+  const availableIds = new Set(availableReviewers.map(r => r.id));
 
-  try {
-    const result = await runtime.run<OrchestratorResult>(
-      { systemPrompt, userMessage, model, apiKey, transport, apiBaseUrl, maxTokens: 4096, temperature: 0, callLabel: 'orchestrator' },
-      orchestratorResultSchema
-    );
-
-    // Filter to reviewers that actually exist in the available set
-    const availableIds = new Set(availableReviewers.map(r => r.id));
-    const validSelection = result.data.selectedReviewers.filter(s => availableIds.has(s.reviewerId));
-
-    // Apply configured or hard cap via confidence-based trimming
-    const trimmed = trimByConfidence(validSelection, effectiveLimit);
-
-    return {
-      selectedReviewers: trimmed,
-      issues: [],
-      tokensUsed: result.tokensUsed,
-    };
-  } catch (err) {
-    // Orchestrator failed — fall back to a small hardcoded core set to avoid cost explosion.
-    const availableIds = new Set(availableReviewers.map(r => r.id));
-    const fallbackSelected = FALLBACK_REVIEWER_IDS
-      .filter(id => availableIds.has(id))
-      .map(id => ({ reviewerId: id, reason: 'Fallback selection after orchestrator failure.', confidence: 0.7 }));
-
-    return {
-      selectedReviewers: trimByConfidence(fallbackSelected, effectiveLimit),
-      issues: [
-        {
-          severity: 'warning',
-          code: 'pr-orchestrator-fallback',
-          message: `PR reviewer orchestrator failed (${formatErrorWithCauses(err)}); using ${fallbackSelected.length} core reviewer(s) as fallback.`,
-          stage: 'select-reviewers',
-        },
-      ],
-    };
+  if (promptLogDir) {
+    logPrompt(promptLogDir, 'orchestrator', systemPrompt, userMessage);
   }
+
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= MAX_ORCHESTRATOR_ATTEMPTS; attempt++) {
+    try {
+      const result = await runtime.run<OrchestratorResult>(
+        { systemPrompt, userMessage, model, apiKey, transport, apiBaseUrl, maxTokens: 4096, temperature: 0, callLabel: 'orchestrator' },
+        orchestratorResultSchema,
+      );
+
+      // Filter to reviewers that actually exist in the available set
+      const validSelection = result.data.selectedReviewers.filter(s => availableIds.has(s.reviewerId));
+
+      // Apply configured or hard cap; custom reviewers bypass the built-in cap
+      const trimmed = trimByConfidence(validSelection, availableReviewers, effectiveLimit);
+
+      return {
+        selectedReviewers: trimmed,
+        issues: [],
+        tokensUsed: result.tokensUsed,
+      };
+    } catch (err) {
+      lastError = err;
+      if (attempt < MAX_ORCHESTRATOR_ATTEMPTS) {
+        await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+      }
+    }
+  }
+
+  throw new Error(
+    `PR reviewer orchestrator failed after ${MAX_ORCHESTRATOR_ATTEMPTS} attempts: ${formatErrorWithCauses(lastError)}`,
+  );
 }

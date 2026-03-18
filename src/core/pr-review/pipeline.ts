@@ -34,6 +34,7 @@ import { formatErrorWithCauses } from '../runtime/error-format';
 import { addTokens, formatTokenSummary } from '../runtime/token-utils';
 import { runReviewerTool } from '../tools/runner';
 import { formatToolContext } from '../tools/format';
+import { logPrompt } from '../output/prompt-logger';
 
 export interface PRReviewPipelineOptions {
   repoPath: string;
@@ -241,8 +242,14 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   // Used to contextualise reviewer prompts (e.g. CLI tool vs web service).
   const repoProfile = buildPRRepoProfile(repoPath, changedFiles);
 
+  // Validate that the agentic runtime is available before calling the orchestrator.
+  // This surfaces errors like "cannot use CODEOWL_RUNTIME=direct" immediately.
+  const runtime = await getPRReviewRuntime();
+
   log('Loading reviewers...');
   const { reviewers } = loadReviewersForMode(repoPath, 'pr-review', config);
+
+  const promptLogDir = path.join(repoPath, OUTPUT_DIR, 'prompts');
 
   log('Selecting relevant reviewers...');
   const orchestratorResult = await selectReviewers(
@@ -255,6 +262,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     config.prReview?.maxReviewers,
     config.transport,
     config.apiBaseUrl,
+    promptLogDir,
   );
   issues.push(...orchestratorResult.issues);
 
@@ -271,7 +279,6 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   const estTotalInput = estInputPerReviewer * selectedReviewers.length;
   log(`[token-diag] Estimated cost preview: ${selectedReviewers.length} reviewers × ~${estInputPerReviewer.toLocaleString()} input tokens/ea = ~${estTotalInput.toLocaleString()} total input tokens (agentic calls may multiply this 2-5×)`);
 
-  const runtime = await getPRReviewRuntime();
   log(`Running ${selectedReviewers.length} agentic reviewer(s) in parallel (model: ${config.model})...`);
   log(`[token-diag] Per-reviewer estimated input context: structured diff (~${Math.round(Math.min(structuredDiff.length, MAX_STRUCTURED_DIFF_CHARS) / 4).toLocaleString()} tokens) + file context (~${Math.round(currentFileContext.length / 4).toLocaleString()} tokens) + system prompt (~600 tokens)`);
 
@@ -290,6 +297,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       config.apiBaseUrl,
       runtime,
       log,
+      promptLogDir,
     ),
   );
   const reviewerRunResults = await Promise.all(reviewerPromises);
@@ -374,6 +382,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       transport: config.transport,
       apiBaseUrl: config.apiBaseUrl,
       log,
+      promptLogDir,
     });
     issues.push(...semantic.issues);
     semanticVerified = semantic.verified;
@@ -565,7 +574,8 @@ async function runPRReviewer(
   transport: string,
   apiBaseUrl: string | undefined,
   runtime: IRuntime,
-  log: (msg: string) => void
+  log: (msg: string) => void,
+  promptLogDir?: string,
 ): Promise<PRReviewerRunResult> {
   const issues: ReviewIssue[] = [];
   let toolContext: string | undefined;
@@ -612,6 +622,10 @@ async function runPRReviewer(
   const systemPrompt = buildPRReviewSystemPrompt(reviewer.instructions, reviewer.id, reviewer.name, repoProfile);
   const userMessage = buildPRReviewUserMessage(structuredDiff, currentDiffFiles, currentFileContext, toolContext, commits);
   const initialFiles = currentDiffFiles;
+
+  if (promptLogDir) {
+    logPrompt(promptLogDir, `reviewer-${reviewer.id}`, systemPrompt, userMessage);
+  }
 
   try {
     log(`  Running reviewer: ${reviewer.name} (model=${reviewer.model || model}, changedFiles=${currentDiffFiles.length}, seededFiles=${initialFiles.length})...`);
