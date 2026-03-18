@@ -50,6 +50,21 @@ Your response must look exactly like this (replace the example values):
 - Exclude a reviewer only when the diff clearly has no overlap with the reviewer's domain (e.g., do not include a database reviewer for a pure UI change).
 - Never return an empty array unless the diff contains zero code changes.
 - **confidence** (0–1): rate your certainty that this reviewer is relevant. Use ≥ 0.9 when the match is obvious, 0.7–0.89 when probable, 0.5–0.69 when possible. Only include reviewers with confidence ≥ 0.5.
+
+## Signal-to-Reviewer Quick Reference
+
+Use these signals in the diff to pick focused reviewers you might otherwise miss:
+
+| Signal in diff | Add reviewer |
+|---|---|
+| \`catch\` blocks whose body is empty or only a comment | \`error-handling\` |
+| \`fetch(\` or HTTP calls added without a timeout/AbortController | \`resiliency\` |
+| Two or more sequential \`await\` calls on independent operations | \`concurrency\` |
+| \`.option(\` or CLI flag names renamed/added/removed | \`breaking-change\` |
+| New exported functions added with no corresponding test file changes | \`test-coverage\` |
+| Function body > 40 lines or nesting depth > 3 added | \`complexity\` |
+| Config parsing, file I/O, or DB calls added inside a CLI command handler or route controller | \`separation-of-concerns\` |
+
 - Return ONLY the JSON`;
 }
 

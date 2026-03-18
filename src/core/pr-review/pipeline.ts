@@ -56,13 +56,9 @@ const SEVERITY_ORDER: Record<string, number> = {
   critical: 4,
 };
 
-/**
- * Minimum confidence required to keep a PR finding at each priority level.
- * Mirrors the same thresholds used by the audit pipeline.
- */
 const CONFIDENCE_FLOORS: Record<Priority, number> = {
   critical: 0.75,
-  high: 0.75,
+  high: 0.60,
   medium: 0.60,
   low: 0.50,
   info: 0.40,
