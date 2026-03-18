@@ -158,6 +158,7 @@ ${buildPRModeOverlay(reviewerId)}
 ## HOW TO DO THIS REVIEW — TWO PHASES
 
 ### PHASE 1: INVESTIGATE FIRST (form no opinions yet)
+0. **Read the "PR INTENT" section in the user message first.** It describes what the author deliberately changed and why. Any concern that matches something described there is NOT a finding — skip it immediately, before any other investigation.
 1. Open and read the changed files listed in the diff.
 2. Follow imports and references to understand context outside the diff.
 3. Use search tools to confirm whether a problem actually exists in the current codebase.
@@ -189,6 +190,7 @@ ${buildPRModeOverlay(reviewerId)}
 10c. For resiliency concerns, do not require retries, backoff, or timeout patterns unless the changed code actually performs the external/network operation in question and the missing guard creates a concrete risk now.
 10d. Do NOT report findings in documentation files (.md, .txt, .rst), template files, example files, or files that DESCRIBE anti-patterns rather than implement them. A file that lists "you should avoid doing X" is not itself a defect — only report findings in actual source code, configuration, or build files.
 10e. COMMIT INTENT: Before reporting that something is "missing", "not handled", or "inconsistent" — read the commit messages provided above. If the commit message explicitly explains the design decision, it is intentional. Do NOT report it as a finding.
+10f. PR INTENT BLOCK: The user message contains a "PR INTENT" section written by the PR orchestrator. If anything you are about to report is described there as a deliberate, planned, or expected change — DO NOT report it. Examples of things to suppress: "logging is intentional", "fallback was removed on purpose", "interface was extended by design", "cap is intentional for cost control". When in doubt, check the PR INTENT and default to NOT reporting.
 10f. DOCUMENTATION GAPS: If the changed lines introduce or modify user-facing behavior (CLI flags, config fields, API signatures, public interfaces, new commands) — check whether relevant documentation files (README.md, AGENTS.md, CLAUDE.md, docs/) reflect the change. If documentation is stale or missing, report a documentation gap finding anchored to the CHANGED CODE LINES that create the obligation (not to the documentation file itself). Set filePath, startLine, and endLine to the changed code. In the description and recommendation, specify exactly which documentation file and section needs updating.
 11. Every finding MUST include a "verificationTrail" with 1-5 entries. Use exact prefixes:
     - "file:<relative path>" for each file you inspected
@@ -243,12 +245,12 @@ export function buildPRReviewUserMessage(
     : '';
 
   const intentSection = intentSummary
-    ? `\n## PR Intent (orchestrator analysis)\n${intentSummary}\nIf a finding you are about to report is already described as intentional above, do NOT report it.\n`
+    ? `\n## ⚠ PR INTENT — READ BEFORE REPORTING ANYTHING\n\n${intentSummary}\n\nMANDATORY CHECK: Before writing any finding, ask: "Is this already described as deliberate in the PR Intent above?" If YES — skip it entirely. Do not mention it, do not soften it into a suggestion, do not report it as a risk. Silence is the correct output for intentional changes.\n`
     : '';
 
   return `## Files Changed in This PR
 ${changedFiles.map(f => `- ${f}`).join('\n')}
-${commitSection}${intentSection}
+${intentSection}${commitSection}
 ## Code Changes
 
 Below are the exact changes in this PR. Each line is labeled with [Line N] showing its line number in the new file.
