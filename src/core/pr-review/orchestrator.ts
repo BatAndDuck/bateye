@@ -6,16 +6,11 @@ import { CommitSummary } from '../git/index';
 import { formatErrorWithCauses } from '../runtime/error-format';
 
 const BROAD_CODE_REVIEWER_IDS = ['bug-hunter', 'code-quality', 'complexity', 'test-quality', 'clean-code', 'security-api', 'resiliency'];
-const OVERLAPPING_CODE_REVIEWER_IDS = new Set(['bug-hunter', 'code-quality', 'complexity', 'clean-code', 'error-handling']);
 const WORKFLOW_REVIEWER_IDS = ['ci-cd'];
 const DOCS_ONLY_PATTERN = /(^|\/)(docs?|changes?)\/|\.mdx?$/i;
 const SOURCE_FILE_PATTERN = /\.(cjs|cts|go|java|js|jsx|mjs|mts|php|py|rb|rs|sh|sql|ts|tsx|ya?ml)$/i;
 const TEST_FILE_PATTERN = /(^|\/)(test|tests|spec|specs|__tests__)\/|(\.test\.|\.(spec|e2e)\.)/i;
 const WORKFLOW_FILE_PATTERN = /(^|\/)\.github\/workflows\/|(^|\/)(docker-compose|Dockerfile|Makefile|package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i;
-const LOGGING_SIGNAL_PATTERN = /\b(log|logger|logging|console\.)\b/i;
-const RESILIENCY_SIGNAL_PATTERN = /\b(retry|backoff|timeout|abort|fetch|http|request|response|circuit|resilien)\b/i;
-const MAX_OVERLAPPING_CODE_REVIEWERS = 3;
-const MAX_STABLE_PR_REVIEWERS = 6;
 
 function isDocsOnlyChange(changedFiles: string[]): boolean {
   return changedFiles.length > 0 && changedFiles.every(file => DOCS_ONLY_PATTERN.test(file));
@@ -41,46 +36,6 @@ function minimumReviewerCount(changedFiles: string[], commits: CommitSummary[]):
   if (multiDomain || largerPr) return 5;
   if (codeCoverage || workflowCoverage || changedFiles.length > 0) return 3;
   return 2;
-}
-
-function touchesLogging(changedFiles: string[], diff: string): boolean {
-  return changedFiles.some(file => LOGGING_SIGNAL_PATTERN.test(file)) || LOGGING_SIGNAL_PATTERN.test(diff);
-}
-
-function touchesResiliency(changedFiles: string[], diff: string): boolean {
-  return changedFiles.some(file => RESILIENCY_SIGNAL_PATTERN.test(file)) || RESILIENCY_SIGNAL_PATTERN.test(diff);
-}
-
-function stabilizeReviewerSelection(
-  initial: OrchestratorResult,
-  changedFiles: string[],
-  diff: string,
-): OrchestratorResult {
-  const selected: OrchestratorResult['selectedReviewers'] = [];
-  let overlappingCodeReviewerCount = 0;
-  const allowLoggingReviewer = touchesLogging(changedFiles, diff);
-  const allowResiliencyReviewer = touchesResiliency(changedFiles, diff);
-
-  for (const reviewer of initial.selectedReviewers) {
-    if (reviewer.reviewerId === 'log-reviewer' && !allowLoggingReviewer) {
-      continue;
-    }
-
-    if (reviewer.reviewerId === 'resiliency' && !allowResiliencyReviewer) {
-      continue;
-    }
-
-    if (OVERLAPPING_CODE_REVIEWER_IDS.has(reviewer.reviewerId)) {
-      if (overlappingCodeReviewerCount >= MAX_OVERLAPPING_CODE_REVIEWERS) {
-        continue;
-      }
-      overlappingCodeReviewerCount += 1;
-    }
-
-    selected.push(reviewer);
-  }
-
-  return { selectedReviewers: selected.slice(0, MAX_STABLE_PR_REVIEWERS) };
 }
 
 function broadenReviewerSelection(
@@ -155,11 +110,7 @@ export async function selectReviewers(
       orchestratorResultSchema
     );
     return {
-      ...stabilizeReviewerSelection(
-        broadenReviewerSelection(result.data, availableReviewers, changedFiles, commits),
-        changedFiles,
-        diff,
-      ),
+      ...result.data,
       issues: [],
       tokensUsed: result.tokensUsed,
     };
@@ -175,7 +126,7 @@ export async function selectReviewers(
     );
 
     return {
-      ...stabilizeReviewerSelection(fallbackSelection, changedFiles, diff),
+      ...fallbackSelection,
       issues: [
         {
           severity: 'warning',

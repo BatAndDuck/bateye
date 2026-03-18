@@ -44,6 +44,21 @@ Your response must look exactly like this (replace the example values):
 - Include logging/observability or resiliency reviewers only when the changed lines directly touch logging output, retries, timeouts, networking, or process reliability behavior.
 - Avoid reviewers that are clearly irrelevant to the diff, and when in doubt prefer omission over speculative overlap.
 - Never return an empty array unless the diff contains zero code changes.
+
+## Signal-to-Reviewer Quick Reference
+
+Use these signals in the diff to pick focused reviewers you might otherwise miss:
+
+| Signal in diff | Add reviewer |
+|---|---|
+| \`catch\` blocks whose body is empty or only a comment | \`error-handling\` |
+| \`fetch(\` or HTTP calls added without a timeout/AbortController | \`resiliency\` |
+| Two or more sequential \`await\` calls on independent operations | \`concurrency\` |
+| \`.option(\` or CLI flag names renamed/added/removed | \`breaking-change\` |
+| New exported functions added with no corresponding test file changes | \`test-coverage\` |
+| Function body > 40 lines or nesting depth > 3 added | \`complexity\` |
+| Config parsing, file I/O, or DB calls added inside a CLI command handler or route controller | \`separation-of-concerns\` |
+
 - Return ONLY the JSON`;
 }
 
