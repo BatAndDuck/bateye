@@ -709,6 +709,16 @@ export class OpenCodeCLIRuntime implements IRuntime {
     const start = Date.now();
     const server = await getServer(options);
     const target = resolveModelTarget(options.model, options.transport);
+
+    // DeepSeek thinking models (e.g. deepseek-v3.2-thinking) are incompatible with tool-calling
+    // workflows: the model requires a `reasoning_content` field in every assistant message during
+    // a multi-turn tool-call sequence, which OpenCode's agentic runner does not inject.
+    // Strip the -thinking suffix so the non-thinking variant is used instead.
+    if (target.modelId.endsWith('-thinking')) {
+      const stripped = target.modelId.slice(0, -'-thinking'.length);
+      logRuntimeDebug(`[opencode] Model "${target.modelId}" is a thinking model and cannot be used with tool calls. Switching to "${stripped}" automatically.`);
+      target.modelId = stripped;
+    }
     const responseSchema = buildStructuredOutputSchema(schema);
     const headers = {
       'content-type': 'application/json',
