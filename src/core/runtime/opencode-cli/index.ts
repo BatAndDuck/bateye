@@ -5,11 +5,17 @@ import * as os from 'os';
 import * as path from 'path';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
+import { Agent, setGlobalDispatcher } from 'undici';
 import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, TokenUsage, resolveModelTarget } from '../interface';
 import { logRuntimeDebug } from '../debug';
 import { formatErrorWithCauses } from '../error-format';
 import { buildOpenCodeEnvironment, resolveOpenCodeInvocation } from './command';
 import { buildStructureRepairPrompt, formatZodErrors, tryParseAndValidate } from '../structure-repair';
+
+// Node.js built-in fetch (undici) has a 300s headersTimeout by default.
+// Thinking models can take > 300s before sending the first response byte, which
+// trips this limit before our AbortController timeout fires.  Override globally.
+setGlobalDispatcher(new Agent({ headersTimeout: 0, bodyTimeout: 0 }));
 
 type OpenCodeServerHandle = {
   url: string;
