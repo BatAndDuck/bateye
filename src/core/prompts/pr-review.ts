@@ -60,20 +60,6 @@ Reviewers will receive this summary so they can skip findings about deliberate d
 - Never return an empty array unless the diff contains zero code changes.
 - **confidence** (0–1): rate your certainty that this reviewer is relevant. Use ≥ 0.9 when the match is obvious, 0.7–0.89 when probable, 0.5–0.69 when possible. Only include reviewers with confidence ≥ 0.5.
 
-## Signal-to-Reviewer Quick Reference
-
-Use these signals in the diff to pick focused reviewers you might otherwise miss:
-
-| Signal in diff | Add reviewer |
-|---|---|
-| \`catch\` blocks whose body is empty or only a comment | \`error-handling\` |
-| \`fetch(\` or HTTP calls added without a timeout/AbortController | \`resiliency\` |
-| Two or more sequential \`await\` calls on independent operations | \`concurrency\` |
-| \`.option(\` or CLI flag names renamed/added/removed | \`breaking-change\` |
-| New exported functions added with no corresponding test file changes | \`test-coverage\` |
-| Function body > 40 lines or nesting depth > 3 added | \`complexity\` |
-| Config parsing, file I/O, or DB calls added inside a CLI command handler or route controller | \`separation-of-concerns\` |
-
 - Return ONLY the JSON`;
 }
 
@@ -279,25 +265,36 @@ Rules:
 }
 
 export function buildPRFindingBatchVerificationSystemPrompt(): string {
-  return `You are a strict PR finding verifier.
+  return `You are a conservative PR finding verifier. Your primary goal is to avoid suppressing valid findings.
+
+GOLDEN RULE: When in doubt, ACCEPT the finding. Only reject when you are 100% certain it is a false positive.
 
 For each finding in the batch, decide whether it is supported by the CURRENT codebase state AND materially related to the pull request changes.
 
-Rules:
-- Reject findings whose anchor file is not in the PR diff or whose anchor lines are not within/near the changed hunk.
-- Reject findings that depend only on removed code.
-- Reject findings that claim something is missing unless the supplied current files confirm it and the PR changes created that obligation.
-- Reject findings contradicted by current-file evidence.
-- Reject findings that are general cleanup suggestions, style advice, or architecture preferences not materially caused by the changed lines.
-- Accept companion-change findings only when the changed lines introduce a user-visible or contract-changing behavior and the supplied supporting files show stale, contradictory, or missing companion updates.
-- If evidence is insufficient, return supported=false.
-- Classify every finding as one of:
+Rejection rules (apply ONLY when you are absolutely certain):
+- Reject ONLY if the anchor file is definitively not present in the PR diff AND the finding clearly has no connection to any changed file.
+- Reject ONLY if the finding explicitly references removed code and nothing in the current file confirms the issue still exists.
+- Reject ONLY if current-file evidence directly and unambiguously contradicts the finding's claim (e.g. the finding says X is missing but X is clearly present in the file).
+- Reject ONLY if the finding is plainly unrelated to this PR with no plausible connection to any changed line.
+
+When to accept (prefer accepting):
+- If the anchor lines are near but not exactly in the diff hunk, ACCEPT — the verifier has tolerance for nearby lines.
+- If supporting evidence is partial or incomplete, ACCEPT — the original reviewer had more context.
+- If the finding could plausibly be valid even if you are not fully certain, ACCEPT.
+- If you cannot determine whether the finding is valid or not, ACCEPT (do NOT default to reject on uncertainty).
+- If the finding is about a missing companion update and you cannot rule it out, ACCEPT.
+- Style and architecture findings: only reject if they are completely unrelated to any changed line; otherwise ACCEPT.
+
+Think step by step before deciding. Consider multiple interpretations of the evidence. Only after exhausting all possible ways the finding could be valid should you consider rejecting it.
+
+Classify every finding as one of:
   - direct: directly about a defect/risk in the changed lines
   - companion: a required related update is missing because of the changed lines
   - unrelated: not materially caused by this PR
-  - unclear: evidence is insufficient
-- You MUST return a verdict for EVERY finding in the input — the output array length must equal the input array length.
-- Return ONLY JSON.`;
+  - unclear: evidence is insufficient (always mark supported=true for unclear findings)
+
+You MUST return a verdict for EVERY finding in the input — the output array length must equal the input array length.
+Return ONLY JSON.`;
 }
 
 export function buildPRFindingBatchVerificationUserMessage(

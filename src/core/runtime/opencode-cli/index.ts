@@ -5,11 +5,17 @@ import * as os from 'os';
 import * as path from 'path';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
+import { Agent, setGlobalDispatcher } from 'undici';
 import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, TokenUsage, resolveModelTarget } from '../interface';
 import { logRuntimeDebug } from '../debug';
 import { formatErrorWithCauses } from '../error-format';
 import { buildOpenCodeEnvironment, resolveOpenCodeInvocation } from './command';
 import { buildStructureRepairPrompt, formatZodErrors, tryParseAndValidate } from '../structure-repair';
+
+// Node.js built-in fetch (undici) has a 300s headersTimeout by default.
+// Thinking models can take > 300s before sending the first response byte, which
+// trips this limit before our AbortController timeout fires.  Override globally.
+setGlobalDispatcher(new Agent({ headersTimeout: 0, bodyTimeout: 0 }));
 
 type OpenCodeServerHandle = {
   url: string;
@@ -742,23 +748,31 @@ export class OpenCodeCLIRuntime implements IRuntime {
         }, 30_000);
         sessionID = session.id;
 
+        // Thinking / reasoning models (e.g. deepseek-reasoner, *-thinking) do not support
+        // tool_choice, which OpenCode uses internally to enforce json_schema structured output.
+        // For those models we omit the format field and rely on prompt-based JSON extraction.
+        const isThinkingModel = /thinking|reasoner/i.test(target.modelId);
+        const messageBody: Record<string, unknown> = {
+          model: {
+            providerID: target.transport,
+            modelID: target.modelId,
+          },
+          system: options.systemPrompt + validationRetryNote,
+          parts: [{ type: 'text', text: options.userMessage }],
+        };
+        if (!isThinkingModel) {
+          messageBody.format = {
+            type: 'json_schema',
+            name: 'CodeOwlResponse',
+            schema: responseSchema,
+            retryCount: OPEN_CODE_STRUCTURED_OUTPUT_RETRY_COUNT,
+          };
+        }
+
         const response = await this.request<OpenCodeMessageResponse>(`${server.url}/session/${sessionID}/message`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({
-            model: {
-              providerID: target.transport,
-              modelID: target.modelId,
-            },
-            format: {
-              type: 'json_schema',
-              name: 'CodeOwlResponse',
-              schema: responseSchema,
-              retryCount: OPEN_CODE_STRUCTURED_OUTPUT_RETRY_COUNT,
-            },
-            system: options.systemPrompt + validationRetryNote,
-            parts: [{ type: 'text', text: options.userMessage }],
-          }),
+          body: JSON.stringify(messageBody),
         }, timeoutMs);
 
         const providerError = response?.info?.error?.data?.message || response?.info?.error?.message;
