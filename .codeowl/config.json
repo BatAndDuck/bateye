@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/codeowl/schemas/codeowl-config.schema.json",
-  "model": "vercel/deepseek/deepseek-v3.2-thinking",
+  "model": "vercel/deepseek/deepseek-v3.2",
   "exclude": ["generated", "vendor"],
   "prReview": {
     "autoApprove": {

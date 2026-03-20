@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI, { AzureOpenAI } from 'openai';
+import { MAX_ORCHESTRATOR_TIMEOUT_MS } from '../../config/defaults';
 import * as fs from 'fs';
 import * as path from 'path';
 import { z } from 'zod';
@@ -297,9 +298,17 @@ async function runWithOpenAI<T>(
   modelId: string,
   baseURL?: string
 ): Promise<RunResult<T>> {
+  // Use the caller-supplied timeout or the orchestrator default (10 min).
+  // maxRetries is set to 0 to disable the OpenAI SDK's built-in 3-attempt retry
+  // loop — without this, the effective timeout is 3× the per-request value (e.g.
+  // 3 × 5 min = 15 min), which we saw in practice as seemingly-frozen CI runs.
+  // Application-level retries are handled by the orchestrator's own loop instead.
+  const clientTimeoutMs = options.timeoutMs ?? MAX_ORCHESTRATOR_TIMEOUT_MS;
   const client = new OpenAI({
     apiKey: options.apiKey,
     baseURL,
+    timeout: clientTimeoutMs,
+    maxRetries: 0,
   });
   const start = Date.now();
   const estInputTokens = Math.ceil((options.systemPrompt.length + options.userMessage.length) / 4);
