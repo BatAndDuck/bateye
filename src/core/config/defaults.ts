@@ -21,7 +21,7 @@ export const AUDIT_OUTPUT_FILE = '.codeowl/out/audit.json';
 export const PR_REVIEW_OUTPUT_FILE = '.codeowl/out/pr-review.json';
 export const SYSTEM_DESIGN_OUTPUT_DIR = '.codeowl/out/system-design';
 
-export const DEFAULT_MODEL = 'anthropic/claude-sonnet-4-5';
+export const DEFAULT_MODEL = 'vercel/deepseek/deepseek-v3.2-thinking';
 export const DEFAULT_API_KEY_ENV = 'CODE_OWL_LLM_MODEL_API_KEY';
 
 export const MAX_FILE_SIZE_BYTES = 500 * 1024; // 500 KB
