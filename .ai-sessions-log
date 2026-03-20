@@ -1,0 +1,7 @@
+# AI Sessions Log
+# Format: YYYY-MM-DD | branch/topic | summary (max 300 chars, what changed + why)
+# Followups: append " +YYYY-MM-DD <note>" to the same entry line
+# Goal: avoid repeating past mistakes, track why decisions were made
+#
+# ─────────────────────────────────────────────────────────────────────────────
+2026-03-20 | eager-bohr/session-logs | Added .ai-sessions-log, AGENTS.md session rules (read before impl, update before push), .claude/settings.json pre-push hook, sync-main log step. Goal: avoid repeating past mistakes across sessions.
