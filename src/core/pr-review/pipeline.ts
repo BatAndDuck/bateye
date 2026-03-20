@@ -17,6 +17,7 @@ import { selectReviewers } from './orchestrator';
 import { writePRReviewResult, ensureDir } from '../output/writer';
 import {
   MAX_CONCURRENT_PR_REVIEWERS,
+  MAX_ORCHESTRATOR_TIMEOUT_MS,
   MAX_PR_CURRENT_CONTEXT_CHARS,
   MAX_PR_CURRENT_FILE_CHARS,
   MAX_PR_REVIEWER_TIMEOUT_MS,
@@ -303,8 +304,9 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
 
   const promptLogDir = path.join(repoPath, OUTPUT_DIR, 'prompts');
 
-  const orchestratorTimeoutSec = Math.round(MAX_PR_REVIEWER_TIMEOUT_MS / 1000);
-  log(`Selecting relevant reviewers... (model: ${config.model}, timeout: ${orchestratorTimeoutSec}s)`);
+  // Each orchestrator attempt has MAX_ORCHESTRATOR_TIMEOUT_MS; up to 3 attempts total.
+  const orchestratorTimeoutSec = Math.round(MAX_ORCHESTRATOR_TIMEOUT_MS / 1000);
+  log(`Selecting relevant reviewers... (model: ${config.model}, timeout: ${orchestratorTimeoutSec}s/attempt)`);
   // Heartbeat so CI logs don't appear frozen while waiting for the model response.
   const heartbeat = setInterval(() => log('  - Still waiting for reviewer selection (model is thinking)...'), 30_000);
   let orchestratorResult;

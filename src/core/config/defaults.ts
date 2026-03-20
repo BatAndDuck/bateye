@@ -40,6 +40,14 @@ export const MAX_AUDIT_REVIEWER_TOKENS = 8096;
 export const MAX_AUDIT_REVIEWER_TIMEOUT_MS = 1_200_000;
 /** Maximum wall clock time for one agentic PR reviewer investigation (ms). */
 export const MAX_PR_REVIEWER_TIMEOUT_MS = 1_200_000;
+/**
+ * Maximum wall clock time for a single DirectAI orchestrator call (ms).
+ * Slow models (e.g. deepseek-v3.2 via Vercel) can take 8-10 min per response.
+ * The orchestrator retries up to 3× at the application layer, so total worst-case
+ * is 3 × this value.  Set to 10 min to accommodate genuine model latency without
+ * the 3× amplification caused by the OpenAI SDK's built-in maxRetries.
+ */
+export const MAX_ORCHESTRATOR_TIMEOUT_MS = 600_000;
 /** Hard cap on number of reviewers to run in a single PR review. Prevents cost explosion. */
 export const MAX_PR_REVIEWERS = 10;
 /**
