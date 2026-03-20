@@ -79,7 +79,7 @@ test('saveConfig overwrites existing config', () => {
 test('resolveConfig uses default model when model is absent', () => {
   const tmpDir = makeTmpDir();
   const config = resolveConfig(tmpDir);
-  assert.ok(config.model.startsWith('anthropic/'));
+  assert.ok(config.model.startsWith('anthropic/') || config.model.startsWith('vercel/'));
 });
 
 test('resolveConfig uses default transport when absent', () => {

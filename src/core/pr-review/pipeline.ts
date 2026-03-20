@@ -21,6 +21,8 @@ import {
   MAX_PR_CURRENT_CONTEXT_CHARS,
   MAX_PR_CURRENT_FILE_CHARS,
   MAX_PR_REVIEWER_TIMEOUT_MS,
+  MAX_PR_REVIEWER_RETRY_CONCURRENCY,
+  MAX_PR_REVIEWER_RETRIES,
   MAX_STRUCTURED_DIFF_CHARS,
   OUTPUT_DIR,
   PR_REVIEW_OUTPUT_FILE,
@@ -348,7 +350,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
 
   const intentSummary = orchestratorResult.intentSummary;
 
-  const reviewerRunResults = await runWithConcurrency(
+  let reviewerRunResults = await runWithConcurrency(
     selectedReviewers,
     MAX_CONCURRENT_PR_REVIEWERS,
     reviewer => runPRReviewer(
@@ -369,6 +371,51 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       intentSummary,
     ),
   );
+
+  // Retry failed/timed-out reviewers with reduced concurrency to avoid server saturation.
+  for (let retryRound = 1; retryRound <= MAX_PR_REVIEWER_RETRIES; retryRound++) {
+    const failedIndices: number[] = [];
+    for (let i = 0; i < reviewerRunResults.length; i++) {
+      const r = reviewerRunResults[i];
+      if (r.findings.length === 0 && r.issues.some(iss => iss.code === 'pr-reviewer-timeout' || iss.code === 'pr-reviewer-failed')) {
+        failedIndices.push(i);
+      }
+    }
+    if (failedIndices.length === 0) break;
+
+    const failedReviewers = failedIndices.map(i => selectedReviewers[i]);
+    log(`Retrying ${failedReviewers.length} failed reviewer(s) (round ${retryRound}/${MAX_PR_REVIEWER_RETRIES}, concurrency ${MAX_PR_REVIEWER_RETRY_CONCURRENCY}): ${failedReviewers.map(r => r.name).join(', ')}`);
+
+    const retryResults = await runWithConcurrency(
+      failedReviewers,
+      MAX_PR_REVIEWER_RETRY_CONCURRENCY,
+      reviewer => runPRReviewer(
+        reviewer,
+        structuredDiff,
+        currentDiffFiles,
+        currentFileContext,
+        commits,
+        repoPath,
+        config.model,
+        apiKey,
+        repoProfile,
+        config.transport,
+        config.apiBaseUrl,
+        runtime,
+        log,
+        promptLogDir,
+        intentSummary,
+      ),
+    );
+
+    // Replace failed results with retry results (successful or not).
+    // Mutable replacement: update the array in place.
+    reviewerRunResults = [...reviewerRunResults];
+    for (let j = 0; j < failedIndices.length; j++) {
+      reviewerRunResults[failedIndices[j]] = retryResults[j];
+    }
+  }
+
   const toolSummaries = reviewerRunResults
     .filter(r => r.hasTool)
     .map(r => ({ reviewerName: r.reviewerName, toolRan: r.toolRan, findingCount: r.findings.length, error: r.toolError }));

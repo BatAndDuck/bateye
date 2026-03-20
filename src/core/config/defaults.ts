@@ -21,7 +21,7 @@ export const AUDIT_OUTPUT_FILE = '.codeowl/out/audit.json';
 export const PR_REVIEW_OUTPUT_FILE = '.codeowl/out/pr-review.json';
 export const SYSTEM_DESIGN_OUTPUT_DIR = '.codeowl/out/system-design';
 
-export const DEFAULT_MODEL = 'anthropic/claude-sonnet-4-5';
+export const DEFAULT_MODEL = 'vercel/deepseek/deepseek-v3.2-thinking';
 export const DEFAULT_API_KEY_ENV = 'CODE_OWL_LLM_MODEL_API_KEY';
 
 export const MAX_FILE_SIZE_BYTES = 500 * 1024; // 500 KB
@@ -57,6 +57,10 @@ export const MAX_PR_REVIEWERS = 10;
  * throughput high while avoiding stalls on later slots.
  */
 export const MAX_CONCURRENT_PR_REVIEWERS = 6;
+/** Concurrency limit when retrying failed/timed-out PR reviewers (lower to reduce server pressure). */
+export const MAX_PR_REVIEWER_RETRY_CONCURRENCY = 3;
+/** Maximum number of retry rounds for failed PR reviewers. */
+export const MAX_PR_REVIEWER_RETRIES = 1;
 /** Maximum number of files an agentic PR reviewer should inspect. */
 export const MAX_PR_REVIEWER_FILES_TO_INSPECT = 20;
 /** Maximum number of supporting files a PR finding should rely on. */
