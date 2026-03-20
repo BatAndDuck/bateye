@@ -602,13 +602,43 @@ async function startServer(env: NodeJS.ProcessEnv, readinessTimeoutMs = 30_000):
   const port = await findAvailablePort();
   const invocation = resolveOpenCodeInvocation();
   const logPath = path.join(os.tmpdir(), `codeowl-opencode-${process.pid}-${Date.now()}-${port}.log`);
+
+  // Write a temporary opencode.json that disables per-provider chunk/total timeouts.
+  // OpenCode's chunkTimeout (default 2–5 min depending on version) fires when no new
+  // SSE chunk arrives within the window.  Reviewer prompts (full diff + file context)
+  // cause slow models like DeepSeek to exceed this idle threshold, so we disable both
+  // timeout and chunkTimeout for every provider CodeOwl may use.
+  // We write into an isolated XDG_CONFIG_HOME so we don't touch the user's own config.
+  const cfgDir = path.join(os.tmpdir(), `codeowl-opencode-cfg-${process.pid}-${Date.now()}`);
+  const opencodeConfigDir = path.join(cfgDir, 'opencode');
+  fs.mkdirSync(opencodeConfigDir, { recursive: true });
+  const noTimeoutOpts = { options: { timeout: false, chunkTimeout: false } };
+  const opencodeConfig = {
+    $schema: 'https://opencode.ai/config.json',
+    provider: {
+      anthropic: noTimeoutOpts,
+      openai: noTimeoutOpts,
+      google: noTimeoutOpts,
+      vercel: noTimeoutOpts,
+      openrouter: noTimeoutOpts,
+      deepseek: noTimeoutOpts,
+      groq: noTimeoutOpts,
+      cerebras: noTimeoutOpts,
+    },
+  };
+  // Write both common filename variants so it's found regardless of OpenCode version.
+  const configJson = JSON.stringify(opencodeConfig, null, 2);
+  fs.writeFileSync(path.join(opencodeConfigDir, 'opencode.json'), configJson);
+  fs.writeFileSync(path.join(opencodeConfigDir, 'config.json'), configJson);
+  const envWithConfig = { ...env, XDG_CONFIG_HOME: cfgDir };
+
   const logFd = fs.openSync(logPath, 'a');
   const child = spawn(
     invocation.command,
     [...invocation.args, 'serve', '--hostname=127.0.0.1', `--port=${port}`],
     {
       cwd: process.cwd(),
-      env,
+      env: envWithConfig,
       stdio: ['ignore', logFd, logFd],
       windowsHide: true,
     },
@@ -644,6 +674,7 @@ async function startServer(env: NodeJS.ProcessEnv, readinessTimeoutMs = 30_000):
       if (child.exitCode === null) {
         child.kill('SIGTERM');
       }
+      try { fs.rmSync(cfgDir, { recursive: true, force: true }); } catch { /* ignore */ }
     },
   };
 }
