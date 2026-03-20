@@ -58,7 +58,7 @@ export const MAX_PR_REVIEWERS = 10;
  */
 export const MAX_CONCURRENT_PR_REVIEWERS = 6;
 /** Concurrency limit when retrying failed/timed-out PR reviewers (lower to reduce server pressure). */
-export const MAX_PR_REVIEWER_RETRY_CONCURRENCY = 2;
+export const MAX_PR_REVIEWER_RETRY_CONCURRENCY = 3;
 /** Maximum number of retry rounds for failed PR reviewers. */
 export const MAX_PR_REVIEWER_RETRIES = 1;
 /** Maximum number of files an agentic PR reviewer should inspect. */

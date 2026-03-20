@@ -4,5 +4,5 @@
 # Goal: avoid repeating past mistakes, track why decisions were made
 #
 # ─────────────────────────────────────────────────────────────────────────────
-2026-03-20 | eager-bohr/session-logs | Added .ai-sessions-log, AGENTS.md session rules (read before impl, update before push), .claude/settings.json pre-push hook, sync-main log step. Goal: avoid repeating past mistakes across sessions. +2026-03-20 Added reviewer retry: failed/timed-out reviewers now auto-retry with concurrency 2 (was 6). Bug Hunter/Code Quality timeout on OpenCode server.
+2026-03-20 | eager-bohr/session-logs | Added .ai-sessions-log, AGENTS.md session rules (read before impl, update before push), .claude/settings.json pre-push hook, sync-main log step. Goal: avoid repeating past mistakes across sessions. +2026-03-20 Added reviewer retry: failed/timed-out reviewers now auto-retry with concurrency 3 (was 6). Bug Hunter/Code Quality timeout on OpenCode server.
 
