@@ -271,6 +271,12 @@ export type PRReviewConfig = {
    * the highest confidence scores are kept. Defaults to no limit (up to the
    * absolute hard cap MAX_PR_REVIEWERS). */
   maxReviewers?: number;
+  /** Controls the LLM-based semantic verification pass that confirms findings are real.
+   * Disabling it skips the pass entirely — faster and cheaper, but may let false-positives through.
+   * Defaults to enabled. */
+  semanticVerification?: {
+    enabled: boolean;
+  };
 };
 
 /** Repository-level configuration loaded from `.codeowl/config.json`. */

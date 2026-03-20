@@ -53,6 +53,15 @@
           },
           "required": ["enabled"],
           "additionalProperties": false
+        },
+        "semanticVerification": {
+          "type": "object",
+          "description": "Controls the LLM-based semantic verification pass that confirms findings are real. Disabling it skips the pass entirely — faster and cheaper, but may let false-positives through. Defaults to enabled.",
+          "properties": {
+            "enabled": { "type": "boolean" }
+          },
+          "required": ["enabled"],
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

@@ -428,7 +428,9 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   let semanticRejectedCount = 0;
   let semanticTokens: TokenUsage | undefined;
 
-  if (deduped.length > 0) {
+  const semanticEnabled = config.prReview?.semanticVerification?.enabled !== false;
+
+  if (deduped.length > 0 && semanticEnabled) {
     log(`Running semantic verification on ${deduped.length} finding(s)...`);
     const semantic = await verifyFindingsSemantically(deduped, {
       repoPath,
@@ -455,6 +457,9 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
         log(`  ✗ Rejected (semantic): "${rejected.finding.title}" — ${rejected.reason}`);
       }
     }
+  } else if (!semanticEnabled) {
+    log('Skipping semantic verification — disabled via config (prReview.semanticVerification.enabled: false).');
+    semanticVerified = deduped;
   } else {
     log('Skipping semantic verification — no findings remain after deterministic/schema validation and deduplication.');
   }

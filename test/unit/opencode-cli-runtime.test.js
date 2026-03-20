@@ -7,6 +7,7 @@ const {
   coerceReviewerPayload,
   repairReviewerPayload,
   serializeOpenCodeResponse,
+  stripThinkingSuffix,
 } = require('../../dist/core/runtime/opencode-cli/index');
 const {
   reviewerAnalysisSchema,
@@ -148,4 +149,32 @@ test('repairReviewerPayload normalizes inverted line and column ranges', () => {
   assert.deepEqual(repaired.findings[0].endLine, 20);
   assert.deepEqual(repaired.findings[0].startColumn, 3);
   assert.deepEqual(repaired.findings[0].endColumn, 8);
+});
+
+// ─── stripThinkingSuffix ────────────────────────────────────────────────────
+// DeepSeek "thinking" variants require reasoning_content in every tool-call
+// turn, which OpenCode does not inject.  The helper strips the suffix so the
+// compatible non-thinking sibling model is used automatically.
+
+test('stripThinkingSuffix removes -thinking suffix from a thinking model ID', () => {
+  assert.equal(stripThinkingSuffix('deepseek-v3.2-thinking'), 'deepseek-v3.2');
+});
+
+test('stripThinkingSuffix leaves non-thinking model IDs unchanged', () => {
+  assert.equal(stripThinkingSuffix('deepseek-v3.2'), 'deepseek-v3.2');
+});
+
+test('stripThinkingSuffix leaves unrelated model IDs unchanged', () => {
+  assert.equal(stripThinkingSuffix('claude-sonnet-4-5'), 'claude-sonnet-4-5');
+  assert.equal(stripThinkingSuffix('gpt-4o'), 'gpt-4o');
+  assert.equal(stripThinkingSuffix('gemini-2.0-flash'), 'gemini-2.0-flash');
+});
+
+test('stripThinkingSuffix only strips a trailing -thinking, not one in the middle', () => {
+  // Hypothetical: a model with "thinking" elsewhere in the name should not be modified.
+  assert.equal(stripThinkingSuffix('my-thinking-model'), 'my-thinking-model');
+});
+
+test('stripThinkingSuffix handles the empty string without throwing', () => {
+  assert.equal(stripThinkingSuffix(''), '');
 });

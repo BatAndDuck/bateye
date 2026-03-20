@@ -260,6 +260,31 @@ function shouldRetryStructuredOutput(err: unknown, attempt: number): boolean {
     || (err instanceof Error && /no structured text response/i.test(err.message));
 }
 
+/**
+ * Strip the `-thinking` suffix from a DeepSeek model ID, if present.
+ *
+ * DeepSeek "thinking" variants (e.g. `deepseek-v3.2-thinking`) use a chain-of-thought
+ * reasoning mode that requires every assistant turn in a multi-turn tool-call sequence to
+ * carry a `reasoning_content` field.  OpenCode's agentic runner does not inject that field,
+ * which causes a `GatewayInternalServerError: Missing reasoning_content` error mid-review.
+ *
+ * The non-thinking sibling model (e.g. `deepseek-v3.2`) is identical in capability for
+ * structured-output tasks and works correctly with tool-calling.  This helper makes the
+ * substitution automatic so users don't need to remember to switch model IDs.
+ *
+ * @param modelId - Raw model ID as resolved by `resolveModelTarget` (e.g. `"deepseek-v3.2-thinking"`)
+ * @returns The same string with the `-thinking` suffix removed, or the original if not present.
+ *
+ * @example
+ * stripThinkingSuffix('deepseek-v3.2-thinking') // → 'deepseek-v3.2'
+ * stripThinkingSuffix('deepseek-v3.2')          // → 'deepseek-v3.2'
+ * stripThinkingSuffix('claude-sonnet-4-5')       // → 'claude-sonnet-4-5'
+ */
+export function stripThinkingSuffix(modelId: string): string {
+  const SUFFIX = '-thinking';
+  return modelId.endsWith(SUFFIX) ? modelId.slice(0, -SUFFIX.length) : modelId;
+}
+
 export function buildStructuredOutputSchema(schema: z.ZodTypeAny): Record<string, unknown> {
   const buildJsonSchema = zodToJsonSchema as unknown as (
     input: z.ZodTypeAny,
@@ -715,6 +740,13 @@ export class OpenCodeCLIRuntime implements IRuntime {
     const start = Date.now();
     const server = await getServer(options);
     const target = resolveModelTarget(options.model, options.transport);
+
+    // Auto-strip the -thinking suffix (see stripThinkingSuffix for rationale).
+    const stripped = stripThinkingSuffix(target.modelId);
+    if (stripped !== target.modelId) {
+      logRuntimeDebug(`[opencode] Model "${target.modelId}" is a thinking model and cannot be used with tool calls. Switching to "${stripped}" automatically.`);
+      target.modelId = stripped;
+    }
     const responseSchema = buildStructuredOutputSchema(schema);
     const headers = {
       'content-type': 'application/json',

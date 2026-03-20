@@ -171,8 +171,9 @@ For other providers use `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, or `GOOGLE_API_K
 
 | Event | Behaviour |
 |---|---|
-| PR opened / pushed to | Review runs automatically |
-| PR comment `/review` | Re-runs the review on demand |
+| PR comment `/review` | Runs the review on demand — post `/review` on any PR comment |
+
+The workflow runs **only** when a PR comment containing `/review` is posted.  It does not run automatically on every push, which keeps CI minutes low and gives you full control over when reviews happen.
 
 ### Customise the model or reviewers
 
@@ -184,6 +185,29 @@ Commit a `.codeowl/config.json` to your repo root and the workflow will use it a
   "exclude": ["generated", "vendor"]
 }
 ```
+
+#### Skipping the semantic verification pass
+
+By default CodeOwl runs an LLM-based **semantic verification** pass after collecting findings.  This pass cross-checks each finding against the actual diff and file content to filter false positives, but it costs additional tokens and time (typically 1–3 minutes depending on the model).
+
+Disable it when you want faster, cheaper reviews and are willing to accept that a small number of false positives may appear:
+
+```json
+{
+  "model": "anthropic/claude-sonnet-4-5",
+  "prReview": {
+    "semanticVerification": {
+      "enabled": false
+    }
+  }
+}
+```
+
+When `enabled` is omitted or `true` the pass runs normally (this is the default).
+
+#### DeepSeek thinking models
+
+If your configured model ends with `-thinking` (e.g. `vercel/deepseek/deepseek-v3.2-thinking`), CodeOwl automatically strips the suffix and uses the non-thinking sibling (`deepseek-v3.2`).  Thinking variants require a `reasoning_content` field in every tool-call turn, which the OpenCode runtime does not inject, causing a `GatewayInternalServerError` mid-review.  The non-thinking variant is identical in quality for structured-output tasks.
 
 Add custom reviewers by committing `.codeowl/reviewers/*.md` files (see [Reviewers](#reviewers)).
 
