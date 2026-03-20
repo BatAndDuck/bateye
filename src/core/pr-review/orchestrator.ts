@@ -49,6 +49,7 @@ export async function selectReviewers(
   transport?: string,
   apiBaseUrl?: string,
   promptLogDir?: string,
+  onLog?: (msg: string) => void,
 ): Promise<ReviewerSelectionResult> {
   const runtime = await getStructuredRuntime();
 
@@ -72,6 +73,11 @@ export async function selectReviewers(
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= MAX_ORCHESTRATOR_ATTEMPTS; attempt++) {
+    if (attempt > 1) {
+      onLog?.(`  - Orchestrator attempt ${attempt}/${MAX_ORCHESTRATOR_ATTEMPTS} (retrying after error)...`);
+    } else {
+      onLog?.(`  - Sending orchestrator request to model...`);
+    }
     try {
       const result = await runtime.run<OrchestratorResult>(
         { systemPrompt, userMessage, model, apiKey, transport, apiBaseUrl, maxTokens: 4096, temperature: 0, callLabel: 'orchestrator' },
@@ -91,6 +97,7 @@ export async function selectReviewers(
       };
     } catch (err) {
       lastError = err;
+      onLog?.(`  - Orchestrator attempt ${attempt}/${MAX_ORCHESTRATOR_ATTEMPTS} failed: ${(err as Error).message?.slice(0, 120)}`);
       if (attempt < MAX_ORCHESTRATOR_ATTEMPTS) {
         await new Promise(resolve => setTimeout(resolve, 500 * attempt));
       }
