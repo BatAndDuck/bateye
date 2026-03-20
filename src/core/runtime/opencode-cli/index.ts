@@ -6,7 +6,7 @@ import * as path from 'path';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { Agent, setGlobalDispatcher } from 'undici';
-import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, TokenUsage, resolveModelTarget } from '../interface';
+import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, TokenUsage, normalizeTransport, resolveModelTarget } from '../interface';
 import { logRuntimeDebug } from '../debug';
 import { formatErrorWithCauses } from '../error-format';
 import { buildOpenCodeEnvironment, resolveOpenCodeInvocation } from './command';
@@ -280,6 +280,28 @@ function shouldRetryStructuredOutput(err: unknown, attempt: number): boolean {
  * stripThinkingSuffix('deepseek-v3.2')          // → 'deepseek-v3.2'
  * stripThinkingSuffix('claude-sonnet-4-5')       // → 'claude-sonnet-4-5'
  */
+/**
+ * Maps a CodeOwl transport name to the providerID that OpenCode recognises.
+ *
+ * OpenCode only ships native providers for `anthropic`, `openai`, and `google`/`gemini`.
+ * Every other transport (vercel, openrouter, deepseek, groq, …) is routed through the
+ * OpenAI-compatible endpoint whose base URL we configure via `OPENAI_BASE_URL` in
+ * `buildOpenCodeEnvironment`.  For those we must use `"openai"` as the providerID so
+ * that OpenCode actually dispatches the request instead of hanging on an unknown provider.
+ */
+export function mapToOpenCodeProviderID(transport: string): string {
+  const t = normalizeTransport(transport);
+  switch (t) {
+    case 'anthropic':
+    case 'openai':
+    case 'google':
+    case 'gemini':
+      return t;
+    default:
+      return 'openai';
+  }
+}
+
 export function stripThinkingSuffix(modelId: string): string {
   const SUFFIX = '-thinking';
   return modelId.endsWith(SUFFIX) ? modelId.slice(0, -SUFFIX.length) : modelId;
@@ -786,7 +808,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
         const isThinkingModel = /thinking|reasoner/i.test(target.modelId);
         const messageBody: Record<string, unknown> = {
           model: {
-            providerID: target.transport,
+            providerID: mapToOpenCodeProviderID(target.transport),
             modelID: target.modelId,
           },
           system: options.systemPrompt + validationRetryNote,
@@ -920,7 +942,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
           headers,
           body: JSON.stringify({
             model: {
-              providerID: target.transport,
+              providerID: mapToOpenCodeProviderID(target.transport),
               modelID: target.modelId,
             },
             format: {
