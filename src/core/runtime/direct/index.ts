@@ -297,9 +297,14 @@ async function runWithOpenAI<T>(
   modelId: string,
   baseURL?: string
 ): Promise<RunResult<T>> {
+  // Default to 5 min; callers can override via options.timeoutMs.
+  // Without an explicit timeout the OpenAI SDK can hang indefinitely when the
+  // remote endpoint is unreachable or the model is extremely slow.
+  const clientTimeoutMs = options.timeoutMs ?? 300_000;
   const client = new OpenAI({
     apiKey: options.apiKey,
     baseURL,
+    timeout: clientTimeoutMs,
   });
   const start = Date.now();
   const estInputTokens = Math.ceil((options.systemPrompt.length + options.userMessage.length) / 4);

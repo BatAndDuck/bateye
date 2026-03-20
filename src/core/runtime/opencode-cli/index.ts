@@ -612,7 +612,11 @@ async function startServer(env: NodeJS.ProcessEnv, readinessTimeoutMs = 30_000):
   const cfgDir = path.join(os.tmpdir(), `codeowl-opencode-cfg-${process.pid}-${Date.now()}`);
   const opencodeConfigDir = path.join(cfgDir, 'opencode');
   fs.mkdirSync(opencodeConfigDir, { recursive: true });
-  const noTimeoutOpts = { options: { timeout: false, chunkTimeout: false } };
+  // OpenCode accepts chunkTimeout as a number (milliseconds), not a boolean.
+  // Use a very large value (1 hour) to effectively disable chunk timeouts for
+  // slow/thinking models that can take many minutes between SSE chunks.
+  const CHUNK_TIMEOUT_MS = 3_600_000; // 1 hour
+  const noTimeoutOpts = { options: { chunkTimeout: CHUNK_TIMEOUT_MS } };
   const opencodeConfig = {
     $schema: 'https://opencode.ai/config.json',
     provider: {
