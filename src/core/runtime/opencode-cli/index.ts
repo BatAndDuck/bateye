@@ -257,7 +257,7 @@ function shouldRetryStructuredOutput(err: unknown, attempt: number): boolean {
 
   return err instanceof z.ZodError
     || err instanceof SyntaxError
-    || (err instanceof Error && /no structured text response/i.test(err.message));
+    || (err instanceof Error && /no structured text response|SSE read timed out/i.test(err.message));
 }
 
 /**
