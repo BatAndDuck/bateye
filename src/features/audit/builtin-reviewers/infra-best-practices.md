@@ -5,18 +5,7 @@ description: Reviews infrastructure configuration for environment parity, networ
 enabled: true
 mode: audit
 category: infrastructure
-scopeHints:
-  - infra
-  - server
-  - config
-  - deploy
-  - environment
-  - production
-  - staging
-  - networking
-  - dns
-  - ssl
-  - cert
+selectWhen: "select for audits of infrastructure configuration, networking, environment parity, and operational readiness; most useful as a periodic audit; skip for pure application code changes with no infrastructure or deployment configuration"
 ---
 
 Focus your review on:

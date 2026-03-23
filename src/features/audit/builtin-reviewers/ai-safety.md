@@ -5,19 +5,7 @@ description: Reviews AI/LLM integrations for prompt injection vulnerabilities, u
 enabled: true
 mode: both
 category: ai
-scopeHints:
-  - llm
-  - ai
-  - openai
-  - anthropic
-  - gpt
-  - claude
-  - prompt
-  - output
-  - moderation
-  - safety
-  - guardrail
-  - content
+selectWhen: "select when code integrates with LLM APIs (OpenAI, Anthropic, etc.), constructs prompts from dynamic input, processes LLM outputs, or implements AI-powered features; skip for codebases with no LLM or AI API usage"
 ---
 
 Focus your review on:

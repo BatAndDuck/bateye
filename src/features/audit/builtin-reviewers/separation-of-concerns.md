@@ -5,15 +5,7 @@ description: Identifies code that mixes business logic with presentation, data a
 enabled: true
 mode: audit
 category: code-quality
-scopeHints:
-  - controller
-  - service
-  - repository
-  - model
-  - view
-  - component
-  - handler
-  - middleware
+selectWhen: "select for any non-trivial code change involving controllers, services, repositories, or domain models where concern mixing is a risk; most valuable as a periodic audit; skip for documentation-only, CSS-only, or trivial single-concern changes"
 ---
 
 Focus your review on:

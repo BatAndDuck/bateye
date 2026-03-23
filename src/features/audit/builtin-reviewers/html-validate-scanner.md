@@ -12,13 +12,7 @@ tool:
   fileArgs: true
   timeout: 60000
   maxOutputChars: 50000
-scopeHints:
-  - html
-  - template
-  - view
-  - page
-  - component
-  - public
+selectWhen: "select when the repository contains HTML files, HTML templates, or server-side rendered views; skip for backend-only, CLI, or non-browser projects with no HTML output"
 ---
 
 You are receiving the JSON output of html-validate, which checks HTML files for standards compliance and accessibility issues.

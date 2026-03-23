@@ -5,16 +5,7 @@ description: Audits whether the project has AI-assisted review integration in CI
 enabled: true
 mode: audit
 category: ai
-scopeHints:
-  - claude
-  - cursor
-  - copilot
-  - ai
-  - setup
-  - config
-  - review
-  - automation
-  - workflow
+selectWhen: "select when reviewing overall AI tooling adoption, CI/CD integration of AI code review, or AI assistant configuration across the project; most useful as a periodic audit rather than per-PR; skip for projects with no AI tooling at all"
 ---
 
 ## INVESTIGATION REQUIREMENTS — Read Before Reporting

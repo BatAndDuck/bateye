@@ -5,16 +5,7 @@ description: Reviews file organization, directory layout, import patterns, and c
 enabled: true
 mode: audit
 category: code-quality
-scopeHints:
-  - module
-  - package
-  - directory
-  - folder
-  - index
-  - barrel
-  - feature
-  - domain
-  - layer
+selectWhen: "select as a periodic codebase health audit or when significant new modules, directories, or import patterns are introduced; skip for single-file changes or documentation-only modifications"
 ---
 
 Focus your review on:

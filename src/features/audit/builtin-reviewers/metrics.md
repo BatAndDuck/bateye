@@ -5,17 +5,7 @@ description: Identifies missing instrumentation on new endpoints and jobs, metri
 enabled: true
 mode: both
 category: sre
-scopeHints:
-  - metric
-  - counter
-  - gauge
-  - histogram
-  - prometheus
-  - statsd
-  - datadog
-  - telemetry
-  - monitor
-  - observ
+selectWhen: "select when code adds new API endpoints, background jobs, queue consumers, or external API integrations that should be instrumented, or when existing metrics/telemetry code is being modified; skip for CLIs, libraries, or codebases with no observability infrastructure"
 ---
 
 Focus your review on:

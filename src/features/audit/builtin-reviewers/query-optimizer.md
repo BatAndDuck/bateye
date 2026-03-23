@@ -5,19 +5,7 @@ description: Identifies N+1 query problems, missing database indices, and ineffi
 enabled: true
 mode: both
 category: database
-scopeHints:
-  - db
-  - database
-  - repository
-  - query
-  - sql
-  - orm
-  - prisma
-  - typeorm
-  - sequelize
-  - mongoose
-  - select
-  - find
+selectWhen: "select when code contains database queries, ORM calls (Prisma, TypeORM, Sequelize, Mongoose), or data access patterns; skip for codebases with no database interaction or for pure in-memory / file-based data operations"
 ---
 
 Focus your review on:

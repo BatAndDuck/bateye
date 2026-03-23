@@ -5,17 +5,7 @@ description: Detects violations of layered architecture, clean architecture, and
 enabled: true
 mode: audit
 category: architecture
-scopeHints:
-  - repository
-  - controller
-  - service
-  - usecase
-  - domain
-  - infrastructure
-  - presentation
-  - api
-  - db
-  - model
+selectWhen: "select for codebases with an intentional layered, clean, or hexagonal architecture (controllers, services, repositories, domain layers); skip for small scripts, CLI tools, or codebases with no declared architectural layering"
 ---
 
 Focus your review on:

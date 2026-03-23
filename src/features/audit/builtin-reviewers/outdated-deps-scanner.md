@@ -11,9 +11,7 @@ tool:
   targeting: project
   timeout: 60000
   maxOutputChars: 60000
-scopeHints:
-  - package
-  - dependency
+selectWhen: "always — static analysis scanner; select for any code changes"
 ---
 
 You are receiving the JSON output of `npm outdated`, which lists packages that have newer versions available.

@@ -5,16 +5,7 @@ description: Checks for missing JSDoc/Docstrings on public methods and complex l
 enabled: true
 mode: audit
 category: documentation
-scopeHints:
-  - api
-  - service
-  - util
-  - helper
-  - lib
-  - interface
-  - type
-  - function
-  - class
+selectWhen: "select when code exports public functions, classes, or interfaces, especially for published libraries or modules with external consumers; less critical for internal application code; skip for documentation-only, configuration-only, or test-only changes"
 ---
 
 Focus your review on:

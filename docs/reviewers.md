@@ -64,9 +64,7 @@ id: my-reviewer
 name: My Custom Reviewer
 description: Checks for specific patterns in our codebase.
 enabled: true
-scopeHints:
-  - service
-  - api
+selectWhen: "select when the diff touches [relevant area]; skip for [irrelevant cases]"
 ---
 
 You are reviewing code for [your concern here].
@@ -90,7 +88,7 @@ When you find an issue, report:
 | `name` | Yes | Human-readable name |
 | `description` | Yes | One-line summary (shown in `bateye reviewers`) |
 | `enabled` | No | Set to `false` to disable without deleting the file |
-| `scopeHints` | No | Keywords that help the orchestrator select this reviewer |
+| `selectWhen` | No | Natural-language description of when the orchestrator should select this reviewer for PR review (e.g. `"select when the diff touches authentication or session logic; skip for documentation-only changes"`) |
 
 ### Overriding built-in reviewers
 

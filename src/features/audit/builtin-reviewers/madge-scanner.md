@@ -11,12 +11,7 @@ tool:
   targeting: project
   timeout: 120000
   maxOutputChars: 40000
-scopeHints:
-  - src
-  - lib
-  - module
-  - service
-  - core
+selectWhen: "always — static analysis scanner; select for any code changes"
 ---
 
 You are receiving the JSON output of Madge, which detects circular dependencies in the module import graph.

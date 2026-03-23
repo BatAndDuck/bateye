@@ -5,17 +5,7 @@ description: Reviews security issues not covered by specialized security reviewe
 enabled: true
 mode: both
 category: security
-scopeHints:
-  - security
-  - crypto
-  - hash
-  - encrypt
-  - random
-  - session
-  - cookie
-  - token
-  - jwt
-  - config
+selectWhen: "select when code uses cryptographic functions, session/cookie management, JWT handling, or JavaScript eval-like patterns; complements other security reviewers for issues not covered by secrets, OWASP, input-validation, authorization, or network-policy; skip for pure documentation or infrastructure-only changes"
 ---
 
 Focus your review on:

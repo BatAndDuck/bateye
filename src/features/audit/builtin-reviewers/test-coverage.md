@@ -5,16 +5,7 @@ description: Identifies critical paths, edge cases, and whole modules lacking te
 enabled: true
 mode: audit
 category: qa
-scopeHints:
-  - test
-  - spec
-  - coverage
-  - unit
-  - integration
-  - jest
-  - pytest
-  - vitest
-  - mocha
+selectWhen: "select for any non-trivial code change where critical paths, business logic, or error handling may lack test coverage; skip for documentation-only, CSS-only, or infrastructure-only changes"
 ---
 
 Focus your review on:

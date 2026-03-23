@@ -5,17 +5,7 @@ description: Identifies O(N²) and worse time complexity patterns, unnecessary i
 enabled: true
 mode: both
 category: performance
-scopeHints:
-  - algorithm
-  - loop
-  - sort
-  - search
-  - filter
-  - map
-  - reduce
-  - query
-  - process
-  - compute
+selectWhen: "select when code contains loops, sorting, searching, data processing, or any operation on collections that could degrade at scale; skip for simple CRUD, configuration, or documentation-only changes"
 ---
 
 Focus your review on:

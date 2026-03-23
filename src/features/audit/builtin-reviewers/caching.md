@@ -5,17 +5,7 @@ description: Reviews caching usage for missing cache opportunities, cache correc
 enabled: true
 mode: audit
 category: performance
-scopeHints:
-  - cache
-  - redis
-  - memcached
-  - memo
-  - memoize
-  - ttl
-  - invalidate
-  - store
-  - fetch
-  - compute
+selectWhen: "select when code uses Redis, Memcached, in-process caches, or memoization, or when there are expensive computations, external API calls, or database queries that repeat frequently; skip for codebases with no caching layer and no performance-sensitive repeated operations"
 ---
 
 Focus your review on:

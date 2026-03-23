@@ -5,18 +5,7 @@ description: Identifies race conditions, async bottlenecks, and resource content
 enabled: true
 mode: both
 category: performance
-scopeHints:
-  - async
-  - promise
-  - thread
-  - worker
-  - concurrent
-  - parallel
-  - mutex
-  - lock
-  - race
-  - queue
-  - pool
+selectWhen: "select when code uses async/await, Promises, worker threads, shared mutable state, connection pools, or performs concurrent operations; skip for purely synchronous, single-threaded utility code with no parallelism"
 ---
 
 Focus your review on:

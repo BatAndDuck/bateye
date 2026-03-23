@@ -5,16 +5,7 @@ description: Detects deprecated, abandoned, and unmaintained packages including 
 enabled: true
 mode: both
 category: dependency
-scopeHints:
-  - package
-  - dependency
-  - npm
-  - pip
-  - import
-  - require
-  - module
-  - version
-  - upgrade
+selectWhen: "select when dependency manifests (package.json, requirements.txt, go.mod, etc.) are modified or as a periodic audit; skip for changes with no dependency modifications"
 ---
 
 Focus your review on:

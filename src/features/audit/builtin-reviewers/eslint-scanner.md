@@ -12,13 +12,7 @@ tool:
   fileArgs: true
   timeout: 120000
   maxOutputChars: 80000
-scopeHints:
-  - ts
-  - js
-  - tsx
-  - jsx
-  - mjs
-  - cjs
+selectWhen: "always — static analysis scanner; select for any code changes"
 ---
 
 You are receiving the JSON output of ESLint alongside the source code.

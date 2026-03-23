@@ -5,14 +5,7 @@ description: Flags hardcoded pixel values and layout patterns that may break on 
 enabled: true
 mode: audit
 category: ux
-scopeHints:
-  - component
-  - ui
-  - view
-  - page
-  - layout
-  - style
-  - css
+selectWhen: "select when the project contains user-facing web UI, HTML templates, or CSS/SCSS that is rendered in a browser and must adapt to different screen sizes; skip for CLI tools, backend services, infrastructure code, or projects with no browser-rendered UI"
 ---
 
 Focus your review on:

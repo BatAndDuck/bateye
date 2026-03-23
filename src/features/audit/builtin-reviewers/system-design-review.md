@@ -5,18 +5,7 @@ description: Evaluates the overall system architecture for distributed systems a
 enabled: true
 mode: audit
 category: architecture
-scopeHints:
-  - service
-  - module
-  - api
-  - gateway
-  - proxy
-  - db
-  - cache
-  - queue
-  - worker
-  - scheduler
-  - config
+selectWhen: "select for audits of distributed systems, microservices architectures, or complex multi-service backends where scalability, consistency, and operational readiness matter; most valuable as a periodic whole-system audit; skip for CLI tools, libraries, or simple single-service applications"
 ---
 
 Focus your review on:

@@ -5,15 +5,7 @@ description: Reviews Dockerfile and Kubernetes configurations for security misco
 enabled: true
 mode: both
 category: infrastructure
-scopeHints:
-  - docker
-  - dockerfile
-  - container
-  - image
-  - kubernetes
-  - k8s
-  - helm
-  - compose
+selectWhen: "select when the repository contains Dockerfiles, docker-compose files, Kubernetes manifests, or Helm charts; skip for projects with no containerization or orchestration configuration"
 ---
 
 Focus your review on:

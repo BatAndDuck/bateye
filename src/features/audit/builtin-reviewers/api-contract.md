@@ -5,16 +5,7 @@ description: Ensures OpenAPI/Swagger specs or GraphQL schemas are updated when A
 enabled: true
 mode: both
 category: documentation
-scopeHints:
-  - api
-  - controller
-  - route
-  - handler
-  - resolver
-  - schema
-  - openapi
-  - swagger
-  - graphql
+selectWhen: "select when code adds or modifies API endpoints, route handlers, GraphQL resolvers, gRPC methods, or request/response DTOs, especially when an OpenAPI/Swagger spec or GraphQL schema exists in the repo; skip for purely internal changes with no API surface"
 ---
 
 Focus your review on:

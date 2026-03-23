@@ -5,17 +5,7 @@ description: Reviews authorization checks, access control enforcement, and privi
 enabled: true
 mode: both
 category: security
-scopeHints:
-  - auth
-  - authz
-  - permission
-  - role
-  - policy
-  - guard
-  - middleware
-  - access
-  - admin
-  - user
+selectWhen: "select when code touches authorization checks, role/permission enforcement, access control middleware, resource ownership validation, or any code that gates operations by user identity or role; skip for codebases with no authentication or multi-user access control"
 ---
 
 Focus your review on:

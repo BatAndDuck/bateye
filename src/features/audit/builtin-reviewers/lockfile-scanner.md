@@ -11,10 +11,7 @@ tool:
   targeting: project
   timeout: 30000
   maxOutputChars: 20000
-scopeHints:
-  - package-lock
-  - lockfile
-  - npm
+selectWhen: "always — static analysis scanner; select for any code changes"
 ---
 
 You are receiving the output of lockfile-lint, which validates that `package-lock.json` is safe from supply chain attacks.

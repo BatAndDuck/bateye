@@ -12,15 +12,7 @@ tool:
   fileArgs: true
   timeout: 60000
   maxOutputChars: 50000
-scopeHints:
-  - config
-  - env
-  - secret
-  - auth
-  - key
-  - token
-  - api
-  - credential
+selectWhen: "always — static analysis scanner; select for any code changes"
 ---
 
 You are receiving the JSON output of Secretlint, a tool that detects hardcoded secrets and credentials using pattern matching.

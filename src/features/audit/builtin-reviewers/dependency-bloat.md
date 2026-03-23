@@ -5,17 +5,7 @@ description: Identifies unnecessary, unused, and over-sized dependencies that in
 enabled: true
 mode: both
 category: dependency
-scopeHints:
-  - package
-  - dependency
-  - import
-  - require
-  - npm
-  - pip
-  - go.mod
-  - maven
-  - gradle
-  - module
+selectWhen: "select when package.json, requirements.txt, go.mod, or equivalent dependency manifests are modified, or as a periodic audit; skip for changes with no dependency modifications"
 ---
 
 Focus your review on:
