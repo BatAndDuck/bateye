@@ -940,7 +940,7 @@ Report only concrete code quality findings after investigating the current repos
 
   const octokitState = JSON.parse(fs.readFileSync(octokitFixturePath, 'utf-8'));
   const actionTypes = octokitState.actions.map(action => action.type);
-  assert.deepEqual(actionTypes, ['updateComment', 'createReaction', 'updateComment', 'updateComment', 'createReview']);
+  assert.deepEqual(actionTypes, ['createReaction', 'updateComment', 'updateComment', 'updateComment', 'createReview']);
   assert.equal(actionTypes.includes('createReviewComment'), false);
 
   const updatedStatus = octokitState.issueComments.find(comment => comment.id === 10);
