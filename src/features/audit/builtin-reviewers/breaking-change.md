@@ -12,7 +12,7 @@ Focus your review on:
 
 ## Public API Contract Changes
 - Removed or renamed exported functions, classes, or constants that consumers reference by name
-- Changed function signatures by adding required parameters — callers will break without updates
+- Changed function signatures by adding required parameters - callers will break without updates
 - Removed parameters from function signatures that callers may be passing positionally or by name
 - Changed parameter types to stricter or incompatible types that reject previously valid input
 - Changed return types in a way that breaks callers (e.g., returning `null` where a value was guaranteed, changing shape of returned object)
@@ -43,7 +43,7 @@ Focus your review on:
 
 ## REST/GraphQL Contract Changes
 - Removed endpoint paths or changed HTTP methods that clients are calling
-- Changed required request body fields — existing clients not sending the new field will receive errors
+- Changed required request body fields - existing clients not sending the new field will receive errors
 - Changed the shape of response bodies by removing fields that clients destructure
 - Changed field types in JSON responses (e.g., `id` from integer to string UUID)
 - Changed error response formats or error codes that clients pattern-match on
@@ -56,16 +56,16 @@ Focus your review on:
 ## Severity Guidance
 
 - Use **critical** only when the breaking change will cause immediate runtime failures in production consumers (e.g., removed required API endpoint, removed field from a response type used everywhere).
-- Use **high** for changes with a clear, concrete breakage path — an external consumer calling a removed function, a removed config key that deployments will have set.
+- Use **high** for changes with a clear, concrete breakage path - an external consumer calling a removed function, a removed config key that deployments will have set.
 - Use **medium** for changes that are technically breaking but are unlikely to affect real consumers (e.g., a helper function removed from an internal utilities module).
 - Use **low** or omit entirely for changes that are breaking in theory but have no realistic consumers outside the current repo.
 
 ## What is NOT a breaking change
 
-- Removing `export` from a function or class that is only used **within the same repository** and has no external consumers — this is a visibility reduction, not a public API break. Only flag export removals if you have evidence of cross-package imports or the function is part of a documented public API.
+- Removing `export` from a function or class that is only used **within the same repository** and has no external consumers - this is a visibility reduction, not a public API break. Only flag export removals if you have evidence of cross-package imports or the function is part of a documented public API.
 - Making a previously exported function or type internal (un-exporting it) when the module is an application, CLI tool, or internal library not published to a package registry.
 - Renaming or removing a function that has no callers outside its own file or feature folder.
-- Adding optional fields to a schema or type — consumers that don't use the field are unaffected.
+- Adding optional fields to a schema or type - consumers that don't use the field are unaffected.
 - Changing the implementation body of a function without changing its signature or behavior contract.
 - Extracting a constant, changing a comment, or renaming an internal variable.
 

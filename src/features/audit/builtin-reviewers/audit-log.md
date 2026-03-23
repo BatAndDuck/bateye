@@ -20,7 +20,7 @@ This reviewer is relevant to systems that have ALL of the following characterist
 - A single-user developer tool (no multi-user access control)
 - A build/CI tool (no sensitive user data or compliance requirements)
 
-If the repository does not show evidence of user authentication, role-based access control, payment processing, or PII handling — the concepts in this reviewer do not apply and you should return zero findings.
+If the repository does not show evidence of user authentication, role-based access control, payment processing, or PII handling - the concepts in this reviewer do not apply and you should return zero findings.
 
 Focus your review on:
 
@@ -28,22 +28,22 @@ Focus your review on:
 - User role or permission changes (grant, revoke, escalate) that do not write an audit log entry before or after the change takes effect
 - Account lifecycle events (creation, deletion, suspension, reactivation) not recorded in the audit trail
 - Payment events (charge, refund, subscription change, payment method update) executed without a corresponding audit record
-- Data export or bulk download operations not logged — these are high-risk events for data exfiltration that require accountability
+- Data export or bulk download operations not logged - these are high-risk events for data exfiltration that require accountability
 - Administrative operations (config changes, feature flag toggles, system settings modifications) missing from the audit log
 - Sensitive data access (viewing PII, reading health records, downloading financial data) not recorded when an audit trail is required by policy or regulation
 
 ## Audit Log Integrity
 - Audit log entries written to the same database table or storage location as the operational data, allowing the same application code or database user that creates business records to also delete or modify audit entries
-- Audit records updated or overwritten after the fact — audit entries should be append-only and immutable
+- Audit records updated or overwritten after the fact - audit entries should be append-only and immutable
 - Audit log table lacking the constraints (no DELETE permission on the app DB user, insert-only storage, WORM storage backend) that would prevent tampering
 - Audit entries generated in the same transaction as the business operation without a compensating mechanism to ensure the audit write succeeds even if the business transaction is rolled back
 
 ## Required Fields in Audit Entries
-- Actor identity missing from audit log entries — who performed the action (user ID, service account, API key identifier) must be recorded
-- Timestamp missing or using a non-monotonic clock that can be manipulated — audit timestamps should use server-side UTC time, not client-supplied values
+- Actor identity missing from audit log entries - who performed the action (user ID, service account, API key identifier) must be recorded
+- Timestamp missing or using a non-monotonic clock that can be manipulated - audit timestamps should use server-side UTC time, not client-supplied values
 - Client IP address or request origin missing from audit entries for user-initiated operations
-- Resource identifier missing — the audit entry records the action type but not which specific record was affected (e.g., "role changed" without the user ID whose role changed)
-- Before and after state not captured for mutation operations — recording only "record updated" without the previous value makes it impossible to reconstruct what changed
+- Resource identifier missing - the audit entry records the action type but not which specific record was affected (e.g., "role changed" without the user ID whose role changed)
+- Before and after state not captured for mutation operations - recording only "record updated" without the previous value makes it impossible to reconstruct what changed
 
 ## Swallowed Audit Events
 - Audit log write calls inside `try/catch` blocks where the `catch` silently ignores errors, allowing the operation to proceed even if the audit entry was not persisted

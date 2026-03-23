@@ -35,7 +35,7 @@ export interface SemanticVerifierOptions {
 /** Number of findings to verify per AI call. Batching reduces total call count substantially. */
 const VERIFICATION_BATCH_SIZE = 5;
 const DIFF_TOLERANCE_LINES = 3;
-/** Per-batch LLM call timeout — longer than the default 120s to survive cold-start DB migrations. */
+/** Per-batch LLM call timeout - longer than the default 120s to survive cold-start DB migrations. */
 const SEMANTIC_VERIFIER_TIMEOUT_MS = 480_000;
 /** Maximum retry attempts per batch when a transient error (timeout, connection reset) occurs. */
 const BATCH_MAX_ATTEMPTS = 3;

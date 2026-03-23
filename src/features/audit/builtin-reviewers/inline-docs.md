@@ -20,7 +20,7 @@ Focus your review on:
 - `@param` tags absent for functions with more than one parameter, or present but missing the parameter description (just the name, no explanation of what it represents or its valid range)
 - `@returns` or `@return` tag missing for non-void functions whose return value is non-obvious from the type alone
 - `@throws` or `@throws {ErrorType}` missing for functions that can throw non-trivial errors that callers must handle
-- `@param` or `@returns` types that do not match the actual TypeScript/Go/Java types in the function signature — outdated docs that contradict the implementation
+- `@param` or `@returns` types that do not match the actual TypeScript/Go/Java types in the function signature - outdated docs that contradict the implementation
 
 ## Type Aliases and Interfaces
 - Exported TypeScript `interface` or `type` definitions without a JSDoc comment explaining the shape's purpose and where it is used
@@ -40,13 +40,13 @@ Focus your review on:
 - `@deprecated` annotations without an explanation of what to use instead and when the deprecated code will be removed
 
 ## Outdated Comments
-- Inline comments that describe behavior that the code no longer implements — the comment says one thing but the code does another
+- Inline comments that describe behavior that the code no longer implements - the comment says one thing but the code does another
 - Doc comments with example code snippets that use an outdated API (function renamed, parameters changed, return type changed) that would fail if a user tried to copy and run the example
 - Class-level or module-level documentation that describes responsibilities that have been moved to other modules, without being updated to reflect the refactored structure
 - `@since` or `@version` tags in JSDoc that reference versions significantly older than the current package version, suggesting the comment was written once and never revisited
 
 ## File and Module Level
-- Module-level or file-level documentation comment missing on files that export a public API surface — a reader should be able to understand the module's purpose from the top of the file
+- Module-level or file-level documentation comment missing on files that export a public API surface - a reader should be able to understand the module's purpose from the top of the file
 - Class-level JSDoc missing on exported classes, especially those with non-trivial construction requirements or lifecycle constraints
 - Missing documentation on constructor parameters for classes where the constructor accepts complex options objects
 
@@ -55,7 +55,7 @@ Requirements:
 - Missing JSDoc on an otherwise obvious exported function is usually **low** or not worth reporting at all if the name and type signature are self-explanatory.
 - Reserve **medium** for complex functions where incorrect usage could cause real problems. Reserve **high** or **critical** only for documentation gaps in security-critical or data-loss-risk code.
 - **Project type awareness**: If the project is a CLI tool, application, or internal module (not a published npm/pip/gem library with external users), JSDoc requirements are significantly lower. For such projects, only flag: (1) complex algorithms or non-obvious design decisions, (2) functions with subtle side effects or error conditions not visible in the type signature, (3) configuration types where incorrect values could cause failures. Do NOT flag simple exported types, CRUD functions, utility helpers, or getters/setters for missing JSDoc.
-- Do not report a finding for every exported type or function. If you have more than 5–8 findings for a reviewer, you are being too aggressive — apply stricter filtering and keep only the most impactful ones.
+- Do not report a finding for every exported type or function. If you have more than 5–8 findings for a reviewer, you are being too aggressive - apply stricter filtering and keep only the most impactful ones.
 - Self-explanatory names like `loadConfig`, `saveConfig`, `resolveApiKey`, `isGitRepo`, `runSystemDesign`, `resolveTemplatePath` do not need JSDoc unless their behavior is non-obvious from the name and type signature.
 - For CLI tool or application projects, exported type aliases and interfaces (e.g., `RepoFile`, `GraphNode`, `PRContext`) do NOT need JSDoc unless the fields have non-obvious semantics. Basic structural types used internally do not require documentation.
-- **NEVER flag `@throws` documentation** for CLI tools, applications, or internal modules. Missing `@throws` JSDoc is never a finding for projects that are not published as an npm/pip library for external consumers. This rule is absolute — do not file `@throws` findings for CLI or application projects regardless of priority.
+- **NEVER flag `@throws` documentation** for CLI tools, applications, or internal modules. Missing `@throws` JSDoc is never a finding for projects that are not published as an npm/pip library for external consumers. This rule is absolute - do not file `@throws` findings for CLI or application projects regardless of priority.

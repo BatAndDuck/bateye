@@ -72,7 +72,7 @@ function querySessionActualUsage(dbPath: string, sessionId: string): SessionToke
   const RETRY_DELAY_MS = 200;
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    // Synchronous sleep for retry — we're already in a synchronous helper.
+    // Synchronous sleep for retry - we're already in a synchronous helper.
     if (attempt > 0) {
       const deadline = Date.now() + RETRY_DELAY_MS;
       while (Date.now() < deadline) { /* spin */ }
@@ -867,7 +867,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
         const durationMs = Date.now() - start;
 
         // 1st preference: query the opencode DB for exact cumulative token counts for this session.
-        //   This is the only way to get the real total — the HTTP response only carries the final
+        //   This is the only way to get the real total - the HTTP response only carries the final
         //   answer, not the rolling accumulation across all agentic tool-call turns.
         // 2nd preference: extract usage from response parts/info (provider-specific, rarely populated).
         // 3rd preference: estimate from prompt character lengths (first-turn only, wildly low).
@@ -894,7 +894,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
           logRuntimeDebug(`[opencode]${labelTag} ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ${responseUsage.inputTokens.toLocaleString()} in + ${responseUsage.outputTokens.toLocaleString()} out (actual from response), attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}`);
         } else {
           tokensUsed = { inputTokens: estimatedInputTokens, outputTokens: estimatedOutputTokens, estimated: true };
-          logRuntimeDebug(`[opencode]${labelTag} ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ~${estimatedInputTokens} in + ~${estimatedOutputTokens} out (⚠ FIRST-TURN ESTIMATE ONLY — agentic turns not counted), attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}`);
+          logRuntimeDebug(`[opencode]${labelTag} ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ~${estimatedInputTokens} in + ~${estimatedOutputTokens} out (⚠ FIRST-TURN ESTIMATE ONLY - agentic turns not counted), attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}`);
         }
 
         return {

@@ -1,7 +1,7 @@
 ---
 id: ci-cd
 name: CI/CD Pipeline
-description: Reviews CI/CD pipeline correctness, performance, security, and reliability — covering missing gates, caching, secret hygiene, and deployment verification.
+description: Reviews CI/CD pipeline correctness, performance, security, and reliability - covering missing gates, caching, secret hygiene, and deployment verification.
 enabled: true
 mode: both
 category: devex

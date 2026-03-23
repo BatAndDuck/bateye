@@ -18,7 +18,7 @@ Focus your review on:
 
 ## Metric Quality
 - Metrics without labels/dimensions that would allow filtering by environment, service, or endpoint
-- High-cardinality labels on metrics (user IDs, request IDs as metric labels — causes metric explosion)
+- High-cardinality labels on metrics (user IDs, request IDs as metric labels - causes metric explosion)
 - Missing SLI metrics for user-facing operations (availability, error rate, latency P99)
 - Histogram buckets not aligned with SLO thresholds (can't compute P99 accurately)
 

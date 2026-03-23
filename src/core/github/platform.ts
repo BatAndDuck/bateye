@@ -221,7 +221,7 @@ export class GitHubReviewPlatform implements ReviewPlatform {
     try {
       // Use paginate to fetch ALL inline review comments (resolved AND unresolved),
       // not just the first 100. The GitHub API returns both resolved and unresolved
-      // threads from listReviewComments — resolution state is a UI concern only.
+      // threads from listReviewComments - resolution state is a UI concern only.
       const comments = await this.octokit.paginate(this.octokit.rest.pulls.listReviewComments, {
         owner: this.owner,
         repo: this.repo,

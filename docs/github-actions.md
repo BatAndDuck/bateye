@@ -1,4 +1,4 @@
-# GitHub Actions — Automated PR Review
+# GitHub Actions - Automated PR Review
 
 BatEye can review pull requests and post inline comments directly to GitHub. Choose how you want to trigger it.
 
@@ -28,7 +28,7 @@ Optionally add a fallback key:
 |---|---|
 | `BATEYE_LLM_MODEL_API_KEY_FALLBACK` | Secondary API key for failover |
 
-> **Note:** The workflow reads `BATEYE_LLM_MODEL_API_KEY` and `BATEYE_LLM_MODEL_API_KEY_FALLBACK` — not provider-specific names like `ANTHROPIC_API_KEY`.
+> **Note:** The workflow reads `BATEYE_LLM_MODEL_API_KEY` and `BATEYE_LLM_MODEL_API_KEY_FALLBACK` - not provider-specific names like `ANTHROPIC_API_KEY`.
 
 ### 3. That's it
 
@@ -44,7 +44,7 @@ Trigger a review using whichever method fits your team (see below). BatEye will:
 
 Choose one or combine them by editing the `on:` section of the workflow file.
 
-### Option A — On-demand with `/review` (default)
+### Option A - On-demand with `/review` (default)
 
 Post `/review` in any PR comment to kick off a review. No review runs until you ask for one, keeping CI minutes low and giving you full control.
 
@@ -58,7 +58,7 @@ Usage: post `/review` as a PR comment.
 
 This is the default in the shipped workflow file.
 
-### Option B — Automatically on every PR push
+### Option B - Automatically on every PR push
 
 Review every commit pushed to a pull request branch, without any manual trigger.
 
@@ -70,9 +70,9 @@ on:
 
 Good for teams that want consistent coverage without remembering to trigger it. Costs more CI minutes.
 
-### Option C — On a schedule
+### Option C - On a schedule
 
-Run reviews on a schedule — useful for auditing long-lived PRs or draft PRs that don't get actively pushed.
+Run reviews on a schedule - useful for auditing long-lived PRs or draft PRs that don't get actively pushed.
 
 ```yaml
 on:
@@ -82,7 +82,7 @@ on:
     types: [opened]          # also trigger on new PRs
 ```
 
-### Option D — Combine triggers
+### Option D - Combine triggers
 
 ```yaml
 on:
@@ -96,7 +96,7 @@ on:
 
 ## Required permissions
 
-The workflow uses the built-in `GITHUB_TOKEN` — no personal access token needed:
+The workflow uses the built-in `GITHUB_TOKEN` - no personal access token needed:
 
 ```yaml
 permissions:

@@ -19,7 +19,7 @@ Focus your review on:
 ## Cache Correctness
 - Cache keys that don't include all relevant parameters (cache collisions between different users/tenants)
 - Missing cache invalidation when underlying data changes (stale data served)
-- Race conditions in cache population (cache stampede — many requests simultaneously compute the same value)
+- Race conditions in cache population (cache stampede - many requests simultaneously compute the same value)
 - Caching mutable objects by reference (mutations affect cached value)
 
 ## Cache Sizing & TTL

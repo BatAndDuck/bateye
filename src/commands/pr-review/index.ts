@@ -140,7 +140,7 @@ function printPRReviewSummary(result: PRReviewResult): void {
   for (const f of critical) {
     const icon = f.priority === 'critical' ? '🔴' : '🟠';
     console.log(`  ${icon} ${chalk.white(f.title)}`);
-    console.log(chalk.gray(`     ${f.filePath}:${f.startLine} — ${f.recommendation.slice(0, 80)}`));
+    console.log(chalk.gray(`     ${f.filePath}:${f.startLine} - ${f.recommendation.slice(0, 80)}`));
   }
   if (result.findings.length > 5) {
     console.log(chalk.gray(`  ... and ${result.findings.length - 5} more findings in the report`));

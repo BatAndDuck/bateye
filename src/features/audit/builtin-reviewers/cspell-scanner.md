@@ -12,7 +12,7 @@ tool:
   fileArgs: true
   timeout: 60000
   maxOutputChars: 40000
-selectWhen: "always — static analysis scanner; select for any code changes"
+selectWhen: "always - static analysis scanner; select for any code changes"
 ---
 
 You are receiving the output of CSpell, a spell checker that identifies misspelled words in source code.
@@ -54,5 +54,5 @@ Analyze the CSpell findings and report genuine typos while filtering out technic
 
 1. **Diff-only**: Only report typos on lines that are added/changed in the diff.
 2. **Consolidate per file**: ALL typos in a single file → ONE finding. List each misspelling in the description (e.g., "`recieve` → `receive`, `occured` → `occurred`") and point to the first affected line.
-3. **Hard cap**: At most **3 findings total** (one per changed file at most). Only report if the typo is in user-facing text or a public API name — skip internal comments.
+3. **Hard cap**: At most **3 findings total** (one per changed file at most). Only report if the typo is in user-facing text or a public API name - skip internal comments.
 4. **codeQuote**: The exact changed line containing the first typo in that file.

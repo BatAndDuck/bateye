@@ -27,7 +27,7 @@ Focus your review on:
 - Significant new features that users would benefit from knowing about (new commands, new integrations, new output formats) missing from the CHANGELOG
 - Bug fixes that address commonly reported issues not recorded in the CHANGELOG
 - CHANGELOG entries present but placed under the wrong version heading, or formatted inconsistently with the existing changelog style (Keep a Changelog, conventional commits, etc.)
-- **Note**: `## Unreleased` or `## [Unreleased]` without a version number is standard Keep a Changelog format. Do not flag this as an error — it is intentionally versionless until the next release.
+- **Note**: `## Unreleased` or `## [Unreleased]` without a version number is standard Keep a Changelog format. Do not flag this as an error - it is intentionally versionless until the next release.
 
 ## Deprecated Features
 - Features, functions, or configuration options marked as deprecated in code (via `@deprecated` JSDoc, deprecation warnings) still documented in the README as active and recommended

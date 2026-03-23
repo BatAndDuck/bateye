@@ -14,7 +14,7 @@ Focus your review on:
 - Request body accessed (`req.body`, `request.json()`, `@Body()`) without any schema validation library (Zod, Joi, Yup, class-validator, Pydantic, go-playground/validator) before use
 - Validation schema defined but not actually applied to the incoming request (schema created but `.parse()` / `.validate()` not called, or validation middleware not wired to the route)
 - Schema validation only on a subset of fields while other request body properties are used without validation
-- Error handling for validation failures missing — parse errors uncaught, allowing the application to proceed with invalid data
+- Error handling for validation failures missing - parse errors uncaught, allowing the application to proceed with invalid data
 - Validation performed on the serialized string representation rather than the deserialized object, missing type coercion issues
 
 ## Query Parameters and Path Variables
@@ -29,20 +29,20 @@ Focus your review on:
 - `JSON.parse()` on user-supplied strings without catching `SyntaxError` and without schema validation of the resulting object
 
 ## Length and Range Constraints
-- String fields without maximum length validation — long inputs can cause denial of service, database errors, or log bloat
-- Numeric fields without minimum and maximum bounds — negative quantities, zero-division inputs, or unreasonably large values not rejected
-- Array or list inputs without a maximum element count — unbounded arrays can exhaust memory or trigger O(n²) processing
-- Pagination parameters (`page`, `limit`, `offset`) without upper bounds — a caller requesting `limit=1000000` should be rejected or clamped
+- String fields without maximum length validation - long inputs can cause denial of service, database errors, or log bloat
+- Numeric fields without minimum and maximum bounds - negative quantities, zero-division inputs, or unreasonably large values not rejected
+- Array or list inputs without a maximum element count - unbounded arrays can exhaust memory or trigger O(n²) processing
+- Pagination parameters (`page`, `limit`, `offset`) without upper bounds - a caller requesting `limit=1000000` should be rejected or clamped
 
 ## File Upload Validation
 - File upload handlers that do not validate the MIME type or content type of uploaded files (relying only on the client-supplied `Content-Type` header)
-- Missing file size limit on upload handlers — no `maxSize` configuration in the multipart parser
+- Missing file size limit on upload handlers - no `maxSize` configuration in the multipart parser
 - File extension not validated or validated only by string suffix without inspecting the actual file content (magic bytes)
 - Uploaded files processed (parsed, executed, or rendered) without virus scanning or safe content checking in security-sensitive contexts
 - Temporary files from uploads not cleaned up on error paths
 
 ## Regular Expression Safety (ReDoS)
-- Regular expressions with nested quantifiers or overlapping alternatives applied to user-controlled input (e.g., `/(a+)+$/`, `/(a|aa)+$/`) — these patterns have exponential worst-case matching time
+- Regular expressions with nested quantifiers or overlapping alternatives applied to user-controlled input (e.g., `/(a+)+$/`, `/(a|aa)+$/`) - these patterns have exponential worst-case matching time
 - User-supplied regex patterns accepted and compiled at runtime (`new RegExp(userInput)`) without sanitization or timeout
 - Email or URL validation regexes with catastrophic backtracking potential applied to unbounded user input without a length limit guard
 
@@ -59,5 +59,5 @@ Focus your review on:
 - Treating `localStorage` or cookie values as trusted inputs in server-side logic without re-validation
 
 ## Scope Clarification
-- This reviewer does NOT cover SQL injection or XSS — those are in the `owasp` reviewer
-- This reviewer does NOT cover authentication or authorization logic — those are in `security-api` and `authorization-logic` reviewers
+- This reviewer does NOT cover SQL injection or XSS - those are in the `owasp` reviewer
+- This reviewer does NOT cover authentication or authorization logic - those are in `security-api` and `authorization-logic` reviewers

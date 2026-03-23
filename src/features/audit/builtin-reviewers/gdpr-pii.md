@@ -12,7 +12,7 @@ Focus your review on:
 
 ## PII in Logs
 - Email addresses, phone numbers, SSNs, passport numbers, or national IDs logged in plaintext via `console.log`, `logger.info`, `print`, or equivalent
-- IP addresses logged without pseudonymization — under GDPR, IP addresses are considered personal data
+- IP addresses logged without pseudonymization - under GDPR, IP addresses are considered personal data
 - Full names or usernames included in log messages at `INFO` or `DEBUG` level that persist in log aggregation systems
 - Request/response body logging middleware that captures full payloads without redacting PII fields
 - Error stack traces that include user-supplied data (e.g., `Error: User john.doe@example.com not found`) forwarded to log aggregators
@@ -30,7 +30,7 @@ Focus your review on:
 - Location data collected at high precision (GPS coordinates) when only city-level resolution is needed
 
 ## PII in Error Responses
-- Detailed error messages returned to the client that include PII (e.g., `"User with email john@example.com already exists"` — leaks whether an email is registered)
+- Detailed error messages returned to the client that include PII (e.g., `"User with email john@example.com already exists"` - leaks whether an email is registered)
 - Validation error responses that echo back the invalid user-supplied PII value rather than a generic error code
 - API responses that include more user fields than necessary for the operation (over-fetching with unexposed PII fields)
 
@@ -52,13 +52,13 @@ Focus your review on:
 - `document.cookie` or cookie library calls for non-essential cookies that do not check the consent store first
 
 ## Right to Erasure
-- User deletion flows that soft-delete records (set `deleted_at`) without removing or anonymizing the PII fields — the data is retained but hidden
+- User deletion flows that soft-delete records (set `deleted_at`) without removing or anonymizing the PII fields - the data is retained but hidden
 - Cascade deletion not implemented for related records containing PII when a user account is deleted
 - Backup systems or append-only audit logs that retain PII after account deletion with no documented exception or anonymization step
 - Third-party integrations not included in the deletion flow (e.g., CRM, mailing list, analytics user profile not deleted on account removal)
 
 ## PII Exposure in URLs and Storage
-- User email addresses or other PII embedded in URL paths or query parameters (e.g., `GET /users/john@example.com/profile`) — URLs are logged in access logs and browser history
+- User email addresses or other PII embedded in URL paths or query parameters (e.g., `GET /users/john@example.com/profile`) - URLs are logged in access logs and browser history
 - User PII stored in `localStorage` or `sessionStorage` where it is accessible to any script on the same origin
 - Unencrypted PII stored in browser cookies (should be server-side session references only)
 - User identifiable data included in analytics event names or URL paths tracked by third-party tools

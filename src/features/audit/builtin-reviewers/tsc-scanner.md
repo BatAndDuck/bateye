@@ -11,7 +11,7 @@ tool:
   targeting: project
   timeout: 120000
   maxOutputChars: 60000
-selectWhen: "always — static analysis scanner; select for any code changes"
+selectWhen: "always - static analysis scanner; select for any code changes"
 ---
 
 You are receiving the output of `tsc --noEmit`, the TypeScript compiler running in type-check-only mode.
@@ -45,9 +45,9 @@ Analyze the TypeScript compiler errors and report the most impactful type safety
 
 ## Output Guidelines
 
-- Group related errors by file — if a file has 10 type errors, summarize the pattern rather than listing each one
+- Group related errors by file - if a file has 10 type errors, summarize the pattern rather than listing each one
 - For each finding, include the exact TypeScript error code (e.g., TS2322, TS7006) and the file:line from compiler output
-- If tsc reports zero errors, return an empty findings array with score 100 — the project type-checks cleanly
+- If tsc reports zero errors, return an empty findings array with score 100 - the project type-checks cleanly
 
 ## PR Review Mode (when you receive a diff with [Line N] markers)
 
@@ -57,4 +57,4 @@ Strict rules:
 1. **Changed files only**: Ignore all tsc errors in files NOT present in the diff. The whole project is compiled but only diff-touched files are in scope.
 2. **Consolidate per file**: If a changed file has multiple type errors, merge them into ONE finding that names the dominant pattern (e.g., "4 type errors in `auth.ts`: implicit `any` on parameters") and cite the most critical line.
 3. **Hard cap**: At most **2 findings per changed file** and **5 findings total**. Prioritise errors that indicate runtime risk (null dereference, wrong function signature) over purely structural issues.
-4. **codeQuote**: Must be the exact changed line from the diff that has the type error — not context lines.
+4. **codeQuote**: Must be the exact changed line from the diff that has the type error - not context lines.

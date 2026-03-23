@@ -18,14 +18,14 @@ function buildVerifierSystemPrompt(): string {
 
 ## Your task
 For each finding in the batch:
-1. Read ALL the code shown — the wider context above and below the flagged lines is critical.
+1. Read ALL the code shown - the wider context above and below the flagged lines is critical.
 2. Ask: "Does the actual code at this file/line prove that this specific problem EXISTS and is HARMFUL in this codebase?"
 3. Classify the finding as one of:
    - concrete: The code shown directly demonstrates the reported problem. A developer would immediately agree this is a real, actionable issue.
    - speculative: The finding describes a theoretical concern, a generic best practice, or a policy that lacks concrete evidence of harm in the actual code shown.
    - inapplicable: The finding applies an enterprise/web-service concept to a codebase that is clearly a local CLI tool, library, or developer utility where that concept is irrelevant.
 
-## Classification rules — read ALL before deciding
+## Classification rules - read ALL before deciding
 
 ### Injection / prompt injection false positives
 - If the finding flags string interpolation as "injection risk" or "prompt injection", look at WHERE the interpolated values come from in the wider code context shown:
@@ -64,7 +64,7 @@ function buildVerifierUserMessage(
   batch: Array<{ finding: Finding; codeContext: string }>,
 ): string {
   const items = batch.map(({ finding, codeContext }, i) => {
-    return `### Finding ${i + 1} — id: "${finding.id}"
+    return `### Finding ${i + 1} - id: "${finding.id}"
 Title: ${finding.title}
 Priority: ${finding.priority}
 File: ${finding.filePath}:${finding.startLine}-${finding.endLine}
@@ -83,7 +83,7 @@ ${codeContext}
 ---
 
 IMPORTANT: The code context shown includes wider surrounding lines (marked with >>> for the exact flagged lines).
-Use the full context to determine WHERE variables come from — this is essential for correctly classifying injection and complexity findings.
+Use the full context to determine WHERE variables come from - this is essential for correctly classifying injection and complexity findings.
 
 Classify each finding. Return JSON with ${batch.length} verification entries.`;
 }
@@ -199,7 +199,7 @@ export async function verifyAuditFindings(
             classification: verification.classification,
             reason: verification.reason,
           });
-          log?.(`  [audit-verifier] Dropped "${finding.title}" (${finding.filePath}:${finding.startLine}) — ${verification.classification}: ${verification.reason}`);
+          log?.(`  [audit-verifier] Dropped "${finding.title}" (${finding.filePath}:${finding.startLine}) - ${verification.classification}: ${verification.reason}`);
         }
       }
     } catch (err) {

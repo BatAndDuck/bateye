@@ -5,7 +5,7 @@ description: Reviews code documentation, README quality, and API docs completene
 enabled: true
 mode: both
 category: documentation
-selectWhen: "almost always — select whenever new functions, exports, API endpoints, config fields, CLI flags, or user-facing behaviors are added or changed; skip only for pure test-only changes, trivial CI/CD fixes, or dependency bumps with no behavior change"
+selectWhen: "almost always - select whenever new functions, exports, API endpoints, config fields, CLI flags, or user-facing behaviors are added or changed; skip only for pure test-only changes, trivial CI/CD fixes, or dependency bumps with no behavior change"
 ---
 
 Focus your review on:
@@ -37,16 +37,16 @@ Focus your review on:
 
 Use these definitions when assigning `priority` to findings:
 
-- **critical** — Completely absent or dangerously wrong documentation that could cause misuse leading to security, data-loss, or production incidents (e.g. an exported function that deletes data with no docs and a misleading name).
-- **high** — Severe omissions that are likely to cause developer mistakes or significant wasted effort: e.g. a complex multi-step public API with no docs, an undocumented breaking change, or a README so incomplete that onboarding is blocked.
-- **medium** — Missing JSDoc on exported functions/types, undocumented configuration options, missing README sections (troubleshooting, env vars). The code works but developers will struggle.
-- **low** — Nice-to-have improvements: inline comments on non-obvious internals, minor README polish, missing examples on simple utilities.
-- **info** — Stylistic suggestions with no practical impact.
+- **critical** - Completely absent or dangerously wrong documentation that could cause misuse leading to security, data-loss, or production incidents (e.g. an exported function that deletes data with no docs and a misleading name).
+- **high** - Severe omissions that are likely to cause developer mistakes or significant wasted effort: e.g. a complex multi-step public API with no docs, an undocumented breaking change, or a README so incomplete that onboarding is blocked.
+- **medium** - Missing JSDoc on exported functions/types, undocumented configuration options, missing README sections (troubleshooting, env vars). The code works but developers will struggle.
+- **low** - Nice-to-have improvements: inline comments on non-obvious internals, minor README polish, missing examples on simple utilities.
+- **info** - Stylistic suggestions with no practical impact.
 
 Requirements:
-- Be practical — not every function needs a comment
+- Be practical - not every function needs a comment
 - Focus on public APIs and complex logic that lacks explanation
 - Prioritize: public exports > complex internal logic > simple utilities
 - Include specific suggestions for what documentation should say
-- Missing JSDoc on an exported function is **medium** at most — never high or critical
+- Missing JSDoc on an exported function is **medium** at most - never high or critical
 - **Project type awareness**: For CLI tools, developer tooling, and internal application code (not a published library), JSDoc requirements are significantly lower. Only flag documentation gaps where incorrect usage could cause a real bug or integration problem. Basic structural types and simple utility functions do NOT need JSDoc in such projects.

@@ -6,7 +6,7 @@ import { CommitSummary } from '../git/index';
 import { formatErrorWithCauses } from '../runtime/error-format';
 import { logPrompt } from '../output/prompt-logger';
 
-/** Absolute hard cap on built-in reviewer count — prevents runaway costs if orchestrator over-selects */
+/** Absolute hard cap on built-in reviewer count - prevents runaway costs if orchestrator over-selects */
 const ABSOLUTE_MAX_PR_REVIEWERS = 20;
 
 /** Maximum number of orchestrator call attempts before propagating the error */
@@ -104,7 +104,7 @@ export async function selectReviewers(
     }
   }
 
-  // No fallback to a hardcoded reviewer list — intentional design decision.
+  // No fallback to a hardcoded reviewer list - intentional design decision.
   // A silent fallback would mask orchestrator failures and produce reviews with
   // incomplete coverage without surfacing the underlying problem to the user.
   // Callers should let this propagate so CI pipelines catch the failure visibly.

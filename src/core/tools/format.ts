@@ -16,7 +16,7 @@ export function formatToolContext(toolName: string, result: ToolRunResult): stri
   sections.push('3. Group related findings into coherent issues where appropriate');
   sections.push('4. Map each finding to a specific file path and line number from the tool output');
   sections.push('5. Add context about WHY each issue matters and provide actionable remediation');
-  sections.push('6. Do NOT blindly repeat every tool finding — only report issues that represent real problems');
+  sections.push('6. Do NOT blindly repeat every tool finding - only report issues that represent real problems');
   sections.push('');
 
   if (result.stdout) {

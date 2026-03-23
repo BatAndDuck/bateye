@@ -494,7 +494,7 @@ async function runSingleReviewer(
 
   if (droppedFindings.length > 0) {
     for (const dropped of droppedFindings) {
-      log(`  [${reviewer.name}]   ✗ Dropped (audit-filter): "${dropped.finding.title}" — ${dropped.reason}`);
+      log(`  [${reviewer.name}]   ✗ Dropped (audit-filter): "${dropped.finding.title}" - ${dropped.reason}`);
     }
   }
   logAuditFindingList(log, reviewer.name, findings, 'Post-filter findings');

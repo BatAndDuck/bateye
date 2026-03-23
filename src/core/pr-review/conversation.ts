@@ -59,11 +59,11 @@ export function buildConversation(
 /**
  * Deduplication thresholds.
  *
- * GLOBAL_TITLE_THRESHOLD — title Jaccard similarity required to consider two findings
+ * GLOBAL_TITLE_THRESHOLD - title Jaccard similarity required to consider two findings
  *   identical regardless of which file or line they reference. High value (0.7) to avoid
  *   matching legitimately distinct findings that share common words.
  *
- * LOCAL_TITLE_THRESHOLD — lower threshold used when the finding is on the same file AND
+ * LOCAL_TITLE_THRESHOLD - lower threshold used when the finding is on the same file AND
  *   within NEARBY_LINE_RANGE lines of an existing comment. The additional location context
  *   allows a softer title match.
  */

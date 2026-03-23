@@ -31,10 +31,10 @@ export interface ExistingComment {
  * Implement this to add support for platforms beyond the default GitHub implementation.
  *
  * Each method is called by the PR review pipeline at well-defined stages:
- * - `publishStartComment` / `updateStatusComment` — bookend the review run
- * - `publishInlineComment` — posts a finding as a line-level comment on the diff
- * - `updateOrCreateSummary` — upserts the overall summary comment
- * - `approvePR` — submits a formal approval when all findings are below the configured threshold
+ * - `publishStartComment` / `updateStatusComment` - bookend the review run
+ * - `publishInlineComment` - posts a finding as a line-level comment on the diff
+ * - `updateOrCreateSummary` - upserts the overall summary comment
+ * - `approvePR` - submits a formal approval when all findings are below the configured threshold
  */
 export interface ReviewPlatform {
   getPullRequestContext(): Promise<PullRequestContext>;

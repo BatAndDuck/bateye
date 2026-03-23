@@ -16,7 +16,7 @@ Focus your review on:
 - New gRPC service method defined in code without the corresponding `.proto` file update
 - New WebSocket message type or event introduced without documentation in the API contract
 
-## Schema Drift — Request and Response Shapes
+## Schema Drift - Request and Response Shapes
 - Request body shape changed in code (new required fields added, field types changed, field removed) without updating the corresponding OpenAPI `requestBody` schema
 - Response object shape changed (new fields added to the response DTO, fields renamed or removed) without updating the OpenAPI `responses` schema
 - GraphQL type fields added, removed, or made non-nullable in the resolver response without the schema type definition being updated to match
@@ -39,13 +39,13 @@ Focus your review on:
 - OAuth scopes required by an endpoint not reflected in the spec's security requirements
 
 ## Breaking Changes
-- Renaming an existing field in a request or response body — this is a breaking change for existing consumers and requires a deprecation strategy or version bump
-- Changing a field from optional to required in a request body — breaks clients that omit the field
-- Changing a field's type (e.g., `string` to `integer`, `object` to `array`) — breaks clients that assume the previous type
-- Removing a response field that downstream consumers may depend on — should be deprecated first with a timeline
+- Renaming an existing field in a request or response body - this is a breaking change for existing consumers and requires a deprecation strategy or version bump
+- Changing a field from optional to required in a request body - breaks clients that omit the field
+- Changing a field's type (e.g., `string` to `integer`, `object` to `array`) - breaks clients that assume the previous type
+- Removing a response field that downstream consumers may depend on - should be deprecated first with a timeline
 
 ## Spec Completeness
-- `description` fields missing on newly added path operations, parameters, or schema properties — the spec serves as documentation for consumers
+- `description` fields missing on newly added path operations, parameters, or schema properties - the spec serves as documentation for consumers
 - `example` or `examples` values missing for complex request/response schemas, making the spec harder to understand and test
 - API tags or groupings not updated when new endpoint groups are added, leaving new paths uncategorized in generated documentation
 - `operationId` values missing or auto-generated with non-descriptive names (e.g., `post_users_id_orders_post`) rather than semantic names

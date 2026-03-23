@@ -40,9 +40,9 @@ BatEye is configured via `.bateye/config.json` in your repo root. Run `bateye in
 |---|---|---|---|
 | `model` | string | `vercel/deepseek/deepseek-v3.2-thinking` | Primary model in `provider/model-id` format |
 | `transport` | string | `"auto"` | HTTP transport/gateway override. `"auto"` uses the provider prefix from `model`. Use `"vercel"`, `"openrouter"`, etc. to route through a gateway |
-| `apiBaseUrl` | string | — | OpenAI-compatible base URL for custom gateways or proxies |
-| `exclude` | string[] | — | Additional paths to exclude from analysis |
-| `disabledReviewers` | object | — | Reviewers to skip per mode |
+| `apiBaseUrl` | string | - | OpenAI-compatible base URL for custom gateways or proxies |
+| `exclude` | string[] | - | Additional paths to exclude from analysis |
+| `disabledReviewers` | object | - | Reviewers to skip per mode |
 | `prReview.semanticVerification.enabled` | boolean | `true` | LLM pass to filter false positives |
 | `prReview.autoApprove.enabled` | boolean | `false` | Auto-approve PRs with no high-severity findings |
 | `prReview.autoApprove.maxSeverity` | `"info"` \| `"low"` \| `"medium"` | `"low"` | Highest severity allowed for auto-approve |
@@ -91,7 +91,7 @@ Disable if you want faster, cheaper reviews and can tolerate some false positive
 
 ### DeepSeek thinking models
 
-If your model ends with `-thinking` (e.g. `vercel/deepseek/deepseek-v3.2-thinking`), BatEye automatically strips the suffix. Thinking variants require a `reasoning_content` field in every tool-call turn that the runtime doesn't inject — the non-thinking variant is identical in quality for structured-output tasks.
+If your model ends with `-thinking` (e.g. `vercel/deepseek/deepseek-v3.2-thinking`), BatEye automatically strips the suffix. Thinking variants require a `reasoning_content` field in every tool-call turn that the runtime doesn't inject - the non-thinking variant is identical in quality for structured-output tasks.
 
 ---
 

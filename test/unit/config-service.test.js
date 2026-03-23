@@ -25,7 +25,7 @@ test('resolveConfig returns model and transport fields from config file', () => 
 
 test('resolveConfig falls back to defaults when config is empty', () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-config-defaults-'));
-  // No config file — resolveConfig should use defaults
+  // No config file - resolveConfig should use defaults
   const config = resolveConfig(repoPath);
   assert.ok(typeof config.model === 'string' && config.model.length > 0);
   assert.equal(config.transport, 'auto');

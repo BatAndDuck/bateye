@@ -33,7 +33,7 @@ Analyze the Stylelint findings and report actual bugs, browser compatibility iss
 ## What to Filter Out
 
 - **Stylistic preferences**: Indentation, spacing, quote style, color format (hex vs. rgb), declaration order
-- **Naming conventions**: Class naming patterns (BEM, camelCase, kebab-case) — these are team preferences
+- **Naming conventions**: Class naming patterns (BEM, camelCase, kebab-case) - these are team preferences
 - **Empty blocks**: Often intentional placeholders in SCSS
 - **Vendor prefix opinions**: If autoprefixer is in use, manual prefixes may be intentional
 - **Max specificity warnings**: Unless the specificity is genuinely causing cascade issues
@@ -56,5 +56,5 @@ Analyze the Stylelint findings and report actual bugs, browser compatibility iss
 
 1. **Diff-only**: Only report issues on CSS/SCSS lines that are added/changed in the diff.
 2. **Consolidate per file**: ALL Stylelint issues within a changed file → ONE finding that describes the most critical problem and lists others in the description.
-3. **Hard cap**: At most **3 findings total**. Report only bugs and accessibility concerns — skip informational style preferences entirely.
+3. **Hard cap**: At most **3 findings total**. Report only bugs and accessibility concerns - skip informational style preferences entirely.
 4. **codeQuote**: The exact changed CSS line that introduced the issue.

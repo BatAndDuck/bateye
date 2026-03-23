@@ -32,4 +32,4 @@ Fetch and merge the latest `origin/main` into the **current working branch**, ha
 
 6. Confirm the final HEAD commit hash and list what changed files came in from main.
 
-> **Note:** Always operate in the correct directory. The worktree at `.claude/worktrees/<name>` and the main repo at the project root are separate — make sure to run git commands in the right one (wherever the current branch is checked out).
+> **Note:** Always operate in the correct directory. The worktree at `.claude/worktrees/<name>` and the main repo at the project root are separate - make sure to run git commands in the right one (wherever the current branch is checked out).

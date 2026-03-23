@@ -134,7 +134,7 @@ export async function selectAuditReviewers(options: SelectAuditReviewersOptions)
       repoProfile: profile,
     };
   } catch (err) {
-    // Orchestrator unavailable — use a conservative core set rather than all reviewers
+    // Orchestrator unavailable - use a conservative core set rather than all reviewers
     // to avoid cost explosion (60+ reviewers × full codebase = expensive).
     const fallbackSelection = buildFallbackReviewers(availableReviewers);
     return {
