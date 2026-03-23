@@ -601,15 +601,15 @@ async function waitForServerReady(
 async function startServer(env: NodeJS.ProcessEnv, readinessTimeoutMs = 30_000): Promise<OpenCodeServerHandle> {
   const port = await findAvailablePort();
   const invocation = resolveOpenCodeInvocation();
-  const logPath = path.join(os.tmpdir(), `codeowl-opencode-${process.pid}-${Date.now()}-${port}.log`);
+  const logPath = path.join(os.tmpdir(), `bateye-opencode-${process.pid}-${Date.now()}-${port}.log`);
 
   // Write a temporary opencode.json that disables per-provider chunk/total timeouts.
   // OpenCode's chunkTimeout (default 2–5 min depending on version) fires when no new
   // SSE chunk arrives within the window.  Reviewer prompts (full diff + file context)
   // cause slow models like DeepSeek to exceed this idle threshold, so we disable both
-  // timeout and chunkTimeout for every provider CodeOwl may use.
+  // timeout and chunkTimeout for every provider BatEye may use.
   // We write into an isolated XDG_CONFIG_HOME so we don't touch the user's own config.
-  const cfgDir = path.join(os.tmpdir(), `codeowl-opencode-cfg-${process.pid}-${Date.now()}`);
+  const cfgDir = path.join(os.tmpdir(), `bateye-opencode-cfg-${process.pid}-${Date.now()}`);
   const opencodeConfigDir = path.join(cfgDir, 'opencode');
   fs.mkdirSync(opencodeConfigDir, { recursive: true });
   // OpenCode accepts chunkTimeout as a number (milliseconds), not a boolean.
@@ -811,7 +811,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
         const session = await this.request<OpenCodeSession>(`${server.url}/session`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ title: 'CodeOwl Review Session' }),
+          body: JSON.stringify({ title: 'BatEye Review Session' }),
         }, 30_000);
         sessionID = session.id;
 
@@ -830,7 +830,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
         if (!isThinkingModel) {
           messageBody.format = {
             type: 'json_schema',
-            name: 'CodeOwlResponse',
+            name: 'BatEyeResponse',
             schema: responseSchema,
             retryCount: OPEN_CODE_STRUCTURED_OUTPUT_RETRY_COUNT,
           };
@@ -946,7 +946,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
         const repairSession = await this.request<OpenCodeSession>(`${server.url}/session`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ title: 'CodeOwl Structure Repair' }),
+          body: JSON.stringify({ title: 'BatEye Structure Repair' }),
         }, 30_000);
         repairSessionID = repairSession.id;
 
@@ -960,7 +960,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
             },
             format: {
               type: 'json_schema',
-              name: 'CodeOwlRepair',
+              name: 'BatEyeRepair',
               schema: responseSchema,
               retryCount: 0,
             },
@@ -1030,7 +1030,10 @@ export class OpenCodeCLIRuntime implements IRuntime {
         30_000,
       );
       return providers.providers.flatMap(provider => Object.keys(provider.models || {}).map(modelID => `${provider.id}/${modelID}`));
-    } catch {
+    } catch (err) {
+      logRuntimeDebug(
+        `[opencode] listModels failed for provider=${_provider} baseUrl=${_apiBaseUrl || '(default)'}: ${formatErrorWithCauses(err)}`,
+      );
       return [];
     }
   }

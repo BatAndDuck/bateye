@@ -26,7 +26,7 @@ import {
   MAX_STRUCTURED_DIFF_CHARS,
   OUTPUT_DIR,
   PR_REVIEW_OUTPUT_FILE,
-  CODEOWL_BREAKING_CHANGES_MARKER,
+  BATEYE_BREAKING_CHANGES_MARKER,
 } from '../config/defaults';
 import { GitHubReviewPlatform, getGitHubEnvContext } from '../github/platform';
 import { parseUnifiedDiff, buildReviewerDiffContext, getFilesInDiff } from './diff-parser';
@@ -107,7 +107,7 @@ function formatFindingComment(finding: PRFinding): string {
   const confidencePercent = Math.round(finding.confidence * 100);
   const inspectedFiles = extractTrailFiles(finding).slice(0, 3);
 
-  let comment = `${icon} **[CodeOwl ${finding.priority.toUpperCase()}] ${finding.title}**\n\n`;
+  let comment = `${icon} **[BatEye ${finding.priority.toUpperCase()}] ${finding.title}**\n\n`;
   comment += `${finding.description}\n\n`;
   comment += `**Recommendation:** ${finding.recommendation}\n\n`;
 
@@ -146,8 +146,8 @@ function formatBreakingChangesComment(findings: PRFinding[]): string {
     return entry.trimEnd();
   }).join('\n\n---\n\n');
 
-  return `${CODEOWL_BREAKING_CHANGES_MARKER}
-## 🦉 CodeOwl — Breaking Changes Detected
+  return `${BATEYE_BREAKING_CHANGES_MARKER}
+## 🦉 BatEye — Breaking Changes Detected
 
 This PR introduces **${findings.length} breaking change${findings.length === 1 ? '' : 's'}**. These are listed here for visibility. Auto-approve is disabled until breaking changes are reviewed and resolved or explicitly acknowledged.
 
@@ -288,7 +288,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
           platform.listReviewComments(),
         ]);
         conversation = buildConversation(generalComments, reviewComments);
-        log(`Found ${conversation.codeOwlInlineComments.length} existing CodeOwl comments`);
+        log(`Found ${conversation.batEyeInlineComments.length} existing BatEye comments`);
       }
     }
   }
@@ -298,7 +298,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   const repoProfile = buildPRRepoProfile(repoPath, changedFiles);
 
   // Validate that the agentic runtime is available before calling the orchestrator.
-  // This surfaces errors like "cannot use CODEOWL_RUNTIME=direct" immediately.
+  // This surfaces errors like "cannot use BATEYE_RUNTIME=direct" immediately.
   const runtime = await getPRReviewRuntime();
 
   log('Loading reviewers...');
@@ -643,8 +643,8 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     await platform.updateOrCreateSummary(result.summary);
 
     const statusBody = result.status === 'degraded'
-      ? `<!-- codeowl-status -->\n🦉 **CodeOwl** review completed with warnings — ${postedFindings.length} findings posted.`
-      : `<!-- codeowl-status -->\n🦉 **CodeOwl** review complete — ${postedFindings.length} findings posted.`;
+      ? `<!-- bateye-status -->\n🦉 **BatEye** review completed with warnings — ${postedFindings.length} findings posted.`
+      : `<!-- bateye-status -->\n🦉 **BatEye** review complete — ${postedFindings.length} findings posted.`;
     await platform.updateStatusComment(statusBody);
 
     const hasBreakingChanges = breakingChangeFindings.length > 0;
@@ -658,7 +658,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       } else if (!hasBlocker) {
         log('Auto-approving PR (no findings exceed threshold)...');
         const approved = await platform.approvePR(
-          `🦉 **CodeOwl Auto-Approve**: No findings above "${maxSev}" severity. ✅`
+          `🦉 **BatEye Auto-Approve**: No findings above "${maxSev}" severity. ✅`
         );
         if (approved) {
           result.autoApproved = true;
@@ -666,7 +666,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
           const failMsg = '⚠️  Auto-approve failed — enable **Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests"** in this repository.';
           log(failMsg);
           await platform.updateStatusComment(
-            `<!-- codeowl-status -->\n🦉 **CodeOwl** review complete — ${postedFindings.length} findings posted.\n\n${failMsg}`
+            `<!-- bateye-status -->\n🦉 **BatEye** review complete — ${postedFindings.length} findings posted.\n\n${failMsg}`
           );
         }
       } else {

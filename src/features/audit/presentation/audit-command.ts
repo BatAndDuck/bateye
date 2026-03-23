@@ -13,7 +13,7 @@ export interface AuditCommandOptions {
 
 export async function runAuditCommand(repoPath: string, options: AuditCommandOptions): Promise<void> {
   await runCliTask({
-    title: '🦉 CodeOwl Audit',
+    title: '🦉 BatEye Audit',
     startText: 'Starting audit...',
     successText: 'Audit complete',
     errorPrefix: 'Audit failed',
@@ -31,8 +31,8 @@ function printAuditSummary(result: AuditResult): void {
   const grade = scoreToGrade(result.overallScore);
   const label = scoreToLabel(result.overallScore);
   const reportPath = result.repoPath
-    ? path.join(result.repoPath, '.codeowl', 'out', 'audit.json')
-    : path.join('.codeowl', 'out', 'audit.json');
+    ? path.join(result.repoPath, '.bateye', 'out', 'audit.json')
+    : path.join('.bateye', 'out', 'audit.json');
 
   console.log('\n' + chalk.cyan('─'.repeat(50)));
   console.log(chalk.white('  Overall Score: ') + chalk.bold(`${result.overallScore}/100`) + ` (${grade} - ${label})`);

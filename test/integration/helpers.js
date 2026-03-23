@@ -37,8 +37,8 @@ function initGitRepo(repoPath) {
   fs.mkdirSync(repoPath, { recursive: true });
   runOk('git', ['init'], { cwd: repoPath });
   runOk('git', ['checkout', '-b', 'main'], { cwd: repoPath });
-  runOk('git', ['config', 'user.name', 'CodeOwl Test'], { cwd: repoPath });
-  runOk('git', ['config', 'user.email', 'codeowl@example.com'], { cwd: repoPath });
+  runOk('git', ['config', 'user.name', 'BatEye Test'], { cwd: repoPath });
+  runOk('git', ['config', 'user.email', 'bateye@example.com'], { cwd: repoPath });
 }
 
 function commitAll(repoPath, message) {

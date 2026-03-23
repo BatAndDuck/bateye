@@ -14,11 +14,11 @@ const {
 } = require('../../dist/features/config/application/config-service');
 
 function makeTmpDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-cfg-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-cfg-'));
 }
 
 function writeConfig(repoPath, data) {
-  const configDir = path.join(repoPath, '.codeowl');
+  const configDir = path.join(repoPath, '.bateye');
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(path.join(configDir, 'config.json'), JSON.stringify(data, null, 2));
 }
@@ -40,8 +40,8 @@ test('loadConfig reads existing config file', () => {
 
 test('loadConfig throws on malformed JSON', () => {
   const tmpDir = makeTmpDir();
-  fs.mkdirSync(path.join(tmpDir, '.codeowl'), { recursive: true });
-  fs.writeFileSync(path.join(tmpDir, '.codeowl', 'config.json'), '{ invalid json }');
+  fs.mkdirSync(path.join(tmpDir, '.bateye'), { recursive: true });
+  fs.writeFileSync(path.join(tmpDir, '.bateye', 'config.json'), '{ invalid json }');
   assert.throws(() => loadConfig(tmpDir), /Failed to parse/);
 });
 
@@ -50,7 +50,7 @@ test('saveConfig writes config as formatted JSON with trailing newline', () => {
   const tmpDir = makeTmpDir();
   saveConfig(tmpDir, { model: 'anthropic/claude-3', exclude: ['dist'] });
 
-  const content = fs.readFileSync(path.join(tmpDir, '.codeowl', 'config.json'), 'utf-8');
+  const content = fs.readFileSync(path.join(tmpDir, '.bateye', 'config.json'), 'utf-8');
   assert.ok(content.endsWith('\n'));
 
   const parsed = JSON.parse(content);
@@ -58,11 +58,11 @@ test('saveConfig writes config as formatted JSON with trailing newline', () => {
   assert.deepEqual(parsed.exclude, ['dist']);
 });
 
-test('saveConfig creates .codeowl directory if it does not exist', () => {
+test('saveConfig creates .bateye directory if it does not exist', () => {
   const tmpDir = makeTmpDir();
-  assert.ok(!fs.existsSync(path.join(tmpDir, '.codeowl')));
+  assert.ok(!fs.existsSync(path.join(tmpDir, '.bateye')));
   saveConfig(tmpDir, { model: 'anthropic/test' });
-  assert.ok(fs.existsSync(path.join(tmpDir, '.codeowl', 'config.json')));
+  assert.ok(fs.existsSync(path.join(tmpDir, '.bateye', 'config.json')));
 });
 
 test('saveConfig overwrites existing config', () => {
@@ -70,7 +70,7 @@ test('saveConfig overwrites existing config', () => {
   saveConfig(tmpDir, { model: 'anthropic/old-model' });
   saveConfig(tmpDir, { model: 'anthropic/new-model' });
   const content = JSON.parse(
-    fs.readFileSync(path.join(tmpDir, '.codeowl', 'config.json'), 'utf-8'),
+    fs.readFileSync(path.join(tmpDir, '.bateye', 'config.json'), 'utf-8'),
   );
   assert.equal(content.model, 'anthropic/new-model');
 });
@@ -114,25 +114,25 @@ test('resolveConfig returns empty exclude array when absent', () => {
 
 // resolveApiKey
 test('resolveApiKey returns API key from default environment variable', () => {
-  const originalKey = process.env.CODE_OWL_LLM_MODEL_API_KEY;
-  process.env.CODE_OWL_LLM_MODEL_API_KEY = 'my-test-api-key-12345';
+  const originalKey = process.env.BATEYE_LLM_MODEL_API_KEY;
+  process.env.BATEYE_LLM_MODEL_API_KEY = 'my-test-api-key-12345';
   try {
     const key = resolveApiKey();
     assert.equal(key, 'my-test-api-key-12345');
   } finally {
     if (originalKey === undefined) {
-      delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
+      delete process.env.BATEYE_LLM_MODEL_API_KEY;
     } else {
-      process.env.CODE_OWL_LLM_MODEL_API_KEY = originalKey;
+      process.env.BATEYE_LLM_MODEL_API_KEY = originalKey;
     }
   }
 });
 
 test('resolveApiKey uses VERCEL_OIDC_TOKEN for Vercel models', () => {
-  const originalDefaultKey = process.env.CODE_OWL_LLM_MODEL_API_KEY;
+  const originalDefaultKey = process.env.BATEYE_LLM_MODEL_API_KEY;
   const originalGatewayKey = process.env.AI_GATEWAY_API_KEY;
   const originalToken = process.env.VERCEL_OIDC_TOKEN;
-  delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
+  delete process.env.BATEYE_LLM_MODEL_API_KEY;
   delete process.env.AI_GATEWAY_API_KEY;
   process.env.VERCEL_OIDC_TOKEN = 'vercel-oidc-token';
   try {
@@ -140,9 +140,9 @@ test('resolveApiKey uses VERCEL_OIDC_TOKEN for Vercel models', () => {
     assert.equal(key, 'vercel-oidc-token');
   } finally {
     if (originalDefaultKey === undefined) {
-      delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
+      delete process.env.BATEYE_LLM_MODEL_API_KEY;
     } else {
-      process.env.CODE_OWL_LLM_MODEL_API_KEY = originalDefaultKey;
+      process.env.BATEYE_LLM_MODEL_API_KEY = originalDefaultKey;
     }
     if (originalGatewayKey === undefined) {
       delete process.env.AI_GATEWAY_API_KEY;
@@ -165,16 +165,24 @@ test('resolveAuthEnvName returns VERCEL_OIDC_TOKEN for Vercel transport', () => 
 });
 
 test('resolveApiKey throws when required environment variable is not set', () => {
-  const original = process.env.CODE_OWL_LLM_MODEL_API_KEY;
-  delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
+  const original = process.env.BATEYE_LLM_MODEL_API_KEY;
+  const originalGatewayKey = process.env.AI_GATEWAY_API_KEY;
+  const originalToken = process.env.VERCEL_OIDC_TOKEN;
+  delete process.env.BATEYE_LLM_MODEL_API_KEY;
+  delete process.env.AI_GATEWAY_API_KEY;
+  delete process.env.VERCEL_OIDC_TOKEN;
   try {
     assert.throws(
       () => resolveApiKey(),
-      /CODE_OWL_LLM_MODEL_API_KEY/,
+      /BATEYE_LLM_MODEL_API_KEY|AI_GATEWAY_API_KEY|VERCEL_OIDC_TOKEN/,
     );
   } finally {
-    if (original === undefined) delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
-    else process.env.CODE_OWL_LLM_MODEL_API_KEY = original;
+    if (original === undefined) delete process.env.BATEYE_LLM_MODEL_API_KEY;
+    else process.env.BATEYE_LLM_MODEL_API_KEY = original;
+    if (originalGatewayKey === undefined) delete process.env.AI_GATEWAY_API_KEY;
+    else process.env.AI_GATEWAY_API_KEY = originalGatewayKey;
+    if (originalToken === undefined) delete process.env.VERCEL_OIDC_TOKEN;
+    else process.env.VERCEL_OIDC_TOKEN = originalToken;
   }
 });
 
@@ -185,7 +193,7 @@ test('setConfigField updates an existing field', () => {
   setConfigField(tmpDir, 'model', 'anthropic/new-model');
 
   const content = JSON.parse(
-    fs.readFileSync(path.join(tmpDir, '.codeowl', 'config.json'), 'utf-8'),
+    fs.readFileSync(path.join(tmpDir, '.bateye', 'config.json'), 'utf-8'),
   );
   assert.equal(content.model, 'anthropic/new-model');
   // Other fields should be preserved
@@ -198,7 +206,7 @@ test('setConfigField adds a new field to existing config', () => {
   setConfigField(tmpDir, 'exclude', ['dist', 'generated']);
 
   const content = JSON.parse(
-    fs.readFileSync(path.join(tmpDir, '.codeowl', 'config.json'), 'utf-8'),
+    fs.readFileSync(path.join(tmpDir, '.bateye', 'config.json'), 'utf-8'),
   );
   assert.deepEqual(content.exclude, ['dist', 'generated']);
   assert.equal(content.model, 'anthropic/model');
@@ -211,7 +219,7 @@ test('setConfigField supports transport fields', () => {
   setConfigField(tmpDir, 'apiBaseUrl', 'https://ai-gateway.vercel.sh/v1');
 
   const content = JSON.parse(
-    fs.readFileSync(path.join(tmpDir, '.codeowl', 'config.json'), 'utf-8'),
+    fs.readFileSync(path.join(tmpDir, '.bateye', 'config.json'), 'utf-8'),
   );
   assert.equal(content.transport, 'vercel');
   assert.equal(content.apiBaseUrl, 'https://ai-gateway.vercel.sh/v1');
@@ -221,7 +229,7 @@ test('setConfigField works when no config file exists yet', () => {
   const tmpDir = makeTmpDir();
   setConfigField(tmpDir, 'model', 'anthropic/new-model');
   const content = JSON.parse(
-    fs.readFileSync(path.join(tmpDir, '.codeowl', 'config.json'), 'utf-8'),
+    fs.readFileSync(path.join(tmpDir, '.bateye', 'config.json'), 'utf-8'),
   );
   assert.equal(content.model, 'anthropic/new-model');
 });
@@ -247,7 +255,7 @@ test('setConfigField supports disabledReviewers arrays', () => {
   setConfigField(tmpDir, 'disabledReviewers', ['inline-docs', 'i18n']);
 
   const content = JSON.parse(
-    fs.readFileSync(path.join(tmpDir, '.codeowl', 'config.json'), 'utf-8'),
+    fs.readFileSync(path.join(tmpDir, '.bateye', 'config.json'), 'utf-8'),
   );
   assert.deepEqual(content.disabledReviewers, ['inline-docs', 'i18n']);
 });

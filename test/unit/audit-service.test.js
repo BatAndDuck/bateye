@@ -8,33 +8,41 @@ const { runAudit } = require('../../dist/features/audit/application/audit-servic
 const { MAX_CONCURRENT_AUDIT_REVIEWERS } = require('../../dist/core/config/defaults');
 
 function makeRepo() {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-audit-unit-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-audit-unit-'));
   fs.mkdirSync(path.join(repoPath, '.git'));
   fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
   fs.writeFileSync(path.join(repoPath, 'src', 'index.ts'), 'export const value = 1;\n');
-  fs.mkdirSync(path.join(repoPath, '.codeowl'), { recursive: true });
+  fs.mkdirSync(path.join(repoPath, '.bateye'), { recursive: true });
   fs.writeFileSync(
-    path.join(repoPath, '.codeowl', 'config.json'),
+    path.join(repoPath, '.bateye', 'config.json'),
     JSON.stringify({ model: 'anthropic/mock-model' }, null, 2),
   );
   return repoPath;
 }
 
 function setApiKey(value) {
-  const original = process.env.CODE_OWL_LLM_MODEL_API_KEY;
-  process.env.CODE_OWL_LLM_MODEL_API_KEY = value;
+  const original = process.env.BATEYE_LLM_MODEL_API_KEY;
+  process.env.BATEYE_LLM_MODEL_API_KEY = value;
   return () => {
-    if (original === undefined) delete process.env.CODE_OWL_LLM_MODEL_API_KEY;
-    else process.env.CODE_OWL_LLM_MODEL_API_KEY = original;
+    if (original === undefined) delete process.env.BATEYE_LLM_MODEL_API_KEY;
+    else process.env.BATEYE_LLM_MODEL_API_KEY = original;
   };
+}
+
+function createDeferred() {
+  let resolve;
+  const promise = new Promise(innerResolve => {
+    resolve = innerResolve;
+  });
+  return { promise, resolve };
 }
 
 test('runAudit throws when a reviewer runtime call fails', async () => {
   const repoPath = makeRepo();
   const restoreApiKey = setApiKey('test-api-key');
-  fs.mkdirSync(path.join(repoPath, '.codeowl', 'reviewers'), { recursive: true });
+  fs.mkdirSync(path.join(repoPath, '.bateye', 'reviewers'), { recursive: true });
   fs.writeFileSync(
-    path.join(repoPath, '.codeowl', 'reviewers', 'failing-reviewer.md'),
+    path.join(repoPath, '.bateye', 'reviewers', 'failing-reviewer.md'),
     `---
 id: failing-reviewer
 name: Failing Reviewer
@@ -75,11 +83,11 @@ Fail on purpose.
 test('runAudit runs reviewers concurrently with a cap of 10', async () => {
   const repoPath = makeRepo();
   const restoreApiKey = setApiKey('test-api-key');
-  fs.mkdirSync(path.join(repoPath, '.codeowl', 'reviewers'), { recursive: true });
+  fs.mkdirSync(path.join(repoPath, '.bateye', 'reviewers'), { recursive: true });
 
   for (let i = 0; i < 12; i++) {
     fs.writeFileSync(
-      path.join(repoPath, '.codeowl', 'reviewers', `reviewer-${i}.md`),
+      path.join(repoPath, '.bateye', 'reviewers', `reviewer-${i}.md`),
       `---
 id: reviewer-${i}
 name: Reviewer ${i}
@@ -92,6 +100,9 @@ Check reviewer ${i}.
 
   let activeRuns = 0;
   let maxActiveRuns = 0;
+  const releaseRuns = createDeferred();
+  const allSlotsObserved = createDeferred();
+  let releaseScheduled = false;
 
   try {
     const result = await runAudit(
@@ -101,8 +112,17 @@ Check reviewer ${i}.
           async runAgenticReview(_options, schema) {
             activeRuns += 1;
             maxActiveRuns = Math.max(maxActiveRuns, activeRuns);
-            const CONCURRENCY_TEST_DELAY_MS = 25; // small delay to allow concurrent reviewers to interleave
-            await new Promise(resolve => setTimeout(resolve, CONCURRENCY_TEST_DELAY_MS));
+
+            if (maxActiveRuns === MAX_CONCURRENT_AUDIT_REVIEWERS && !releaseScheduled) {
+              releaseScheduled = true;
+              allSlotsObserved.resolve();
+            }
+
+            await Promise.race([
+              releaseRuns.promise,
+              allSlotsObserved.promise.then(() => undefined),
+            ]);
+
             activeRuns -= 1;
             return {
               data: schema.parse({ score: 85, summary: 'ok', findings: [] }),
@@ -125,9 +145,12 @@ Check reviewer ${i}.
       },
     );
 
+    releaseRuns.resolve();
     assert.equal(result.reviewerResults.length, 12);
     assert.equal(maxActiveRuns, MAX_CONCURRENT_AUDIT_REVIEWERS);
   } finally {
+    releaseRuns.resolve();
+    allSlotsObserved.resolve();
     restoreApiKey();
   }
 });
@@ -135,9 +158,9 @@ Check reviewer ${i}.
 test('runAudit drops findings that point at generated artifacts', async () => {
   const repoPath = makeRepo();
   const restoreApiKey = setApiKey('test-api-key');
-  fs.mkdirSync(path.join(repoPath, '.codeowl', 'reviewers'), { recursive: true });
+  fs.mkdirSync(path.join(repoPath, '.bateye', 'reviewers'), { recursive: true });
   fs.writeFileSync(
-    path.join(repoPath, '.codeowl', 'reviewers', 'generated-artifact.md'),
+    path.join(repoPath, '.bateye', 'reviewers', 'generated-artifact.md'),
     `---
 id: generated-artifact
 name: Generated Artifact Reviewer
@@ -201,9 +224,9 @@ test('runAudit drops dependency-placement findings when the package is reference
   const repoPath = makeRepo();
   const restoreApiKey = setApiKey('test-api-key');
   fs.writeFileSync(path.join(repoPath, 'src', 'index.ts'), 'export const tool = "dependency-cruiser";\n');
-  fs.mkdirSync(path.join(repoPath, '.codeowl', 'reviewers'), { recursive: true });
+  fs.mkdirSync(path.join(repoPath, '.bateye', 'reviewers'), { recursive: true });
   fs.writeFileSync(
-    path.join(repoPath, '.codeowl', 'reviewers', 'dependency-noise.md'),
+    path.join(repoPath, '.bateye', 'reviewers', 'dependency-noise.md'),
     `---
 id: dependency-noise
 name: Dependency Noise Reviewer
@@ -267,11 +290,11 @@ Check dependency placement.
 test('runAudit skips failed reviewers when at least one reviewer succeeds', async () => {
   const repoPath = makeRepo();
   const restoreApiKey = setApiKey('test-api-key');
-  fs.mkdirSync(path.join(repoPath, '.codeowl', 'reviewers'), { recursive: true });
+  fs.mkdirSync(path.join(repoPath, '.bateye', 'reviewers'), { recursive: true });
 
   for (const id of ['ok-reviewer', 'broken-reviewer']) {
     fs.writeFileSync(
-      path.join(repoPath, '.codeowl', 'reviewers', `${id}.md`),
+      path.join(repoPath, '.bateye', 'reviewers', `${id}.md`),
       `---
 id: ${id}
 name: ${id}
@@ -322,7 +345,7 @@ Check reviewer ${id}.
 test('runAudit seeds audit reviewers with an adaptive file budget and accurate prompt counts', async () => {
   const repoPath = makeRepo();
   const restoreApiKey = setApiKey('test-api-key');
-  fs.mkdirSync(path.join(repoPath, '.codeowl', 'reviewers'), { recursive: true });
+  fs.mkdirSync(path.join(repoPath, '.bateye', 'reviewers'), { recursive: true });
   fs.mkdirSync(path.join(repoPath, 'src', 'components'), { recursive: true });
 
   for (let i = 0; i < 20; i++) {
@@ -332,7 +355,7 @@ test('runAudit seeds audit reviewers with an adaptive file budget and accurate p
   fs.writeFileSync(path.join(repoPath, 'package.json'), '{"name":"seed-budget-test"}\n');
 
   fs.writeFileSync(
-    path.join(repoPath, '.codeowl', 'reviewers', 'frontend-seeding.md'),
+    path.join(repoPath, '.bateye', 'reviewers', 'frontend-seeding.md'),
     `---
 id: frontend-seeding
 name: Frontend Seeding
@@ -388,9 +411,9 @@ Review frontend bundle signals.
 test('runAudit surfaces nested reviewer failure causes in persisted issues', async () => {
   const repoPath = makeRepo();
   const restoreApiKey = setApiKey('test-api-key');
-  fs.mkdirSync(path.join(repoPath, '.codeowl', 'reviewers'), { recursive: true });
+  fs.mkdirSync(path.join(repoPath, '.bateye', 'reviewers'), { recursive: true });
   fs.writeFileSync(
-    path.join(repoPath, '.codeowl', 'reviewers', 'failing-reviewer.md'),
+    path.join(repoPath, '.bateye', 'reviewers', 'failing-reviewer.md'),
     `---
 id: failing-reviewer
 name: Failing Reviewer

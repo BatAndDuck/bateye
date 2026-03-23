@@ -2,7 +2,7 @@ import chalk from 'chalk';
 import { loadReviewers } from '../application/reviewer-registry';
 
 export async function runReviewersList(repoPath: string): Promise<void> {
-  console.log(chalk.cyan('\n🦉 CodeOwl Reviewers\n'));
+  console.log(chalk.cyan('\n🦉 BatEye Reviewers\n'));
 
   const { reviewers, warnings } = loadReviewers(repoPath);
 
@@ -11,7 +11,7 @@ export async function runReviewersList(repoPath: string): Promise<void> {
   }
 
   if (reviewers.length === 0) {
-    console.log(chalk.gray('  No reviewers found. Add custom reviewers to .codeowl/reviewers/*.md.'));
+    console.log(chalk.gray('  No reviewers found. Add custom reviewers to .bateye/reviewers/*.md.'));
     return;
   }
 
@@ -30,7 +30,7 @@ export async function runReviewersList(repoPath: string): Promise<void> {
   }
 
   if (user.length > 0) {
-    console.log(chalk.white('  User reviewers (.codeowl/reviewers/):'));
+    console.log(chalk.white('  User reviewers (.bateye/reviewers/):'));
     for (const reviewer of user) {
       console.log(`    ${chalk.cyan(reviewer.id.padEnd(20))} ${chalk.gray(reviewer.name)}`);
       if (reviewer.description) {

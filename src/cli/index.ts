@@ -6,14 +6,14 @@ import { runModels } from '../commands/models/index';
 import { runConfigShow, runConfigSet } from '../commands/config/index';
 import { runAuditCommand } from '../commands/audit/index';
 import { runPRReviewCommand } from '../commands/pr-review/index';
-import { runSystemDesignCommand } from '../commands/system-design/index';
 import { runReviewersList } from '../commands/reviewers/index';
 
+/** Build the top-level BatEye CLI program and register every supported command. */
 export function createCLI(): Command {
   const program = new Command();
 
   program
-    .name('codeowl')
+    .name('bateye')
     .description('AI-powered code analysis CLI')
     .version('0.1.0');
 
@@ -30,14 +30,14 @@ export function createCLI(): Command {
   program.hook('preAction', command => {
     const opts = command.optsWithGlobals();
     if (opts.verbose) {
-      process.env.CODEOWL_VERBOSE = '1';
+      process.env.BATEYE_VERBOSE = '1';
     }
   });
 
   // ── init ──────────────────────────────────────────────────────────────
   program
     .command('init')
-    .description('Initialize CodeOwl in the current repository')
+    .description('Initialize BatEye in the current repository')
     .action(async (_, cmd) => {
       await runInit(getRepoPath(cmd));
     });
@@ -45,7 +45,7 @@ export function createCLI(): Command {
   // ── doctor ───────────────────────────────────────────────────────────
   program
     .command('doctor')
-    .description('Check CodeOwl setup and configuration')
+    .description('Check BatEye setup and configuration')
     .action(async (_, cmd) => {
       await runDoctor(getRepoPath(cmd));
     });
@@ -61,7 +61,7 @@ export function createCLI(): Command {
   // ── config ────────────────────────────────────────────────────────────
   const configCmd = program
     .command('config')
-    .description('Manage CodeOwl configuration');
+    .description('Manage BatEye configuration');
 
   configCmd
     .command('show')
@@ -114,15 +114,6 @@ export function createCLI(): Command {
         prNumber: opts.prNumber,
         dryRun: opts.dryRun,
       });
-    });
-
-  // ── system-design ─────────────────────────────────────────────────────
-  program
-    .command('system-design')
-    .description('Generate system design documentation and interactive visualization')
-    .option('-o, --output <dir>', 'Output directory for report')
-    .action(async (opts, cmd) => {
-      await runSystemDesignCommand(getRepoPath(cmd), { output: opts.output });
     });
 
   program.configureOutput({

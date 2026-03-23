@@ -6,7 +6,7 @@ import { MockRuntime } from '../../features/shared/runtime/mock-runtime';
 export type RuntimePreference = 'direct' | 'opencode-cli' | 'mock' | 'auto';
 
 const OPEN_CODE_RUNTIME_HINT =
-  'Install CodeOwl with its dependencies (`npm install codeowl`, `npm i -g codeowl`, or `npm ci`) '
+  'Install BatEye with its dependencies (`npm install bateye`, `npm i -g bateye`, or `npm ci`) '
   + 'or make `opencode` available on PATH.';
 
 let runtimeInstance: IRuntime | null = null;
@@ -15,7 +15,7 @@ let auditRuntimeInstance: IRuntime | null = null;
 let structuredRuntimeInstance: IRuntime | null = null;
 
 export async function createRuntime(preference: RuntimePreference = 'auto'): Promise<IRuntime> {
-  const effectivePreference = preference === 'auto' && process.env.CODEOWL_RUNTIME === 'mock'
+  const effectivePreference = preference === 'auto' && process.env.BATEYE_RUNTIME === 'mock'
     ? 'mock'
     : preference;
 
@@ -44,7 +44,7 @@ export async function getRuntime(): Promise<IRuntime> {
 }
 
 export async function createStructuredRuntime(): Promise<IRuntime> {
-  if (process.env.CODEOWL_RUNTIME === 'mock') {
+  if (process.env.BATEYE_RUNTIME === 'mock') {
     return new MockRuntime();
   }
 
@@ -60,14 +60,14 @@ export async function createAuditRuntime(): Promise<IRuntime> {
 }
 
 async function createAgenticRuntime(modeLabel: string): Promise<IRuntime> {
-  if (process.env.CODEOWL_RUNTIME === 'mock') {
+  if (process.env.BATEYE_RUNTIME === 'mock') {
     return new MockRuntime();
   }
 
-  if (process.env.CODEOWL_RUNTIME === 'direct') {
+  if (process.env.BATEYE_RUNTIME === 'direct') {
     throw new Error(
-      `Agentic ${modeLabel} cannot use CODEOWL_RUNTIME=direct. `
-      + 'Use the OpenCode CLI runtime or CODEOWL_RUNTIME=mock.'
+      `Agentic ${modeLabel} cannot use BATEYE_RUNTIME=direct. `
+      + 'Use the OpenCode CLI runtime or BATEYE_RUNTIME=mock.'
     );
   }
 
@@ -77,7 +77,7 @@ async function createAgenticRuntime(modeLabel: string): Promise<IRuntime> {
   }
 
   throw new Error(
-    `Agentic ${modeLabel} requires the OpenCode CLI runtime or CODEOWL_RUNTIME=mock. `
+    `Agentic ${modeLabel} requires the OpenCode CLI runtime or BATEYE_RUNTIME=mock. `
     + OPEN_CODE_RUNTIME_HINT
   );
 }

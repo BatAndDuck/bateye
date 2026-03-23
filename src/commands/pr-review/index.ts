@@ -12,8 +12,21 @@ export interface PRReviewCommandOptions {
   dryRun?: boolean;
 }
 
+function parsePrNumber(prNumber?: string): number | undefined {
+  if (!prNumber) {
+    return undefined;
+  }
+
+  const parsed = Number.parseInt(prNumber, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0 || String(parsed) !== prNumber.trim()) {
+    throw new Error(`Invalid PR number: "${prNumber}". Expected a positive integer.`);
+  }
+
+  return parsed;
+}
+
 export async function runPRReviewCommand(repoPath: string, options: PRReviewCommandOptions): Promise<void> {
-  console.log(chalk.cyan('\n🦉 CodeOwl PR Review\n'));
+  console.log(chalk.cyan('\n🦉 BatEye PR Review\n'));
 
   const interactive = Boolean(process.stdout.isTTY && !process.env.CI);
   const spinner = interactive ? ora({ text: 'Starting PR review...', color: 'cyan' }).start() : null;
@@ -32,7 +45,7 @@ export async function runPRReviewCommand(repoPath: string, options: PRReviewComm
       headRef: options.head,
       github: options.github,
       githubToken: options.token,
-      prNumber: options.prNumber ? parseInt(options.prNumber, 10) : undefined,
+      prNumber: parsePrNumber(options.prNumber),
       dryRun: options.dryRun,
       onProgress: msg => {
         if (noticePattern.test(msg)) {
@@ -54,10 +67,11 @@ export async function runPRReviewCommand(repoPath: string, options: PRReviewComm
       },
     });
   } catch (err) {
+    const message = err instanceof Error ? err.stack || err.message : String(err);
     if (spinner) {
-      spinner.fail(chalk.red(`PR review failed: ${(err as Error).message}`));
+      spinner.fail(chalk.red(`PR review failed: ${message}`));
     } else {
-      console.error(chalk.red(`PR review failed: ${(err as Error).message}`));
+      console.error(chalk.red(`PR review failed: ${message}`));
     }
     process.exit(1);
   }

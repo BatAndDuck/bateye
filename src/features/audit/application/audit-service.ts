@@ -1,6 +1,5 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import packageJson from '../../../../package.json';
 import { AuditResult, Finding, Priority, ReviewIssue, Reviewer, ReviewerResult } from '../../../types/index';
 import { buildRepoIndex, scopeFilesForReviewer, selectAuditSeedFiles } from '../../../core/indexing/index';
 import { reviewerAnalysisSchema, ReviewerAnalysis } from '../../../core/validation/schemas';
@@ -24,8 +23,7 @@ import { resolveApiKey, resolveConfig } from '../../config/application/config-se
 import { loadReviewersForMode } from '../../reviewers/application/reviewer-registry';
 import { selectAuditReviewers } from './audit-orchestrator';
 import { verifyAuditFindings } from './audit-verifier';
-
-const CODEOWL_VERSION: string = (packageJson as { version: string }).version;
+import { BATEYE_VERSION } from '../../../version';
 
 /**
  * Minimum confidence required to keep a finding, by severity.
@@ -119,7 +117,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   }
 
   if (activeReviewers.length === 0) {
-    throw new Error('No reviewers found. Built-in reviewers should load automatically; add custom reviewers to .codeowl/reviewers if needed.');
+    throw new Error('No reviewers found. Built-in reviewers should load automatically; add custom reviewers to .bateye/reviewers if needed.');
   }
 
   // Phase 4: Run reviewers
@@ -364,7 +362,7 @@ function assembleAuditResult(params: {
     issues,
     tokenUsage,
     generatedAt: new Date().toISOString(),
-    codeowlVersion: CODEOWL_VERSION,
+    bateyeVersion: BATEYE_VERSION,
     verificationStats,
   };
 }
@@ -571,7 +569,7 @@ function normalizeRepoPath(relativePath: string): string {
 }
 
 function isGeneratedArtifactPath(relativePath: string): boolean {
-  return /^(dist|build|coverage|\.codeowl\/out)(\/|$)/.test(relativePath);
+  return /^(dist|build|coverage|\.bateye\/out)(\/|$)/.test(relativePath);
 }
 
 function isKnownRepoMetadataPath(relativePath: string): boolean {

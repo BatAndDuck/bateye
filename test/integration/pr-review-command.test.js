@@ -18,15 +18,15 @@ function runPRReview(args, env) {
 }
 
 test('pr-review command runs agentic reviewers, semantically verifies findings, and writes the final report', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-int-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-int-'));
   initGitRepo(repoPath);
 
-  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
     model: 'anthropic/mock-model',
     exclude: [],
   });
 
-  writeText(path.join(repoPath, '.codeowl', 'reviewers', 'pr-tool.md'), `---
+  writeText(path.join(repoPath, '.bateye', 'reviewers', 'pr-tool.md'), `---
 id: pr-tool
 name: PR Tool Reviewer
 mode: pr-review
@@ -43,7 +43,7 @@ tool:
 Report only concrete security problems after investigating the current repository state.
 `);
 
-  writeText(path.join(repoPath, '.codeowl', 'reviewers', 'pr-follow-up.md'), `---
+  writeText(path.join(repoPath, '.bateye', 'reviewers', 'pr-follow-up.md'), `---
 id: pr-follow-up
 name: PR Follow-up Reviewer
 mode: pr-review
@@ -176,16 +176,16 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
   });
 
   const result = runPRReview(['--cwd', repoPath, '--base', 'main', '--dry-run'], {
-    CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
-    CODEOWL_RUNTIME: 'mock',
-    CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
-    CODEOWL_MOCK_RUNTIME_LOG: logPath,
+    BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+    BATEYE_RUNTIME: 'mock',
+    BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
+    BATEYE_MOCK_RUNTIME_LOG: logPath,
   });
   const combinedOutput = result.stdout + result.stderr;
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
 
-  const reportPath = path.join(repoPath, '.codeowl', 'out', 'pr-review.json');
+  const reportPath = path.join(repoPath, '.bateye', 'out', 'pr-review.json');
   assert.ok(fs.existsSync(reportPath));
 
   const report = JSON.parse(fs.readFileSync(reportPath, 'utf-8'));
@@ -228,10 +228,10 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
 });
 
 test('pr-review command fails when there are no changed files between the requested refs', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-empty-int-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-empty-int-'));
   initGitRepo(repoPath);
 
-  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
     model: 'anthropic/mock-model',
     exclude: [],
   });
@@ -243,21 +243,21 @@ test('pr-review command fails when there are no changed files between the reques
   writeJson(fixturePath, { runs: [], agenticRuns: [] });
 
   const result = runPRReview(['--cwd', repoPath, '--base', 'HEAD', '--head', 'HEAD', '--dry-run'], {
-    CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
-    CODEOWL_RUNTIME: 'mock',
-    CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+    BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+    BATEYE_RUNTIME: 'mock',
+    BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
   });
 
   assert.equal(result.status, 1);
   assert.match(result.stdout + result.stderr, /No changed files found between the specified refs/);
-  assert.equal(fs.existsSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json')), false);
+  assert.equal(fs.existsSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json')), false);
 });
 
 test('pr-review command uses exactly the reviewers the orchestrator selected, no more', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-broad-coverage-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-broad-coverage-'));
   initGitRepo(repoPath);
 
-  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
     model: 'anthropic/mock-model',
     exclude: [],
   });
@@ -294,15 +294,15 @@ test('pr-review command uses exactly the reviewers the orchestrator selected, no
   });
 
   const result = runPRReview(['--cwd', repoPath, '--base', 'main', '--dry-run'], {
-    CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
-    CODEOWL_RUNTIME: 'mock',
-    CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
-    CODEOWL_MOCK_RUNTIME_LOG: logPath,
+    BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+    BATEYE_RUNTIME: 'mock',
+    BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
+    BATEYE_MOCK_RUNTIME_LOG: logPath,
   });
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
 
-  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json'), 'utf-8'));
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json'), 'utf-8'));
   const selectedIds = report.selectedReviewers.map(reviewer => reviewer.reviewerId);
   assert.deepEqual(selectedIds, ['bug-hunter']);
 
@@ -311,10 +311,10 @@ test('pr-review command uses exactly the reviewers the orchestrator selected, no
 });
 
 test('pr-review command runs all reviewers the orchestrator selected without filtering', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-stable-selection-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-stable-selection-'));
   initGitRepo(repoPath);
 
-  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
     model: 'anthropic/mock-model',
     exclude: [],
   });
@@ -366,28 +366,28 @@ test('pr-review command runs all reviewers the orchestrator selected without fil
   });
 
   const result = runPRReview(['--cwd', repoPath, '--base', 'main', '--dry-run'], {
-    CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
-    CODEOWL_RUNTIME: 'mock',
-    CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+    BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+    BATEYE_RUNTIME: 'mock',
+    BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
   });
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
 
-  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json'), 'utf-8'));
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json'), 'utf-8'));
   const selectedIds = report.selectedReviewers.map(reviewer => reviewer.reviewerId);
   assert.deepEqual(selectedIds, ['error-handling', 'log-reviewer', 'complexity', 'code-quality', 'clean-code', 'test-quality', 'resiliency', 'bug-hunter']);
 });
 
 test('pr-review command reports degraded status when review coverage is reduced by tool failures', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-degraded-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-degraded-'));
   initGitRepo(repoPath);
 
-  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
     model: 'anthropic/mock-model',
     exclude: [],
   });
 
-  writeText(path.join(repoPath, '.codeowl', 'reviewers', 'failing-tool-reviewer.md'), `---
+  writeText(path.join(repoPath, '.bateye', 'reviewers', 'failing-tool-reviewer.md'), `---
 id: failing-tool-reviewer
 name: Failing Tool Reviewer
 mode: pr-review
@@ -403,7 +403,7 @@ tool:
 Investigate security issues only.
 `);
 
-  writeText(path.join(repoPath, '.codeowl', 'reviewers', 'plain-reviewer.md'), `---
+  writeText(path.join(repoPath, '.bateye', 'reviewers', 'plain-reviewer.md'), `---
 id: plain-reviewer
 name: Plain Reviewer
 mode: pr-review
@@ -440,16 +440,16 @@ Investigate code quality issues only.
   });
 
   const result = runPRReview(['--cwd', repoPath, '--base', 'main', '--dry-run'], {
-    CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
-    CODEOWL_RUNTIME: 'mock',
-    CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+    BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+    BATEYE_RUNTIME: 'mock',
+    BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
   });
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Status:\s+DEGRADED/);
   assert.match(result.stdout, /Review issues/);
 
-  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json'), 'utf-8'));
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json'), 'utf-8'));
   assert.equal(report.status, 'degraded');
   assert.equal(report.findings.length, 0);
   assert.ok(report.issues.some(issue => issue.code === 'pr-reviewer-optional-tool-failed'));
@@ -457,15 +457,15 @@ Investigate code quality issues only.
 });
 
 test('pr-review command rejects false positives when current code preserves the behavior elsewhere in the file', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-inline-fp-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-inline-fp-'));
   initGitRepo(repoPath);
 
-  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
     model: 'anthropic/mock-model',
     exclude: [],
   });
 
-  writeText(path.join(repoPath, '.codeowl', 'reviewers', 'bug-hunter-local.md'), `---
+  writeText(path.join(repoPath, '.bateye', 'reviewers', 'bug-hunter-local.md'), `---
 id: bug-hunter-local
 name: Bug Hunter Local
 mode: pr-review
@@ -545,14 +545,14 @@ export function buildRepoIndex(config) {
   });
 
   const result = runPRReview(['--cwd', repoPath, '--base', 'main', '--dry-run'], {
-    CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
-    CODEOWL_RUNTIME: 'mock',
-    CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+    BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+    BATEYE_RUNTIME: 'mock',
+    BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
   });
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
 
-  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json'), 'utf-8'));
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json'), 'utf-8'));
   assert.equal(report.findings.length, 0);
   assert.deepEqual(report.verificationStats, {
     rawFindings: 1,
@@ -565,15 +565,15 @@ export function buildRepoIndex(config) {
 });
 
 test('pr-review command rejects workflow absence claims when the current workflow already contains the gate', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-workflow-fp-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-workflow-fp-'));
   initGitRepo(repoPath);
 
-  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
     model: 'anthropic/mock-model',
     exclude: [],
   });
 
-  writeText(path.join(repoPath, '.codeowl', 'reviewers', 'ci-cd-local.md'), `---
+  writeText(path.join(repoPath, '.bateye', 'reviewers', 'ci-cd-local.md'), `---
 id: ci-cd-local
 name: CI Local
 mode: pr-review
@@ -666,28 +666,28 @@ jobs:
   });
 
   const result = runPRReview(['--cwd', repoPath, '--base', 'main', '--dry-run'], {
-    CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
-    CODEOWL_RUNTIME: 'mock',
-    CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+    BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+    BATEYE_RUNTIME: 'mock',
+    BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
   });
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
 
-  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json'), 'utf-8'));
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json'), 'utf-8'));
   assert.equal(report.findings.length, 0);
   assert.equal(report.verificationStats.semanticRejected, 1);
 });
 
 test('pr-review command rejects findings anchored only to removed code', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-removed-code-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-removed-code-'));
   initGitRepo(repoPath);
 
-  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
     model: 'anthropic/mock-model',
     exclude: [],
   });
 
-  writeText(path.join(repoPath, '.codeowl', 'reviewers', 'removed-code-reviewer.md'), `---
+  writeText(path.join(repoPath, '.bateye', 'reviewers', 'removed-code-reviewer.md'), `---
 id: removed-code-reviewer
 name: Removed Code Reviewer
 mode: pr-review
@@ -763,14 +763,14 @@ Report only concrete issues that still exist after investigating the current fil
   });
 
   const result = runPRReview(['--cwd', repoPath, '--base', 'main', '--dry-run'], {
-    CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
-    CODEOWL_RUNTIME: 'mock',
-    CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+    BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+    BATEYE_RUNTIME: 'mock',
+    BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
   });
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
 
-  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json'), 'utf-8'));
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json'), 'utf-8'));
   assert.equal(report.findings.length, 0);
   assert.deepEqual(report.verificationStats, {
     rawFindings: 1,
@@ -783,10 +783,10 @@ Report only concrete issues that still exist after investigating the current fil
 });
 
 test('pr-review command in github mode filters already-posted findings and updates mocked GitHub state', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-github-int-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-github-int-'));
   initGitRepo(repoPath);
 
-  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
     model: 'anthropic/mock-model',
     exclude: [],
     prReview: {
@@ -797,7 +797,7 @@ test('pr-review command in github mode filters already-posted findings and updat
     },
   });
 
-  writeText(path.join(repoPath, '.codeowl', 'reviewers', 'github-reviewer.md'), `---
+  writeText(path.join(repoPath, '.bateye', 'reviewers', 'github-reviewer.md'), `---
 id: github-reviewer
 name: GitHub Reviewer
 mode: pr-review
@@ -882,24 +882,24 @@ Report only concrete code quality findings after investigating the current repos
     issueComments: [
       {
         id: 10,
-        body: '<!-- codeowl-status -->\nOld status body',
-        user: { login: 'codeowl-bot' },
+        body: '<!-- bateye-status -->\nOld status body',
+        user: { login: 'bateye-bot' },
         created_at: '2026-03-15T00:00:00Z',
       },
       {
         id: 11,
-        body: '<!-- codeowl-summary -->\nOld summary body',
-        user: { login: 'codeowl-bot' },
+        body: '<!-- bateye-summary -->\nOld summary body',
+        user: { login: 'bateye-bot' },
         created_at: '2026-03-15T00:00:00Z',
       },
     ],
     reviewComments: [
       {
         id: 21,
-        body: '🟢 **[CodeOwl LOW] Trimmed input is returned directly**\n\nAlready posted.',
+        body: '🟢 **[BatEye LOW] Trimmed input is returned directly**\n\nAlready posted.',
         path: 'src/service.ts',
         line: 2,
-        user: { login: 'codeowl-bot' },
+        user: { login: 'bateye-bot' },
         created_at: '2026-03-15T00:00:00Z',
       },
     ],
@@ -911,12 +911,12 @@ Report only concrete code quality findings after investigating the current repos
     cwd: process.cwd(),
     env: {
       ...process.env,
-      CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
-      CODEOWL_RUNTIME: 'mock',
-      CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
-      CODEOWL_OCTOKIT_FIXTURES: octokitFixturePath,
+      BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+      BATEYE_RUNTIME: 'mock',
+      BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
+      BATEYE_OCTOKIT_FIXTURES: octokitFixturePath,
       GITHUB_TOKEN: 'github-test-token',
-      GITHUB_REPOSITORY: 'CodeOwlOrg/CodeOwl',
+      GITHUB_REPOSITORY: 'BatEyeOrg/BatEye',
       PR_NUMBER: '7',
       COMMENT_ID: '99',
     },
@@ -925,7 +925,7 @@ Report only concrete code quality findings after investigating the current repos
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
 
-  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json'), 'utf-8'));
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json'), 'utf-8'));
   assert.equal(report.findings.length, 0);
   assert.equal(report.autoApproved, true);
   assert.match(report.summary, /No issues found/);
@@ -950,15 +950,15 @@ Report only concrete code quality findings after investigating the current repos
 });
 
 test('pr-review command falls back to a general PR comment when an inline line cannot be resolved', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-inline-fallback-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-inline-fallback-'));
   initGitRepo(repoPath);
 
-  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
     model: 'anthropic/mock-model',
     exclude: [],
   });
 
-  writeText(path.join(repoPath, '.codeowl', 'reviewers', 'github-inline-reviewer.md'), `---
+  writeText(path.join(repoPath, '.bateye', 'reviewers', 'github-inline-reviewer.md'), `---
 id: github-inline-reviewer
 name: GitHub Inline Reviewer
 mode: pr-review
@@ -1051,12 +1051,12 @@ Report only concrete findings anchored to the changed file.
     cwd: process.cwd(),
     env: {
       ...process.env,
-      CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
-      CODEOWL_RUNTIME: 'mock',
-      CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
-      CODEOWL_OCTOKIT_FIXTURES: octokitFixturePath,
+      BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+      BATEYE_RUNTIME: 'mock',
+      BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
+      BATEYE_OCTOKIT_FIXTURES: octokitFixturePath,
       GITHUB_TOKEN: 'github-test-token',
-      GITHUB_REPOSITORY: 'CodeOwlOrg/CodeOwl',
+      GITHUB_REPOSITORY: 'BatEyeOrg/BatEye',
       PR_NUMBER: '9',
     },
     encoding: 'utf-8',
@@ -1064,7 +1064,7 @@ Report only concrete findings anchored to the changed file.
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
 
-  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'pr-review.json'), 'utf-8'));
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json'), 'utf-8'));
   assert.equal(report.status, 'complete');
   assert.equal(report.findings.length, 1);
   assert.equal(report.issues.length, 0);
@@ -1072,15 +1072,15 @@ Report only concrete findings anchored to the changed file.
   const octokitState = JSON.parse(fs.readFileSync(octokitFixturePath, 'utf-8'));
   const actionTypes = octokitState.actions.map(action => action.type);
   assert.ok(actionTypes.includes('createComment'));
-  const fallbackComment = octokitState.issueComments.find(comment => /CodeOwl follow-up/.test(comment.body));
+  const fallbackComment = octokitState.issueComments.find(comment => /BatEye follow-up/.test(comment.body));
   assert.ok(fallbackComment);
 });
 
 test('pr-review command fails clearly when non-agentic direct runtime is requested', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-pr-review-direct-runtime-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-direct-runtime-'));
   initGitRepo(repoPath);
 
-  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
     model: 'anthropic/mock-model',
     exclude: [],
   });
@@ -1093,10 +1093,10 @@ test('pr-review command fails clearly when non-agentic direct runtime is request
   commitAll(repoPath, 'feature change');
 
   const result = runPRReview(['--cwd', repoPath, '--base', 'main', '--dry-run'], {
-    CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
-    CODEOWL_RUNTIME: 'direct',
+    BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+    BATEYE_RUNTIME: 'direct',
   });
 
   assert.equal(result.status, 1);
-  assert.match(result.stdout + result.stderr, /Agentic PR review cannot use CODEOWL_RUNTIME=direct/);
+  assert.match(result.stdout + result.stderr, /Agentic PR review cannot use BATEYE_RUNTIME=direct/);
 });

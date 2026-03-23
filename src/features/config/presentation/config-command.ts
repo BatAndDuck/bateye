@@ -5,7 +5,7 @@ import { resolveAuthEnvName, resolveConfig, setConfigField } from '../applicatio
 const ALLOWED_FIELDS: (keyof Config)[] = ['model', 'transport', 'apiBaseUrl', 'exclude'];
 
 export async function runConfigShow(repoPath: string): Promise<void> {
-  console.log(chalk.cyan('\n🦉 CodeOwl Config\n'));
+  console.log(chalk.cyan('\n🦉 BatEye Config\n'));
   const config = resolveConfig(repoPath);
 
   const rows: [string, string][] = [

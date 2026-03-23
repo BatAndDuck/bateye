@@ -16,7 +16,7 @@ interface CheckResult {
 }
 
 export async function runDoctor(repoPath: string): Promise<void> {
-  console.log(chalk.cyan('\n🦉 CodeOwl Doctor\n'));
+  console.log(chalk.cyan('\n🦉 BatEye Doctor\n'));
 
   const checks: CheckResult[] = [];
 
@@ -30,12 +30,12 @@ export async function runDoctor(repoPath: string): Promise<void> {
   if (fs.existsSync(configPath)) {
     try {
       loadConfig(repoPath);
-      checks.push({ label: 'Config file (.codeowl/config.json)', status: 'ok' });
+      checks.push({ label: 'Config file (.bateye/config.json)', status: 'ok' });
     } catch (err) {
-      checks.push({ label: 'Config file (.codeowl/config.json)', status: 'error', detail: (err as Error).message });
+      checks.push({ label: 'Config file (.bateye/config.json)', status: 'error', detail: (err as Error).message });
     }
   } else {
-    checks.push({ label: 'Config file (.codeowl/config.json)', status: 'warn', detail: 'Not found - run `codeowl init`' });
+    checks.push({ label: 'Config file (.bateye/config.json)', status: 'warn', detail: 'Not found - run `bateye init`' });
   }
 
   const config = resolveConfig(repoPath);
@@ -88,13 +88,13 @@ export async function runDoctor(repoPath: string): Promise<void> {
   try {
     const invocation = resolveOpenCodeInvocation();
     const result = await execa(invocation.command, [...invocation.args, '--version'], { timeout: 3000 });
-    const sourceLabel = invocation.source === 'bundled' ? 'bundled with CodeOwl' : 'from PATH';
+    const sourceLabel = invocation.source === 'bundled' ? 'bundled with BatEye' : 'from PATH';
     checks.push({ label: 'OpenCode CLI', status: 'ok', detail: `${result.stdout.trim()} (${sourceLabel})` });
   } catch {
     checks.push({
       label: 'OpenCode CLI (agentic runtime)',
       status: 'warn',
-      detail: 'Not available - reinstall CodeOwl dependencies or add `opencode` to PATH for `audit` and `pr-review`.',
+      detail: 'Not available - reinstall BatEye dependencies or add `opencode` to PATH for `audit` and `pr-review`.',
     });
   }
 
@@ -109,9 +109,9 @@ export async function runDoctor(repoPath: string): Promise<void> {
 
   console.log();
   if (hasErrors) {
-    console.log(chalk.red('  ✗ Some checks failed. Fix the errors above before running CodeOwl.'));
+    console.log(chalk.red('  ✗ Some checks failed. Fix the errors above before running BatEye.'));
   } else {
-    console.log(chalk.green('  ✓ Ready to run CodeOwl!'));
+    console.log(chalk.green('  ✓ Ready to run BatEye!'));
   }
   console.log();
 }

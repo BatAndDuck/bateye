@@ -7,12 +7,12 @@ const { spawnSync } = require('node:child_process');
 const { writeJson, writeText } = require('./helpers');
 
 test('audit command uses built-in reviewers and reaches the mocked runtime', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-audit-int-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-audit-int-'));
   fs.mkdirSync(path.join(repoPath, '.git'));
   fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
   fs.writeFileSync(path.join(repoPath, 'src', 'index.ts'), 'export const value = 1;\n');
 
-  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
     model: 'anthropic/mock-model',
     exclude: [],
   });
@@ -44,10 +44,10 @@ test('audit command uses built-in reviewers and reaches the mocked runtime', () 
     cwd: process.cwd(),
     env: {
       ...process.env,
-      CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
-      CODEOWL_RUNTIME: 'mock',
-      CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
-      CODEOWL_MOCK_RUNTIME_LOG: logPath,
+      BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+      BATEYE_RUNTIME: 'mock',
+      BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
+      BATEYE_MOCK_RUNTIME_LOG: logPath,
     },
     encoding: 'utf-8',
   });
@@ -66,16 +66,16 @@ test('audit command uses built-in reviewers and reaches the mocked runtime', () 
 });
 
 test('audit command runs a custom tool-backed reviewer end to end', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-audit-tool-int-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-audit-tool-int-'));
   fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
   fs.writeFileSync(path.join(repoPath, 'src', 'index.ts'), 'export const apiKey = process.env.API_KEY ?? "";\n');
 
-  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
     model: 'anthropic/mock-model',
     exclude: [],
   });
 
-  writeText(path.join(repoPath, '.codeowl', 'reviewers', 'audit-tool.md'), `---
+  writeText(path.join(repoPath, '.bateye', 'reviewers', 'audit-tool.md'), `---
 id: audit-tool
 name: Audit Tool
 mode: audit
@@ -133,10 +133,10 @@ process.stdout.write('AUDIT TOOL OK\\nsecret-pattern-detected');
     cwd: process.cwd(),
     env: {
       ...process.env,
-      CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
-      CODEOWL_RUNTIME: 'mock',
-      CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
-      CODEOWL_MOCK_RUNTIME_LOG: logPath,
+      BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+      BATEYE_RUNTIME: 'mock',
+      BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
+      BATEYE_MOCK_RUNTIME_LOG: logPath,
     },
     encoding: 'utf-8',
   });
@@ -164,16 +164,16 @@ process.stdout.write('AUDIT TOOL OK\\nsecret-pattern-detected');
 });
 
 test('audit command deduplicates overlapping findings across reviewers', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-audit-dedup-int-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-audit-dedup-int-'));
   fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
   fs.writeFileSync(path.join(repoPath, 'src', 'index.ts'), 'export const duplicated = true;\n');
 
-  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
     model: 'anthropic/mock-model',
     exclude: [],
   });
 
-  writeText(path.join(repoPath, '.codeowl', 'reviewers', 'dup-a.md'), `---
+  writeText(path.join(repoPath, '.bateye', 'reviewers', 'dup-a.md'), `---
 id: dup-a
 name: Duplicate Reviewer A
 mode: audit
@@ -182,7 +182,7 @@ category: code-quality
 Look for duplicated code-quality findings only.
 `);
 
-  writeText(path.join(repoPath, '.codeowl', 'reviewers', 'dup-b.md'), `---
+  writeText(path.join(repoPath, '.bateye', 'reviewers', 'dup-b.md'), `---
 id: dup-b
 name: Duplicate Reviewer B
 mode: audit
@@ -244,9 +244,9 @@ Look for duplicated code-quality findings only.
     cwd: process.cwd(),
     env: {
       ...process.env,
-      CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
-      CODEOWL_RUNTIME: 'mock',
-      CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+      BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+      BATEYE_RUNTIME: 'mock',
+      BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
     },
     encoding: 'utf-8',
   });
@@ -255,7 +255,7 @@ Look for duplicated code-quality findings only.
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(combinedOutput, /\[audit-dedup\] Dropped "Duplicate constant naming style"/);
 
-  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'audit.json'), 'utf-8'));
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'audit.json'), 'utf-8'));
   assert.equal(report.reviewerResults.length, 2);
 
   const totalFindings = report.reviewerResults.reduce((sum, reviewer) => sum + reviewer.findings.length, 0);
@@ -265,17 +265,17 @@ Look for duplicated code-quality findings only.
 });
 
 test('audit command reports degraded status when review coverage is reduced by tool failures', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-audit-degraded-int-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-audit-degraded-int-'));
   fs.mkdirSync(path.join(repoPath, '.git'));
   fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
   fs.writeFileSync(path.join(repoPath, 'src', 'index.ts'), 'export const value = 1;\n');
 
-  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
     model: 'anthropic/mock-model',
     exclude: [],
   });
 
-  writeText(path.join(repoPath, '.codeowl', 'reviewers', 'degraded-tool.md'), `---
+  writeText(path.join(repoPath, '.bateye', 'reviewers', 'degraded-tool.md'), `---
 id: degraded-tool
 name: Degraded Tool Reviewer
 mode: audit
@@ -309,9 +309,9 @@ Investigate security issues only.
     cwd: process.cwd(),
     env: {
       ...process.env,
-      CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
-      CODEOWL_RUNTIME: 'mock',
-      CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+      BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+      BATEYE_RUNTIME: 'mock',
+      BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
     },
     encoding: 'utf-8',
   });
@@ -320,19 +320,19 @@ Investigate security issues only.
   assert.match(result.stdout, /Status:\s+DEGRADED/);
   assert.match(result.stdout, /Review issues/);
 
-  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'audit.json'), 'utf-8'));
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'audit.json'), 'utf-8'));
   assert.equal(report.status, 'degraded');
   assert.equal(report.reviewerResults.length, 1);
   assert.ok(report.issues.some(issue => issue.code === 'audit-reviewer-tool-error'));
 });
 
 test('audit command reports degraded status when the orchestrator falls back', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-audit-orchestrator-fallback-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-audit-orchestrator-fallback-'));
   fs.mkdirSync(path.join(repoPath, '.git'));
   fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
   fs.writeFileSync(path.join(repoPath, 'src', 'index.ts'), 'export const value = 1;\n');
 
-  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
     model: 'anthropic/mock-model',
     exclude: [],
   });
@@ -351,9 +351,9 @@ test('audit command reports degraded status when the orchestrator falls back', (
     cwd: process.cwd(),
     env: {
       ...process.env,
-      CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
-      CODEOWL_RUNTIME: 'mock',
-      CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+      BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+      BATEYE_RUNTIME: 'mock',
+      BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
     },
     encoding: 'utf-8',
   });
@@ -362,18 +362,18 @@ test('audit command reports degraded status when the orchestrator falls back', (
   assert.match(result.stdout, /Status:\s+DEGRADED/);
   assert.match(result.stdout, /audit reviewer orchestrator failed/i);
 
-  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.codeowl', 'out', 'audit.json'), 'utf-8'));
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'audit.json'), 'utf-8'));
   assert.equal(report.status, 'degraded');
   assert.ok(report.issues.some(issue => issue.code === 'audit-orchestrator-fallback'));
 });
 
 test('audit command prints and persists aggregated token usage', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-audit-tokens-int-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-audit-tokens-int-'));
   fs.mkdirSync(path.join(repoPath, '.git'));
   fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
   fs.writeFileSync(path.join(repoPath, 'src', 'index.ts'), 'export const value = 1;\n');
 
-  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
     model: 'anthropic/mock-model',
     exclude: [],
   });
@@ -408,9 +408,9 @@ test('audit command prints and persists aggregated token usage', () => {
     cwd: process.cwd(),
     env: {
       ...process.env,
-      CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
-      CODEOWL_RUNTIME: 'mock',
-      CODEOWL_MOCK_RUNTIME_FIXTURES: fixturePath,
+      BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+      BATEYE_RUNTIME: 'mock',
+      BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
     },
     encoding: 'utf-8',
   });
@@ -427,12 +427,12 @@ test('audit command prints and persists aggregated token usage', () => {
 });
 
 test('audit command fails clearly when non-agentic direct runtime is requested', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-audit-direct-runtime-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-audit-direct-runtime-'));
   fs.mkdirSync(path.join(repoPath, '.git'));
   fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
   fs.writeFileSync(path.join(repoPath, 'src', 'index.ts'), 'export const changed = true;\n');
 
-  writeJson(path.join(repoPath, '.codeowl', 'config.json'), {
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
     model: 'anthropic/mock-model',
     exclude: [],
   });
@@ -441,12 +441,12 @@ test('audit command fails clearly when non-agentic direct runtime is requested',
     cwd: process.cwd(),
     env: {
       ...process.env,
-      CODE_OWL_LLM_MODEL_API_KEY: 'direct-test-key',
-      CODEOWL_RUNTIME: 'direct',
+      BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+      BATEYE_RUNTIME: 'direct',
     },
     encoding: 'utf-8',
   });
 
   assert.equal(result.status, 1);
-  assert.match(result.stdout + result.stderr, /Agentic audit cannot use CODEOWL_RUNTIME=direct/);
+  assert.match(result.stdout + result.stderr, /Agentic audit cannot use BATEYE_RUNTIME=direct/);
 });

@@ -101,7 +101,7 @@ const ALLOWED_CONFIG_KEYS: ReadonlySet<keyof Config> = new Set([
 ]);
 
 /**
- * Sets a single field in the repository's CodeOwl config file.
+ * Sets a single field in the repository's BatEye config file.
  * @param repoPath - Path to the repository root
  * @param field - Configuration field name. Allowed values: '$schema', 'model', 'transport', 'apiBaseUrl', 'exclude', 'prReview', 'disabledReviewers'
  * @param value - New value to assign to the field

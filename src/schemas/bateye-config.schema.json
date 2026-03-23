@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://codeowl.dev/schemas/codeowl-config.schema.json",
-  "title": "CodeOwl Configuration",
-  "description": "Configuration schema for .codeowl/config.json",
+  "$id": "https://bateye.dev/schemas/bateye-config.schema.json",
+  "title": "BatEye Configuration",
+  "description": "Configuration schema for .bateye/config.json",
   "type": "object",
   "properties": {
     "$schema": {

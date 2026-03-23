@@ -17,13 +17,13 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 // ─── Config schema ──────────────────────────────────────────────────────────
-// The JSON schema for .codeowl/config.json is shipped alongside the package so
+// The JSON schema for .bateye/config.json is shipped alongside the package so
 // that editors can provide in-place validation.  We smoke-test the relevant
 // portion here to catch regressions in the schema itself.
 
-const schema = require('../../src/schemas/codeowl-config.schema.json');
+const schema = require('../../src/schemas/bateye-config.schema.json');
 
-test('codeowl-config schema includes prReview.semanticVerification.enabled', () => {
+test('bateye-config schema includes prReview.semanticVerification.enabled', () => {
   const prReview = schema.properties?.prReview;
   assert.ok(prReview, 'schema has a prReview property');
 

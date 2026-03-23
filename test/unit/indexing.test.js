@@ -15,7 +15,7 @@ const {
 
 // Helpers
 function makeTmpDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-idx-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-idx-'));
 }
 
 function makeIndex(relPaths, baseDir) {
@@ -40,7 +40,7 @@ test('readFileContent reads file content correctly', () => {
 });
 
 test('readFileContent returns empty string for non-existent file', () => {
-  assert.equal(readFileContent('/tmp/codeowl-definitely-does-not-exist.ts'), '');
+  assert.equal(readFileContent('/tmp/bateye-definitely-does-not-exist.ts'), '');
 });
 
 test('readFileContent truncates content exceeding token limit', () => {
@@ -177,7 +177,7 @@ test('formatFilesForContext limits output to maxFiles', () => {
 
 test('formatFilesForContext skips files with empty content', () => {
   const files = [
-    { relativePath: 'missing.ts', absolutePath: '/tmp/codeowl-does-not-exist/missing.ts', sizeBytes: 0, extension: '.ts' },
+    { relativePath: 'missing.ts', absolutePath: '/tmp/bateye-does-not-exist/missing.ts', sizeBytes: 0, extension: '.ts' },
   ];
   const result = formatFilesForContext(files);
   assert.equal(result, '');
