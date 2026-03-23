@@ -5,16 +5,7 @@ description: Enforces module boundaries, controls coupling between features, and
 enabled: true
 mode: both
 category: architecture
-scopeHints:
-  - module
-  - package
-  - component
-  - service
-  - feature
-  - index
-  - barrel
-  - import
-  - dependency
+selectWhen: "select for any non-trivial code change as a periodic health check; particularly valuable when imports, module boundaries, or barrel files are modified; skip for documentation-only or infrastructure-only changes"
 ---
 
 Focus your review on:

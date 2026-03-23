@@ -11,10 +11,7 @@ tool:
   targeting: project
   timeout: 60000
   maxOutputChars: 80000
-scopeHints:
-  - package
-  - license
-  - dependency
+selectWhen: "always — static analysis scanner; select for any code changes"
 ---
 
 You are receiving the JSON output of license-checker, which lists the license of every production dependency.

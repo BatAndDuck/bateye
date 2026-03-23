@@ -5,17 +5,7 @@ description: Ensures personal data is masked in logs, handled with consent, and 
 enabled: true
 mode: audit
 category: compliance
-scopeHints:
-  - user
-  - profile
-  - personal
-  - email
-  - phone
-  - address
-  - log
-  - audit
-  - analytics
-  - tracking
+selectWhen: "select when code handles user profiles, personal data (email, phone, address, IP), logging, analytics, or third-party data sharing; particularly important for applications serving EU users or subject to GDPR; skip for internal tooling with no personal data handling"
 ---
 
 Focus your review on:

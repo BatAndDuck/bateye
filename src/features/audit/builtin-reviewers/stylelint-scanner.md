@@ -12,12 +12,7 @@ tool:
   fileArgs: true
   timeout: 60000
   maxOutputChars: 50000
-scopeHints:
-  - css
-  - scss
-  - less
-  - style
-  - theme
+selectWhen: "select when the repository contains CSS, SCSS, or Less files; skip for projects with no stylesheet files"
 ---
 
 You are receiving the JSON output of Stylelint, which lints CSS, SCSS, and Less files.

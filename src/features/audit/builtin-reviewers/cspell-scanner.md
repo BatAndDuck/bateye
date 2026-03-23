@@ -12,11 +12,7 @@ tool:
   fileArgs: true
   timeout: 60000
   maxOutputChars: 40000
-scopeHints:
-  - src
-  - docs
-  - readme
-  - component
+selectWhen: "always — static analysis scanner; select for any code changes"
 ---
 
 You are receiving the output of CSpell, a spell checker that identifies misspelled words in source code.

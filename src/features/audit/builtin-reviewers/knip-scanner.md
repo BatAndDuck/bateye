@@ -11,11 +11,7 @@ tool:
   targeting: project
   timeout: 120000
   maxOutputChars: 80000
-scopeHints:
-  - src
-  - package
-  - tsconfig
-  - dependency
+selectWhen: "always — static analysis scanner; select for any code changes"
 ---
 
 You are receiving the JSON output of Knip, which detects unused files, exports, dependencies, types, and more across the project.

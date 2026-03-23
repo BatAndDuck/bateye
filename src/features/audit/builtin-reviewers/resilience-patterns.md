@@ -5,19 +5,7 @@ description: Identifies missing circuit breakers, retry/timeout configuration, g
 enabled: true
 mode: audit
 category: architecture
-scopeHints:
-  - http
-  - client
-  - fetch
-  - request
-  - retry
-  - timeout
-  - circuit
-  - breaker
-  - fallback
-  - external
-  - api
-  - service
+selectWhen: "select when code makes external HTTP calls, uses service clients, calls third-party APIs, or implements retry/timeout/circuit-breaker logic; skip for CLI tools, libraries, or repos with no outbound service-to-service communication"
 ---
 
 Focus your review on:

@@ -5,14 +5,7 @@ description: Identifies naming convention inconsistencies, mixed code patterns, 
 enabled: true
 mode: both
 category: code-quality
-scopeHints:
-  - style
-  - naming
-  - convention
-  - format
-  - lint
-  - pattern
-  - standard
+selectWhen: "select for any non-trivial code change where naming conventions, async patterns, or TypeScript style drift could be assessed; most valuable as a periodic audit across a whole codebase rather than for single-file PRs; skip for documentation-only or infrastructure-only changes"
 ---
 
 Focus your review on:

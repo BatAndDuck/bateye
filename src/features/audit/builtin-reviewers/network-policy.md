@@ -5,16 +5,7 @@ description: Checks for insecure CORS configurations, exposed sensitive headers,
 enabled: true
 mode: both
 category: security
-scopeHints:
-  - cors
-  - headers
-  - middleware
-  - server
-  - api
-  - config
-  - proxy
-  - nginx
-  - gateway
+selectWhen: "select when code configures CORS, HTTP security headers, TLS, rate limiting, or network middleware; also when API gateway, proxy, or reverse proxy configuration is present; skip for codebases with no HTTP server or network configuration"
 ---
 
 Focus your review on:

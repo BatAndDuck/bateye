@@ -5,17 +5,7 @@ description: Evaluates backup configuration, high availability design, and recov
 enabled: true
 mode: audit
 category: infrastructure
-scopeHints:
-  - backup
-  - restore
-  - recovery
-  - snapshot
-  - failover
-  - replica
-  - rto
-  - rpo
-  - ha
-  - redundancy
+selectWhen: "select for infrastructure or database configuration audits where backup strategy, high availability, and recovery procedures can be assessed; most useful as a periodic audit; skip for pure application logic changes with no infrastructure components"
 ---
 
 Focus your review on:

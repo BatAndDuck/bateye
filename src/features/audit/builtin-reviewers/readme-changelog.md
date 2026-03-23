@@ -5,14 +5,7 @@ description: Prompts documentation updates when significant features or breaking
 enabled: true
 mode: both
 category: documentation
-scopeHints:
-  - readme
-  - changelog
-  - docs
-  - release
-  - version
-  - breaking
-  - feature
+selectWhen: "select when new CLI commands, API endpoints, config options, environment variables, or breaking changes are introduced; skip for pure internal refactors, test-only changes, or dependency bumps with no user-visible behavior change"
 ---
 
 Focus your review on:

@@ -5,19 +5,7 @@ description: Reviews database migrations for backward compatibility issues, unsa
 enabled: true
 mode: both
 category: database
-scopeHints:
-  - migration
-  - schema
-  - database
-  - db
-  - table
-  - column
-  - index
-  - constraint
-  - alembic
-  - flyway
-  - prisma
-  - knex
+selectWhen: "select when the repository contains database migration files (Alembic, Flyway, Prisma migrations, Knex, Sequelize migrations) or when schema changes are being introduced; skip for codebases with no relational database or migration tooling"
 ---
 
 Focus your review on:

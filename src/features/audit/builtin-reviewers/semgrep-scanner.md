@@ -12,16 +12,7 @@ tool:
   fileArgs: true
   timeout: 180000
   maxOutputChars: 100000
-scopeHints:
-  - src
-  - api
-  - controller
-  - route
-  - handler
-  - auth
-  - middleware
-  - service
-  - util
+selectWhen: "almost always — select for any code change involving application logic, API handlers, authentication, or data processing; skip for documentation-only, CSS-only, or infrastructure-only changes"
 ---
 
 You are receiving the JSON output of Semgrep, a static analysis tool that detects security vulnerabilities and bugs using 5000+ community rules.

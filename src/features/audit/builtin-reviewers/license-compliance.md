@@ -5,17 +5,7 @@ description: Audits project dependencies for viral licenses (GPL, AGPL) that may
 enabled: true
 mode: audit
 category: dependency
-scopeHints:
-  - package
-  - license
-  - dependency
-  - npm
-  - pip
-  - go.mod
-  - open-source
-  - gpl
-  - mit
-  - apache
+selectWhen: "select when new dependencies are added or as a periodic audit of dependency licenses; especially important for commercial or proprietary projects; skip for changes with no dependency additions"
 ---
 
 Focus your review on:

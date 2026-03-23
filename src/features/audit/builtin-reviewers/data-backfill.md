@@ -5,17 +5,7 @@ description: Reviews backfill and data repair scripts for large-scale mutation s
 enabled: true
 mode: both
 category: database
-scopeHints:
-  - migration
-  - backfill
-  - script
-  - batch
-  - update
-  - repair
-  - seed
-  - data
-  - job
-  - task
+selectWhen: "select when the repository contains data backfill scripts, data repair jobs, bulk update scripts, or database seeding utilities; skip for normal application code with no large-scale data mutation scripts"
 ---
 
 Focus your review on:

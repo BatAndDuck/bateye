@@ -5,17 +5,7 @@ description: Detects patterns that inflate JavaScript bundle size including heav
 enabled: true
 mode: both
 category: performance
-scopeHints:
-  - import
-  - bundle
-  - webpack
-  - vite
-  - rollup
-  - next
-  - component
-  - page
-  - client
-  - browser
+selectWhen: "select when the repository contains browser-facing JavaScript/TypeScript that is bundled (React, Vue, Angular, Next.js, etc.); skip for backend-only, CLI, or pure server-side codebases with no client bundle"
 ---
 
 Focus your review on:

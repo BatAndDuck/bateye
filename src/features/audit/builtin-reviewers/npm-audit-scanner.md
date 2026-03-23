@@ -11,10 +11,7 @@ tool:
   targeting: project
   timeout: 60000
   maxOutputChars: 80000
-scopeHints:
-  - package
-  - dependency
-  - node_modules
+selectWhen: "always — static analysis scanner; select for any code changes"
 ---
 
 You are receiving the JSON output of `npm audit`, which reports known security vulnerabilities (CVEs) in the project's npm dependencies.

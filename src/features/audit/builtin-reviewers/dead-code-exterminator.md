@@ -5,16 +5,7 @@ description: Finds unused code, abandoned features, permanently disabled feature
 enabled: true
 mode: audit
 category: code-quality
-scopeHints:
-  - export
-  - function
-  - class
-  - variable
-  - const
-  - import
-  - module
-  - feature
-  - flag
+selectWhen: "select for any non-trivial code change or as a periodic whole-codebase audit; particularly valuable when feature flags, old exports, or commented-out blocks are suspected; skip for documentation-only or infrastructure-only changes"
 ---
 
 Focus your review on:

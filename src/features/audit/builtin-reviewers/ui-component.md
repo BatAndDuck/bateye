@@ -5,15 +5,7 @@ description: Checks for correct usage of Design System components instead of cus
 enabled: true
 mode: both
 category: ux
-scopeHints:
-  - component
-  - ui
-  - view
-  - page
-  - widget
-  - button
-  - modal
-  - form
+selectWhen: "select when the repository uses a Design System component library and code adds or modifies UI components, pages, or layouts; skip for backend-only, CLI, infrastructure, or projects with no design system"
 ---
 
 Focus your review on:

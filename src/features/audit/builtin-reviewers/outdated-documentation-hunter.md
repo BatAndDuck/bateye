@@ -5,18 +5,7 @@ description: Hunts for outdated documentation (md files, comments) that should b
 enabled: true
 mode: audit
 category: documentation
-scopeHints:
-  - readme
-  - docs
-  - changelog
-  - comment
-  - doc
-  - guide
-  - wiki
-  - command
-  - package
-  - script
-  - config
+selectWhen: "select as a periodic documentation health check or when significant refactors, renames, or feature removals have occurred that may have left documentation behind; skip for minor or purely internal changes unlikely to affect docs"
 ---
 
 Focus your review on:

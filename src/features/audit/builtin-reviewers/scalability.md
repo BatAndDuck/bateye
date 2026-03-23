@@ -5,19 +5,7 @@ description: Identifies horizontal scaling blockers, connection pool issues, asy
 enabled: true
 mode: audit
 category: infrastructure
-scopeHints:
-  - server
-  - api
-  - worker
-  - queue
-  - cache
-  - db
-  - connection
-  - pool
-  - thread
-  - async
-  - load
-  - scale
+selectWhen: "select for server-side services, APIs, or background workers where horizontal scaling, connection pooling, and throughput under load matter; skip for CLI tools, one-shot scripts, or libraries with no long-running service boundary"
 ---
 
 Focus your review on:

@@ -5,21 +5,7 @@ description: Reviews event-driven systems for idempotency, error handling, schem
 enabled: true
 mode: audit
 category: architecture
-scopeHints:
-  - event
-  - message
-  - queue
-  - topic
-  - consumer
-  - producer
-  - handler
-  - subscriber
-  - publish
-  - kafka
-  - rabbitmq
-  - sns
-  - sqs
-  - pubsub
+selectWhen: "select when code uses message queues, event buses, pub/sub systems (Kafka, RabbitMQ, SNS/SQS, EventBridge, Pub/Sub), or any event-driven consumer/producer patterns; skip for codebases with no messaging or async event-driven architecture"
 ---
 
 Focus your review on:

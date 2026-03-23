@@ -5,16 +5,7 @@ description: Detects hardcoded API keys, passwords, tokens, and credentials in s
 enabled: true
 mode: both
 category: security
-scopeHints:
-  - config
-  - env
-  - secret
-  - auth
-  - key
-  - token
-  - password
-  - credential
-  - api
+selectWhen: "almost always — select for any code change that touches configuration files, environment setup, API integration code, or authentication logic; skip only for pure documentation, CSS, or HTML-only changes with no code"
 ---
 
 Focus your review on:

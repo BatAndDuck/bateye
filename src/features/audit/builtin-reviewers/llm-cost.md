@@ -5,19 +5,7 @@ description: Identifies patterns that cause runaway LLM API token usage, subopti
 enabled: true
 mode: both
 category: ai
-scopeHints:
-  - llm
-  - ai
-  - openai
-  - anthropic
-  - gpt
-  - claude
-  - prompt
-  - completion
-  - token
-  - model
-  - chat
-  - message
+selectWhen: "select when code calls LLM APIs (OpenAI, Anthropic, etc.), constructs prompts, or implements AI-powered features where token usage, model selection, or API cost matters; skip for codebases with no LLM API integration"
 ---
 
 Focus your review on:

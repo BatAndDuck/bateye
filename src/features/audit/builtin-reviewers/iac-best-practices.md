@@ -5,17 +5,7 @@ description: Reviews Terraform, Pulumi, and Helm configurations for security mis
 enabled: true
 mode: both
 category: infrastructure
-scopeHints:
-  - terraform
-  - pulumi
-  - helm
-  - aws
-  - azure
-  - gcp
-  - cloud
-  - infra
-  - stack
-  - resource
+selectWhen: "select when the repository contains Terraform, Pulumi, Helm, or other IaC definitions; skip for pure application code repositories with no infrastructure-as-code files"
 ---
 
 Focus your review on:

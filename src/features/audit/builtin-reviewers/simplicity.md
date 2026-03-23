@@ -5,16 +5,7 @@ description: Identifies over-engineering, accidental complexity, and premature o
 enabled: true
 mode: both
 category: devex
-scopeHints:
-  - util
-  - helper
-  - service
-  - config
-  - middleware
-  - factory
-  - provider
-  - manager
-  - abstraction
+selectWhen: "select for any non-trivial code change where over-engineering, unnecessary abstraction, or accidental complexity may be introduced; skip for documentation-only, CSS-only, or trivial config-value changes"
 ---
 
 Focus your review on:

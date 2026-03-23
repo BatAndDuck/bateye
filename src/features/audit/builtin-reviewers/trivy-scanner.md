@@ -11,14 +11,7 @@ tool:
   targeting: project
   timeout: 180000
   maxOutputChars: 100000
-scopeHints:
-  - package
-  - docker
-  - terraform
-  - helm
-  - kubernetes
-  - iac
-  - dependency
+selectWhen: "always — static analysis scanner; select for any code changes"
 ---
 
 You are receiving the JSON output of Trivy, a comprehensive security scanner that detects vulnerabilities (CVEs), hardcoded secrets, and IaC misconfigurations.

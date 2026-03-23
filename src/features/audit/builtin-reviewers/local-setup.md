@@ -5,17 +5,7 @@ description: Evaluates onboarding experience, environment configuration, develop
 enabled: true
 mode: audit
 category: devex
-scopeHints:
-  - readme
-  - setup
-  - install
-  - env
-  - docker
-  - compose
-  - makefile
-  - script
-  - dev
-  - start
+selectWhen: "select as a periodic onboarding audit or when README, setup scripts, environment configuration, or developer tooling documentation is modified; most valuable for new repositories or after major refactors"
 ---
 
 Focus your review on:

@@ -11,13 +11,7 @@ tool:
   targeting: project
   timeout: 120000
   maxOutputChars: 60000
-scopeHints:
-  - src
-  - lib
-  - service
-  - util
-  - helper
-  - component
+selectWhen: "always — static analysis scanner; select for any code changes"
 ---
 
 You are receiving the JSON output of jscpd (JS Copy/Paste Detector), which identifies duplicated code blocks across the codebase.

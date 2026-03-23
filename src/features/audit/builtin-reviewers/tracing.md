@@ -5,17 +5,7 @@ description: Reviews trace context propagation across async boundaries and servi
 enabled: true
 mode: both
 category: sre
-scopeHints:
-  - trace
-  - span
-  - opentelemetry
-  - otel
-  - jaeger
-  - zipkin
-  - datadog
-  - apm
-  - context
-  - propagation
+selectWhen: "select when the codebase contains distributed tracing instrumentation (OpenTelemetry, Jaeger, Zipkin, Datadog APM) or when new microservices, external integrations, or async operations are added; skip for CLI tools, libraries, or codebases with no distributed tracing setup"
 ---
 
 Focus your review on:

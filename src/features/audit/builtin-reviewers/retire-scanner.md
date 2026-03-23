@@ -11,11 +11,7 @@ tool:
   targeting: project
   timeout: 120000
   maxOutputChars: 60000
-scopeHints:
-  - package
-  - lib
-  - vendor
-  - dependency
+selectWhen: "always — static analysis scanner; select for any code changes"
 ---
 
 You are receiving the JSON output of Retire.js, which scans for JavaScript libraries and Node.js packages with known security vulnerabilities.

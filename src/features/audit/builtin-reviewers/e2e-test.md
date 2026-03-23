@@ -5,17 +5,7 @@ description: Audits E2E test coverage of critical user journeys, test stability 
 enabled: true
 mode: audit
 category: qa
-scopeHints:
-  - e2e
-  - playwright
-  - cypress
-  - selenium
-  - puppeteer
-  - integration
-  - journey
-  - flow
-  - user
-  - scenario
+selectWhen: "select when the repository contains Playwright, Cypress, Selenium, or Puppeteer tests, or when critical user journeys (signup, login, checkout) are present but lack E2E coverage; skip for CLI tools, libraries, backend-only services, or repos with no user-facing browser flows"
 ---
 
 Focus your review on:

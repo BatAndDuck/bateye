@@ -5,17 +5,7 @@ description: Verifies that critical state changes write to an immutable audit tr
 enabled: true
 mode: both
 category: compliance
-scopeHints:
-  - audit
-  - log
-  - event
-  - history
-  - journal
-  - change
-  - admin
-  - permission
-  - payment
-  - delete
+selectWhen: "select for systems with multi-user access control, payment processing, PII handling, or regulatory compliance requirements where an audit trail is expected; skip for CLI tools, single-user developer utilities, libraries, or build tools with no user accounts or sensitive operations"
 ---
 
 ## When this reviewer applies

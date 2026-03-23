@@ -5,15 +5,7 @@ description: Reviews adherence to foundational software design principles includ
 enabled: true
 mode: audit
 category: architecture
-scopeHints:
-  - service
-  - class
-  - module
-  - interface
-  - component
-  - util
-  - handler
-  - controller
+selectWhen: "select for any non-trivial code change involving classes, services, modules, or business logic; most valuable as a periodic design health check; skip for documentation-only, infrastructure-only, or trivial single-line changes"
 ---
 
 Focus your review on:

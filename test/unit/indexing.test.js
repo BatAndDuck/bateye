@@ -70,29 +70,10 @@ test('scopeFilesForReviewer returns all files when no hints or globs provided', 
   assert.equal(result.length, 3);
 });
 
-test('scopeFilesForReviewer returns all files (scopeHints no longer used)', () => {
+test('scopeFilesForReviewer returns all files', () => {
   const index = makeIndex(['src/auth/login.ts', 'src/utils.ts', 'test/auth.test.ts']);
   const result = scopeFilesForReviewer(index);
   assert.equal(result.length, 3);
-});
-
-test('scopeFilesForReviewer falls back to all files when scopeHint matches nothing', () => {
-  const index = makeIndex(['src/index.ts', 'src/utils.ts']);
-  const result = scopeFilesForReviewer(index, ['nonexistent-path-xyz'], undefined);
-  assert.equal(result.length, 2);
-});
-
-test('scopeFilesForReviewer returns all files regardless of extra arguments', () => {
-  const index = makeIndex(['src/api/routes.ts', 'src/db/schema.ts', 'src/utils.ts']);
-  const result = scopeFilesForReviewer(index);
-  assert.equal(result.length, 3);
-});
-
-test('scopeFilesForReviewer returns all when recommendedGlobs match nothing', () => {
-  const index = makeIndex(['src/index.ts', 'src/utils.ts']);
-  const result = scopeFilesForReviewer(index, undefined, ['nonexistent/**']);
-  // When no globs match, falls through to return all candidates
-  assert.ok(result.length === 2);
 });
 
 test('calculateAuditSeedFileBudget scales with repo size and reviewer type', () => {
@@ -101,17 +82,17 @@ test('calculateAuditSeedFileBudget scales with repo size and reviewer type', () 
 
   const smallBudget = calculateAuditSeedFileBudget(
     smallIndex,
-    { category: 'qa', scopeHints: ['test'] },
+    { category: 'qa' },
     smallIndex.files.slice(0, 12),
   );
   const largeBudget = calculateAuditSeedFileBudget(
     largeIndex,
-    { category: 'qa', scopeHints: ['test'] },
+    { category: 'qa' },
     largeIndex.files.slice(0, 250),
   );
   const toolBudget = calculateAuditSeedFileBudget(
     largeIndex,
-    { category: 'qa', scopeHints: ['test'], tool: { command: 'npm', args: ['test'] } },
+    { category: 'qa', tool: { command: 'npm', args: ['test'] } },
     largeIndex.files.slice(0, 250),
   );
 

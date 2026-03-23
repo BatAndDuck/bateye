@@ -11,11 +11,7 @@ tool:
   targeting: project
   timeout: 120000
   maxOutputChars: 60000
-scopeHints:
-  - ts
-  - tsx
-  - typescript
-  - tsconfig
+selectWhen: "always — static analysis scanner; select for any code changes"
 ---
 
 You are receiving the output of `tsc --noEmit`, the TypeScript compiler running in type-check-only mode.

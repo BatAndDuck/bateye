@@ -5,17 +5,7 @@ description: Elastic template for domain-specific compliance rules (HIPAA, PCI-D
 enabled: true
 mode: audit
 category: compliance
-scopeHints:
-  - payment
-  - card
-  - health
-  - medical
-  - phi
-  - pci
-  - hipaa
-  - billing
-  - financial
-  - credit
+selectWhen: "select when the codebase handles payment card data (PCI-DSS), protected health information (HIPAA), or is subject to SOC 2 or ISO 27001 requirements; skip for applications with no regulated data or compliance framework obligations"
 ---
 
 Focus your review on:

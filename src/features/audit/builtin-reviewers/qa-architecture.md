@@ -5,18 +5,7 @@ description: Evaluates the overall test pyramid balance, test infrastructure qua
 enabled: true
 mode: audit
 category: qa
-scopeHints:
-  - test
-  - spec
-  - qa
-  - coverage
-  - e2e
-  - integration
-  - unit
-  - fixture
-  - factory
-  - mock
-  - ci
+selectWhen: "select as a periodic test infrastructure audit or when test frameworks, CI test configuration, or test data management patterns are modified; skip for pure application code changes with no test-related modifications"
 ---
 
 Focus your review on:

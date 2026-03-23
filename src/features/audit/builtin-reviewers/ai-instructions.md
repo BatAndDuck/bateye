@@ -5,17 +5,7 @@ description: Audits the quality, completeness, and maintenance of AI coding assi
 enabled: true
 mode: audit
 category: ai
-scopeHints:
-  - claude
-  - cursor
-  - copilot
-  - agent
-  - ai
-  - instruction
-  - skill
-  - prompt
-  - rules
-  - coding
+selectWhen: "select when the repository contains or is missing AI coding assistant instruction files (CLAUDE.md, AGENTS.md, .cursorrules, .cursor/) or when AI tooling configuration is being added or modified; skip for projects with no AI assistant integration and no such files anywhere in the repo"
 ---
 
 Focus your review on:
