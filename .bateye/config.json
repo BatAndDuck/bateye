@@ -1,0 +1,11 @@
+{
+  "$schema": "./node_modules/bateye/schemas/bateye-config.schema.json",
+  "model": "vercel/deepseek/deepseek-v3.2",
+  "exclude": ["generated", "vendor"],
+  "prReview": {
+    "autoApprove": {
+      "enabled": true,
+      "maxSeverity": "medium"
+    }
+  }
+}

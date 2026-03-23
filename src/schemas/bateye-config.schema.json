@@ -1,0 +1,90 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://bateye.dev/schemas/bateye-config.schema.json",
+  "title": "BatEye Configuration",
+  "description": "Configuration schema for .bateye/config.json",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference"
+    },
+    "model": {
+      "type": "string",
+      "description": "Primary analysis model in provider/model format (e.g. anthropic/claude-sonnet-4-5)",
+      "examples": ["anthropic/claude-sonnet-4-5", "openai/gpt-4o"]
+    },
+    "transport": {
+      "type": "string",
+      "description": "Optional transport used to send requests. Use this when the model name represents the routed provider/model but the HTTP transport should be a gateway such as Vercel AI Gateway.",
+      "examples": ["auto", "vercel", "openrouter", "openai"]
+    },
+    "apiBaseUrl": {
+      "type": "string",
+      "description": "Optional OpenAI-compatible base URL for custom gateways or proxies.",
+      "examples": ["https://ai-gateway.vercel.sh/v1", "https://my-gateway.example.com/v1"]
+    },
+    "exclude": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Additional paths/patterns to exclude from analysis",
+      "examples": [["**/generated/**", "**/vendor/**", "**/dist/**", "**/*.pb.go"]]
+    },
+    "prReview": {
+      "type": "object",
+      "description": "Configuration for the PR review command.",
+      "properties": {
+        "maxReviewers": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum number of reviewers to run in a single PR review. When the orchestrator selects more reviewers than this limit, the ones with the highest confidence scores are kept. Defaults to no limit (up to the absolute hard cap of 10).",
+          "examples": [5, 8]
+        },
+        "autoApprove": {
+          "type": "object",
+          "description": "Automatically approve the PR on GitHub if all findings are below the configured severity.",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "maxSeverity": {
+              "type": "string",
+              "enum": ["info", "low", "medium"],
+              "description": "Maximum finding severity that still allows auto-approval."
+            }
+          },
+          "required": ["enabled"],
+          "additionalProperties": false
+        },
+        "semanticVerification": {
+          "type": "object",
+          "description": "Controls the LLM-based semantic verification pass that confirms findings are real. Disabling it skips the pass entirely - faster and cheaper, but may let false-positives through. Defaults to enabled.",
+          "properties": {
+            "enabled": { "type": "boolean" }
+          },
+          "required": ["enabled"],
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "disabledReviewers": {
+      "type": "object",
+      "description": "Per-mode list of reviewer IDs to disable.",
+      "properties": {
+        "audit": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Reviewer IDs to disable for audit mode.",
+          "examples": [["ui-component", "responsiveness"]]
+        },
+        "prReview": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Reviewer IDs to disable for PR review mode.",
+          "examples": [["inline-docs", "license-compliance"]]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

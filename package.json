@@ -1,0 +1,75 @@
+{
+  "name": "bateye",
+  "version": "0.1.1",
+  "description": "AI-powered code analysis CLI - audit your codebase with a squad of LLM reviewers",
+  "license": "AGPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BatAndDuck/bateye.git"
+  },
+  "homepage": "https://github.com/BatAndDuck/bateye#readme",
+  "bugs": {
+    "url": "https://github.com/BatAndDuck/bateye/issues"
+  },
+  "keywords": [
+    "ai",
+    "code-review",
+    "static-analysis",
+    "audit",
+    "llm",
+    "cli",
+    "anthropic",
+    "openai",
+    "pr-review",
+    "security"
+  ],
+  "files": [
+    "dist/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "main": "dist/index.js",
+  "bin": {
+    "bateye": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc && npm run copy-templates",
+    "copy-templates": "node scripts/copy-templates.js",
+    "dev": "ts-node src/index.ts",
+    "lint": "eslint . --max-warnings=0",
+    "start": "node dist/index.js",
+    "link:local": "npm run build && npm link",
+    "test:unit": "npm run build && node --test test/unit/*.test.js",
+    "test:integration": "npm run build && node --test test/integration/*.test.js",
+    "test": "npm run test:unit && npm run test:integration"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.36.3",
+    "@opencode-ai/sdk": "^1.2.27",
+    "chalk": "^4.1.2",
+    "commander": "^12.1.0",
+    "execa": "^5.1.1",
+    "glob": "^10.4.5",
+    "gray-matter": "^4.0.3",
+    "ignore": "^5.3.2",
+    "octokit": "^4.0.3",
+    "openai": "^4.78.1",
+    "opencode-ai": "^1.2.27",
+    "ora": "^5.4.1",
+    "undici": "^7.24.5",
+    "zod": "^3.24.1",
+    "zod-to-json-schema": "^3.25.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.10.5",
+    "eslint": "^10.0.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.57.0"
+  }
+}
