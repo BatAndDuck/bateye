@@ -273,14 +273,14 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
           repoPath,
         });
 
-        log('Posting review start comment...');
-        await platform.publishStartComment();
-
         const triggerCommentId = parseInt(process.env.COMMENT_ID || '', 10);
         if (!isNaN(triggerCommentId) && triggerCommentId > 0) {
           log('Adding reaction to trigger comment...');
           await platform.addReaction(triggerCommentId, 'eyes');
         }
+
+        log('Posting review start comment...');
+        await platform.publishStartComment();
 
         log('Reading existing PR conversation...');
         const [generalComments, reviewComments] = await Promise.all([

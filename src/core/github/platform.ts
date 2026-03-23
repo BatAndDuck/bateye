@@ -146,7 +146,7 @@ export class GitHubReviewPlatform implements ReviewPlatform {
   async publishStartComment(): Promise<void> {
     // Check if a status comment already exists and update it
     const existing = await this.findStatusComment();
-    const body = `${BATEYE_STATUS_MARKER}\n🦉 **BatEye** is reviewing this PR...\n\n_This comment will be updated with results._`;
+    const body = `${BATEYE_STATUS_MARKER}\n🦇 **BatEye** is hunting through the shadows of this PR...\n\n_This comment will be updated with results._`;
 
     if (existing) {
       await this.updateComment(existing.id, body);
