@@ -89,7 +89,7 @@ jobs:
 
       # Create a minimal config if the repo doesn't have one yet.
       # To customise the model or reviewers, commit a .bateye/config.json
-      # (see https://github.com/CodeNinjaArea/BatEye#configuration).
+      # (see https://github.com/BatAndDuck/bateye#configuration).
       - name: Initialize BatEye config (if absent)
         run: |
           if [ ! -f .bateye/config.json ]; then

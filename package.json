@@ -1,15 +1,15 @@
 {
   "name": "bateye",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "AI-powered code analysis CLI - audit your codebase with a squad of LLM reviewers",
   "license": "AGPL-3.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/CodeNinjaArea/BatEye.git"
+    "url": "https://github.com/BatAndDuck/bateye.git"
   },
-  "homepage": "https://github.com/CodeNinjaArea/BatEye#readme",
+  "homepage": "https://github.com/BatAndDuck/bateye#readme",
   "bugs": {
-    "url": "https://github.com/CodeNinjaArea/BatEye/issues"
+    "url": "https://github.com/BatAndDuck/bateye/issues"
   },
   "keywords": [
     "ai",

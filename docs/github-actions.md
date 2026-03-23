@@ -9,7 +9,7 @@ BatEye can review pull requests and post inline comments directly to GitHub. Cho
 ```bash
 mkdir -p .github/workflows
 curl -o .github/workflows/bateye-pr-review.yml \
-  https://raw.githubusercontent.com/CodeNinjaArea/BatEye/main/.github/workflows/bateye-pr-review.yml
+  https://raw.githubusercontent.com/BatAndDuck/bateye/main/.github/workflows/bateye-pr-review.yml
 git add .github/workflows/bateye-pr-review.yml
 git commit -m "ci: add BatEye PR review workflow"
 ```

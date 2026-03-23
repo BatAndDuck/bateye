@@ -152,7 +152,7 @@ console.log(JSON.stringify(cfg, null, 2));
 
 ## Still stuck?
 
-Open an issue: https://github.com/CodeNinjaArea/BatEye/issues
+Open an issue: https://github.com/BatAndDuck/bateye/issues
 
 Include:
 - Output of `bateye doctor`
