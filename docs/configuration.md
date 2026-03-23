@@ -16,8 +16,6 @@ BatEye is configured via `.bateye/config.json` in your repo root. Run `bateye in
 {
   "$schema": "./node_modules/bateye/dist/schemas/bateye-config.schema.json",
   "model": "anthropic/claude-sonnet-4-5",
-  "lightModel": "anthropic/claude-haiku-4-5",
-  "apiKeyEnv": "BATEYE_LLM_MODEL_API_KEY",
   "transport": "auto",
   "exclude": ["generated", "vendor", "migrations"],
   "disabledReviewers": {
@@ -41,14 +39,13 @@ BatEye is configured via `.bateye/config.json` in your repo root. Run `bateye in
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `model` | string | `vercel/deepseek/deepseek-v3.2-thinking` | Primary model in `provider/model-id` format |
-| `lightModel` | string | — | Faster/cheaper model for lightweight tasks |
-| `apiKeyEnv` | string | `BATEYE_LLM_MODEL_API_KEY` | Env var name that holds your API key |
-| `transport` | `"auto"` \| `"direct"` \| `"opencode"` | `"auto"` | Runtime transport |
+| `transport` | string | `"auto"` | HTTP transport/gateway override. `"auto"` uses the provider prefix from `model`. Use `"vercel"`, `"openrouter"`, etc. to route through a gateway |
+| `apiBaseUrl` | string | — | OpenAI-compatible base URL for custom gateways or proxies |
 | `exclude` | string[] | — | Additional paths to exclude from analysis |
 | `disabledReviewers` | object | — | Reviewers to skip per mode |
 | `prReview.semanticVerification.enabled` | boolean | `true` | LLM pass to filter false positives |
 | `prReview.autoApprove.enabled` | boolean | `false` | Auto-approve PRs with no high-severity findings |
-| `prReview.autoApprove.maxSeverity` | `"low"` \| `"medium"` | `"low"` | Highest severity allowed for auto-approve |
+| `prReview.autoApprove.maxSeverity` | `"info"` \| `"low"` \| `"medium"` | `"low"` | Highest severity allowed for auto-approve |
 
 ### Vercel AI Gateway
 
