@@ -14,7 +14,7 @@ const {
 } = require('../../dist/core/runtime/opencode-cli/command');
 
 test('resolveBundledOpenCodeInvocation maps package metadata to a bundled node invocation', () => {
-  const packageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-opencode-package-'));
+  const packageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-opencode-package-'));
   const packageJsonPath = path.join(packageDir, 'package.json');
   const binPath = path.join(packageDir, 'bin', 'opencode');
 
@@ -35,7 +35,7 @@ test('resolveBundledOpenCodeInvocation maps package metadata to a bundled node i
 });
 
 test('resolveBundledOpenCodeInvocation returns null when the package has no usable bin', () => {
-  const packageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-opencode-invalid-'));
+  const packageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-opencode-invalid-'));
   const packageJsonPath = path.join(packageDir, 'package.json');
 
   fs.writeFileSync(packageJsonPath, JSON.stringify({ name: 'opencode-ai' }, null, 2));
@@ -92,7 +92,7 @@ test('buildOpenCodeRunArguments inlines smaller prompts directly', () => {
   ]);
 });
 
-test('buildOpenCodeEnvironment maps CodeOwl credentials onto OpenCode-compatible env vars', () => {
+test('buildOpenCodeEnvironment maps BatEye credentials onto OpenCode-compatible env vars', () => {
   const env = buildOpenCodeEnvironment({}, {
     apiKey: 'secret-key',
     model: 'anthropic/claude-sonnet-4-5',

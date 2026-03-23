@@ -10,7 +10,7 @@ test('isRuntimeDebugEnabled is false by default', () => {
 });
 
 test('isRuntimeDebugEnabled recognizes truthy verbose env values', () => {
-  assert.equal(isRuntimeDebugEnabled({ CODEOWL_VERBOSE: '1' }), true);
-  assert.equal(isRuntimeDebugEnabled({ CODEOWL_VERBOSE: 'true' }), true);
-  assert.equal(isRuntimeDebugEnabled({ CODEOWL_DEBUG_RUNTIME: 'on' }), true);
+  assert.equal(isRuntimeDebugEnabled({ BATEYE_VERBOSE: '1' }), true);
+  assert.equal(isRuntimeDebugEnabled({ BATEYE_VERBOSE: 'true' }), true);
+  assert.equal(isRuntimeDebugEnabled({ BATEYE_DEBUG_RUNTIME: 'on' }), true);
 });

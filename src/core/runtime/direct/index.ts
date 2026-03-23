@@ -479,7 +479,7 @@ export class DirectAIRuntime implements IRuntime {
       const apiKey = resolveVercelGatewayCredential(options.apiKey);
       if (!apiKey) {
         throw new Error(
-          'Vercel AI Gateway requires a credential. Set CODE_OWL_LLM_MODEL_API_KEY, AI_GATEWAY_API_KEY, or VERCEL_OIDC_TOKEN.'
+          'Vercel AI Gateway requires a credential. Set BATEYE_LLM_MODEL_API_KEY, AI_GATEWAY_API_KEY, or VERCEL_OIDC_TOKEN.'
         );
       }
       return runWithOpenAI({ ...options, apiKey }, schema, modelId, baseURL);
@@ -557,7 +557,8 @@ export class DirectAIRuntime implements IRuntime {
           return models.data.map(m => m.id).sort();
         }
       }
-    } catch {
+    } catch (err) {
+      logRuntimeDebug(`Failed to list models for ${normalizedProvider}: ${formatErrorWithCauses(err)}`);
       return [];
     }
   }
@@ -568,7 +569,7 @@ export class DirectAIRuntime implements IRuntime {
 
   async runAgenticReview<T>(_options: AgenticRepositoryReviewOptions, _schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>> {
     throw new Error(
-      'Agentic repository review requires the OpenCode CLI runtime or CODEOWL_RUNTIME=mock. '
+      'Agentic repository review requires the OpenCode CLI runtime or BATEYE_RUNTIME=mock. '
       + 'The direct SDK runtime cannot inspect the repository before reporting findings.'
     );
   }

@@ -1,10 +1,10 @@
 import { PRFinding } from '../../types/index';
 import { ExistingComment } from '../github/types';
-import { CODEOWL_COMMENT_MARKER } from '../config/defaults';
+import { BATEYE_COMMENT_MARKER } from '../config/defaults';
 
 export interface PRConversation {
-  codeOwlInlineComments: ExistingComment[];
-  codeOwlGeneralComments: ExistingComment[];
+  batEyeInlineComments: ExistingComment[];
+  batEyeGeneralComments: ExistingComment[];
   allComments: ExistingComment[];
 }
 
@@ -23,13 +23,13 @@ function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
 }
 
 /**
- * Extract ALL CodeOwl finding titles from a comment body.
+ * Extract ALL BatEye finding titles from a comment body.
  * A comment may contain multiple titles (e.g. the summary comment lists every finding).
- * Format matched: **[CodeOwl SEVERITY] Title text**
+ * Format matched: **[BatEye SEVERITY] Title text**
  */
 function extractAllTitles(body: string): string[] {
   const titles: string[] = [];
-  const regex = /\*\*\[CodeOwl [A-Z]+\]\s*(.+?)\*\*/g;
+  const regex = /\*\*\[BatEye [A-Z]+\]\s*(.+?)\*\*/g;
   let match: RegExpExecArray | null;
   while ((match = regex.exec(body)) !== null) {
     titles.push(match[1]);
@@ -41,17 +41,17 @@ export function buildConversation(
   generalComments: ExistingComment[],
   reviewComments: ExistingComment[]
 ): PRConversation {
-  const codeOwlInlineComments = reviewComments.filter(c =>
-    c.body.includes(CODEOWL_COMMENT_MARKER)
+  const batEyeInlineComments = reviewComments.filter(c =>
+    c.body.includes(BATEYE_COMMENT_MARKER)
   );
 
-  const codeOwlGeneralComments = generalComments.filter(c =>
-    c.body.includes(CODEOWL_COMMENT_MARKER)
+  const batEyeGeneralComments = generalComments.filter(c =>
+    c.body.includes(BATEYE_COMMENT_MARKER)
   );
 
   return {
-    codeOwlInlineComments,
-    codeOwlGeneralComments,
+    batEyeInlineComments,
+    batEyeGeneralComments,
     allComments: [...generalComments, ...reviewComments],
   };
 }
@@ -73,7 +73,7 @@ const NEARBY_LINE_RANGE = 5;
 
 interface PrecomputedComment {
   comment: ExistingComment;
-  /** All CodeOwl finding titles found in this comment body (tokenized). */
+  /** All BatEye finding titles found in this comment body (tokenized). */
   titleTokenSets: Set<string>[];
 }
 
@@ -83,18 +83,18 @@ export function filterAlreadyPosted(
 ): PRFinding[] {
   // Check both inline review comments (resolved or unresolved) AND general PR comments
   // (e.g. the summary comment that lists all findings from a previous run).
-  const allCodeOwlComments: ExistingComment[] = [
-    ...conversation.codeOwlInlineComments,
-    ...conversation.codeOwlGeneralComments,
+  const allBatEyeComments: ExistingComment[] = [
+    ...conversation.batEyeInlineComments,
+    ...conversation.batEyeGeneralComments,
   ];
 
-  if (allCodeOwlComments.length === 0) {
+  if (allBatEyeComments.length === 0) {
     return findings;
   }
 
-  // Pre-compute tokenized title sets for every existing CodeOwl comment.
+  // Pre-compute tokenized title sets for every existing BatEye comment.
   // A single comment may contain multiple titles (e.g. the summary); we extract all of them.
-  const precomputed: PrecomputedComment[] = allCodeOwlComments.map(comment => ({
+  const precomputed: PrecomputedComment[] = allBatEyeComments.map(comment => ({
     comment,
     titleTokenSets: extractAllTitles(comment.body).map(tokenize).filter(s => s.size > 0),
   }));

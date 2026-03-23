@@ -3,7 +3,7 @@ export const BUILT_IN_EXCLUDES = [
   'dist',
   'build',
   'coverage',
-  '.codeowl',
+  '.bateye',
   '.claude',
   '.next',
   '.out',
@@ -13,16 +13,15 @@ export const BUILT_IN_EXCLUDES = [
   '.git',
 ];
 
-export const CONFIG_DIR = '.codeowl';
-export const CONFIG_FILE = '.codeowl/config.json';
-export const REVIEWERS_DIR = '.codeowl/reviewers';
-export const OUTPUT_DIR = '.codeowl/out';
-export const AUDIT_OUTPUT_FILE = '.codeowl/out/audit.json';
-export const PR_REVIEW_OUTPUT_FILE = '.codeowl/out/pr-review.json';
-export const SYSTEM_DESIGN_OUTPUT_DIR = '.codeowl/out/system-design';
+export const CONFIG_DIR = '.bateye';
+export const CONFIG_FILE = '.bateye/config.json';
+export const REVIEWERS_DIR = '.bateye/reviewers';
+export const OUTPUT_DIR = '.bateye/out';
+export const AUDIT_OUTPUT_FILE = '.bateye/out/audit.json';
+export const PR_REVIEW_OUTPUT_FILE = '.bateye/out/pr-review.json';
 
 export const DEFAULT_MODEL = 'vercel/deepseek/deepseek-v3.2-thinking';
-export const DEFAULT_API_KEY_ENV = 'CODE_OWL_LLM_MODEL_API_KEY';
+export const DEFAULT_API_KEY_ENV = 'BATEYE_LLM_MODEL_API_KEY';
 
 export const MAX_FILE_SIZE_BYTES = 500 * 1024; // 500 KB
 export const MAX_CONTEXT_FILES = 50;
@@ -82,12 +81,12 @@ export const DEFAULT_TOOL_TIMEOUT_MS = 60_000;
 /** Default max characters to capture from tool stdout */
 export const DEFAULT_TOOL_MAX_OUTPUT_CHARS = 50_000;
 
-export const CODEOWL_SUMMARY_MARKER = '<!-- codeowl-summary -->';
-export const CODEOWL_STATUS_MARKER = '<!-- codeowl-status -->';
+export const BATEYE_SUMMARY_MARKER = '<!-- bateye-summary -->';
+export const BATEYE_STATUS_MARKER = '<!-- bateye-status -->';
 /**
  * HTML comment marker injected at the start of the aggregated breaking-changes PR comment.
  * The pipeline uses this marker to locate and update the comment on re-runs rather than
  * creating a duplicate. When present, auto-approve is disabled for the PR.
  */
-export const CODEOWL_BREAKING_CHANGES_MARKER = '<!-- codeowl-breaking-changes -->';
-export const CODEOWL_COMMENT_MARKER = '[CodeOwl';
+export const BATEYE_BREAKING_CHANGES_MARKER = '<!-- bateye-breaking-changes -->';
+export const BATEYE_COMMENT_MARKER = '[BatEye';

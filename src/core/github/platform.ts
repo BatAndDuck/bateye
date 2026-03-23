@@ -1,7 +1,7 @@
 import { Octokit } from 'octokit';
 import { ReviewPlatform, PullRequestContext, InlineComment, ExistingComment } from './types';
 import { getGitDiff, getChangedFiles } from '../git/index';
-import { CODEOWL_SUMMARY_MARKER, CODEOWL_STATUS_MARKER, CODEOWL_BREAKING_CHANGES_MARKER } from '../config/defaults';
+import { BATEYE_SUMMARY_MARKER, BATEYE_STATUS_MARKER, BATEYE_BREAKING_CHANGES_MARKER } from '../config/defaults';
 
 export class GitHubReviewPlatform implements ReviewPlatform {
   private octokit: Octokit;
@@ -36,6 +36,10 @@ export class GitHubReviewPlatform implements ReviewPlatform {
     this.repo = options.repo;
     this.prNumber = options.prNumber;
     this.repoPath = options.repoPath;
+  }
+
+  private describePR(): string {
+    return `${this.owner}/${this.repo}#${this.prNumber}`;
   }
 
   private async getHeadSha(): Promise<string> {
@@ -98,20 +102,20 @@ export class GitHubReviewPlatform implements ReviewPlatform {
     } catch (err) {
       const message = (err as Error).message;
       if (/could not be resolved|pull_request_review_thread\.line|Validation Failed/i.test(message)) {
-        console.warn(`Could not post inline comment for ${comment.path}:${comment.line}; falling back to a general PR comment: ${message}`);
+        console.warn(`Could not post inline comment for ${this.describePR()} ${comment.path}:${comment.line}; falling back to a general PR comment: ${message}`);
         try {
           await this.octokit.rest.issues.createComment({
             owner: this.owner,
             repo: this.repo,
             issue_number: this.prNumber,
-            body: `**CodeOwl follow-up for \`${comment.path}:${comment.line}\`**\n\n${comment.body}`,
+            body: `**BatEye follow-up for \`${comment.path}:${comment.line}\`**\n\n${comment.body}`,
           });
           return true;
         } catch (fallbackErr) {
-          console.warn(`Could not post fallback PR comment for ${comment.path}:${comment.line}: ${(fallbackErr as Error).message}`);
+          console.warn(`Could not post fallback PR comment for ${this.describePR()} ${comment.path}:${comment.line}: ${(fallbackErr as Error).message}`);
         }
       } else {
-        console.warn(`Could not post inline comment for ${comment.path}:${comment.line}: ${message}`);
+        console.warn(`Could not post inline comment for ${this.describePR()} ${comment.path}:${comment.line}: ${message}`);
       }
       return false;
     }
@@ -135,14 +139,14 @@ export class GitHubReviewPlatform implements ReviewPlatform {
         content: reaction,
       });
     } catch (err) {
-      console.warn(`Could not add reaction to comment ${commentId}: ${(err as Error).message}`);
+      console.warn(`Could not add reaction to comment ${commentId} on ${this.describePR()}: ${(err as Error).message}`);
     }
   }
 
   async publishStartComment(): Promise<void> {
     // Check if a status comment already exists and update it
     const existing = await this.findStatusComment();
-    const body = `${CODEOWL_STATUS_MARKER}\n🦉 **CodeOwl** is reviewing this PR...\n\n_This comment will be updated with results._`;
+    const body = `${BATEYE_STATUS_MARKER}\n🦉 **BatEye** is reviewing this PR...\n\n_This comment will be updated with results._`;
 
     if (existing) {
       await this.updateComment(existing.id, body);
@@ -167,7 +171,7 @@ export class GitHubReviewPlatform implements ReviewPlatform {
 
   async updateOrCreateBreakingChangesComment(body: string): Promise<void> {
     const comments = await this.listExistingComments();
-    const existing = comments.find(c => c.body.includes(CODEOWL_BREAKING_CHANGES_MARKER));
+    const existing = comments.find(c => c.body.includes(BATEYE_BREAKING_CHANGES_MARKER));
     if (existing) {
       await this.updateComment(existing.id, body);
     } else {
@@ -186,7 +190,7 @@ export class GitHubReviewPlatform implements ReviewPlatform {
       });
       return true;
     } catch (err) {
-      console.warn(`Could not approve PR: ${(err as Error).message}`);
+      console.warn(`Could not approve PR ${this.describePR()}: ${(err as Error).message}`);
       return false;
     }
   }
@@ -208,7 +212,7 @@ export class GitHubReviewPlatform implements ReviewPlatform {
         createdAt: c.created_at,
       }));
     } catch (err) {
-      console.warn(`Could not list PR comments: ${(err as Error).message}`);
+      console.warn(`Could not list PR comments for ${this.describePR()}: ${(err as Error).message}`);
       return [];
     }
   }
@@ -250,7 +254,7 @@ export class GitHubReviewPlatform implements ReviewPlatform {
 
   async findSummaryComment(): Promise<{ id: number; body: string } | null> {
     const comments = await this.listExistingComments();
-    const found = comments.find(c => c.body.includes(CODEOWL_SUMMARY_MARKER));
+    const found = comments.find(c => c.body.includes(BATEYE_SUMMARY_MARKER));
     if (found) {
       return { id: found.id, body: found.body };
     }
@@ -259,7 +263,7 @@ export class GitHubReviewPlatform implements ReviewPlatform {
 
   async findStatusComment(): Promise<{ id: number; body: string } | null> {
     const comments = await this.listExistingComments();
-    const found = comments.find(c => c.body.includes(CODEOWL_STATUS_MARKER));
+    const found = comments.find(c => c.body.includes(BATEYE_STATUS_MARKER));
     if (found) {
       return { id: found.id, body: found.body };
     }

@@ -13,7 +13,7 @@ test('built-in reviewer directories resolve from feature-owned locations', () =>
 });
 
 test('loadReviewers includes built-in reviewers without repo-local files', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-reviewers-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-reviewers-'));
   const result = loadReviewers(repoPath);
 
   assert.ok(result.reviewers.length >= 3);

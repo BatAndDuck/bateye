@@ -2,9 +2,9 @@ const fs = require('node:fs');
 const Module = require('node:module');
 
 function readFixtures() {
-  const fixturePath = process.env.CODEOWL_OCTOKIT_FIXTURES;
+  const fixturePath = process.env.BATEYE_OCTOKIT_FIXTURES;
   if (!fixturePath) {
-    throw new Error('CODEOWL_OCTOKIT_FIXTURES is required for the Octokit mock hook');
+    throw new Error('BATEYE_OCTOKIT_FIXTURES is required for the Octokit mock hook');
   }
 
   return {
@@ -87,7 +87,7 @@ class MockOctokit {
           const comment = {
             id: nextCommentId(state),
             body: params.body,
-            user: { login: 'codeowl-bot' },
+            user: { login: 'bateye-bot' },
             created_at: '2026-03-16T00:00:00Z',
           };
           if (!Array.isArray(state.issueComments)) {

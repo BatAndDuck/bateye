@@ -64,13 +64,13 @@ npm run lint
 
 ## Local Development
 
-After building, link the CLI globally so `codeowl` resolves to the local build:
+After building, link the CLI globally so `bateye` resolves to the local build:
 ```
 npm link
 ```
 
 Then run any command against a local repo:
 ```
-codeowl audit
-codeowl pr-review --base <sha>
+bateye audit
+bateye pr-review --base <sha>
 ```

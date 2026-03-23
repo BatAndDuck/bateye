@@ -85,7 +85,7 @@ export type AuditResult = {
   issues: ReviewIssue[];
   tokenUsage?: TokenUsageSummary;
   generatedAt: string;
-  codeowlVersion?: string;
+  bateyeVersion?: string;
   verificationStats?: {
     rawFindings: number;
     confidenceRejected: number;
@@ -121,144 +121,7 @@ export type PRReviewResult = {
   tokenUsage?: TokenUsageSummary;
   generatedAt: string;
   autoApproved?: boolean;
-  codeowlVersion?: string;
-};
-
-/** The communication interface type exposed by a service (e.g. REST, GraphQL, event stream) */
-export type ServiceInterfaceType = "http" | "graphql" | "event" | "queue" | "cron" | "db";
-
-/** Classifies the type of architectural code unit detected in the repository */
-export type ServiceKind = "service" | "module" | "library" | "app" | "worker" | "gateway" | "resource";
-
-/** Category of an external dependency or infrastructure integration */
-export type ResourceCategory =
-  | "database"
-  | "cache"
-  | "queue"
-  | "storage"
-  | "vector-search"
-  | "external-saas"
-  | "external-api"
-  | "internal-platform";
-
-/** A reference to a specific file that provided evidence for an architectural decision */
-export type EvidenceRef = {
-  filePath: string;
-  reason: string;
-  signal?: string;
-};
-
-/** A reference to an external or internal service that a unit integrates with */
-export type IntegrationRef = {
-  name: string;
-  description: string;
-  internal: boolean;
-  category?: ResourceCategory;
-  instanceKey?: string;
-};
-
-/** Architecture analysis document for a single service or module */
-export type ServiceDesignDoc = {
-  serviceId: string;
-  name: string;
-  kind: ServiceKind;
-  resourceCategory?: ResourceCategory;
-  purpose: string;
-  responsibilities: string[];
-  capabilities: string[];
-  publicInterfaces: {
-    type: ServiceInterfaceType;
-    name: string;
-    description?: string;
-  }[];
-  integrations: IntegrationRef[];
-  dependencies: string[];
-  entities: {
-    name: string;
-    description?: string;
-    fields?: string[];
-  }[];
-  submodules: string[];
-  complexityScore: number;
-  risks: string[];
-  confidence: number;
-  evidence: {
-    filePaths: string[];
-    reasons: string[];
-  };
-  discoverySources: string[];
-  gaps: string[];
-  conflicts: string[];
-};
-
-export type ArchitectureType =
-  | "monolith"
-  | "modular-monolith"
-  | "distributed-monolith"
-  | "microservices"
-  | "hybrid-service-oriented"
-  | "event-driven-hybrid";
-
-/** Complete system architecture analysis, containing all service docs, graph data, and coverage metrics */
-export type SystemDesignResult = {
-  command: "system-design";
-  repoPath: string;
-  architectureType: ArchitectureType;
-  score: number;
-  strengths: string[];
-  weaknesses: string[];
-  services: ServiceDesignDoc[];
-  globalSummary: string;
-  coverage: {
-    overallConfidence: number;
-    gaps: string[];
-    conflicts: string[];
-    unitCoverage: Array<{
-      unitId: string;
-      name: string;
-      confidence: number;
-      seedFileCount: number;
-      selectedFileCount: number;
-      analyzedFileCount: number;
-      retrievalIterations: number;
-      gaps: string[];
-      conflicts: string[];
-    }>;
-  };
-  artifacts: {
-    htmlReportPath: string;
-    graphDataPath: string;
-    servicesDir: string;
-    unitsDir: string;
-    inventoryPath: string;
-    coveragePath: string;
-    architecturePath: string;
-  };
-  generatedAt: string;
-};
-
-export type SystemDesignInventoryUnit = {
-  unitId: string;
-  name: string;
-  kindHint?: ServiceKind;
-  dirPath: string;
-  seedFiles: string[];
-  candidateFiles: string[];
-  selectedFiles: string[];
-  dependencyHints: string[];
-  integrationHints: IntegrationRef[];
-  discoverySources: string[];
-  evidence: EvidenceRef[];
-  confidence: number;
-};
-
-export type SystemDesignInventory = {
-  generatedAt: string;
-  repoPath: string;
-  units: SystemDesignInventoryUnit[];
-  integrations: IntegrationRef[];
-  gaps: string[];
-  conflicts: string[];
+  bateyeVersion?: string;
 };
 
 export type PRReviewConfig = {
@@ -279,7 +142,7 @@ export type PRReviewConfig = {
   };
 };
 
-/** Repository-level configuration loaded from `.codeowl/config.json`. */
+/** Repository-level configuration loaded from `.bateye/config.json`. */
 export type Config = {
   $schema?: string;
   model?: string;
@@ -368,36 +231,6 @@ export type RepoIndex = {
   files: RepoFile[];
   repoPath: string;
   totalFiles: number;
-};
-
-export type GraphNode = {
-  id: string;
-  label: string;
-  kind: ServiceKind;
-  data: ServiceDesignDoc;
-};
-
-export type GraphEdge = {
-  id: string;
-  source: string;
-  target: string;
-  label?: string;
-  type: "dependency" | "event" | "http" | "db";
-};
-
-/** Graph data structure for the interactive architecture visualisation report */
-export type ArchitectureGraph = {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-  metadata: {
-    architectureType: ArchitectureType;
-    score: number;
-    strengths: string[];
-    weaknesses: string[];
-    globalSummary: string;
-    generatedAt: string;
-    coverage?: SystemDesignResult["coverage"];
-  };
 };
 
 export type OrchestratorResult = {

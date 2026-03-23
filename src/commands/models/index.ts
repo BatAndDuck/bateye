@@ -18,7 +18,7 @@ export const SUPPORTED_PROVIDERS = [
 ];
 
 export async function runModels(repoPath: string, provider?: string): Promise<void> {
-  console.log(chalk.cyan('\n🦉 CodeOwl Models\n'));
+  console.log(chalk.cyan('\n🦉 BatEye Models\n'));
 
   const config = resolveConfig(repoPath);
   let apiKey: string;
@@ -55,7 +55,7 @@ export async function runModels(repoPath: string, provider?: string): Promise<vo
         config.transport === p ? config.apiBaseUrl : undefined,
       );
       if (models.length === 0) {
-        console.log(chalk.gray('    (no models found — set CODE_OWL_LLM_MODEL_API_KEY and try again)'));
+        console.log(chalk.gray('    (no models found — set BATEYE_LLM_MODEL_API_KEY and try again)'));
       } else {
         for (const m of models) {
           const isCurrent = m === config.model || `${p}/${m}` === config.model;
@@ -71,7 +71,7 @@ export async function runModels(repoPath: string, provider?: string): Promise<vo
   console.log(chalk.gray(`  Current model:  ${config.model || 'anthropic/claude-sonnet-4-5 (default)'}`));
   console.log(chalk.gray(`  Transport:      ${config.transport || 'auto (default)'}`));
   console.log(chalk.gray(`\n  Supported providers: ${SUPPORTED_PROVIDERS.join(', ')}`));
-  console.log(chalk.gray(`  To list a provider:  codeowl models <provider>`));
-  console.log(chalk.gray(`  To change model:     codeowl config set model anthropic/claude-opus-4-6`));
+  console.log(chalk.gray(`  To list a provider:  bateye models <provider>`));
+  console.log(chalk.gray(`  To change model:     bateye config set model anthropic/claude-opus-4-6`));
   console.log();
 }

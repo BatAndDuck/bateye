@@ -12,18 +12,18 @@ const {
 
 // isGitRepo
 test('isGitRepo returns true when .git directory exists', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-git-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-git-'));
   fs.mkdirSync(path.join(tmpDir, '.git'));
   assert.equal(await isGitRepo(tmpDir), true);
 });
 
 test('isGitRepo returns false when .git directory is absent', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-git-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-git-'));
   assert.equal(await isGitRepo(tmpDir), false);
 });
 
 test('isGitRepo returns false for non-existent path', async () => {
-  assert.equal(await isGitRepo('/tmp/nonexistent-codeowl-xyz'), false);
+  assert.equal(await isGitRepo('/tmp/nonexistent-bateye-xyz'), false);
 });
 
 // parseGithubRepoFromUrl
@@ -67,7 +67,7 @@ test('parseGithubRepoFromUrl returns null for plain text', () => {
 
 // listTopLevelDirs
 test('listTopLevelDirs returns non-hidden subdirectories only', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-git-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-git-'));
   fs.mkdirSync(path.join(tmpDir, 'src'));
   fs.mkdirSync(path.join(tmpDir, 'test'));
   fs.mkdirSync(path.join(tmpDir, '.hidden'));
@@ -81,20 +81,20 @@ test('listTopLevelDirs returns non-hidden subdirectories only', async () => {
 });
 
 test('listTopLevelDirs returns empty array when no subdirectories exist', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-git-'));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-git-'));
   fs.writeFileSync(path.join(tmpDir, 'file.txt'), '');
   const dirs = await listTopLevelDirs(tmpDir);
   assert.deepEqual(dirs, []);
 });
 
-test('listTopLevelDirs excludes dot-directories like .git and .codeowl', async () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-git-'));
+test('listTopLevelDirs excludes dot-directories like .git and .bateye', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-git-'));
   fs.mkdirSync(path.join(tmpDir, '.git'));
-  fs.mkdirSync(path.join(tmpDir, '.codeowl'));
+  fs.mkdirSync(path.join(tmpDir, '.bateye'));
   fs.mkdirSync(path.join(tmpDir, 'src'));
 
   const dirs = await listTopLevelDirs(tmpDir);
   assert.ok(!dirs.includes('.git'));
-  assert.ok(!dirs.includes('.codeowl'));
+  assert.ok(!dirs.includes('.bateye'));
   assert.ok(dirs.includes('src'));
 });

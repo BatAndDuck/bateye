@@ -1,4 +1,4 @@
-name: CodeOwl PR Review
+name: BatEye PR Review
 
 on:
   issue_comment:
@@ -11,8 +11,8 @@ permissions:
   # Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests"
 
 jobs:
-  codeowl-review:
-    name: CodeOwl Review
+  bateye-review:
+    name: BatEye Review
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -84,35 +84,35 @@ jobs:
       - name: Run full test suite
         run: npm test
 
-      - name: Link CodeOwl globally
+      - name: Link BatEye globally
         run: npm link
 
       # Create a minimal config if the repo doesn't have one yet.
-      # To customise the model or reviewers, commit a .codeowl/config.json
-      # (see https://github.com/CodeNinjaArea/CodeOwl#configuration).
-      - name: Initialize CodeOwl config (if absent)
+      # To customise the model or reviewers, commit a .bateye/config.json
+      # (see https://github.com/CodeNinjaArea/BatEye#configuration).
+      - name: Initialize BatEye config (if absent)
         run: |
-          if [ ! -f .codeowl/config.json ]; then
-            mkdir -p .codeowl
-            cat > .codeowl/config.json << 'EOF'
+          if [ ! -f .bateye/config.json ]; then
+            mkdir -p .bateye
+            cat > .bateye/config.json << 'EOF'
           {
             "model": "anthropic/claude-sonnet-4-5"
           }
           EOF
           fi
 
-      - name: Run CodeOwl PR Review
+      - name: Run BatEye PR Review
         env:
-          CODE_OWL_LLM_MODEL_API_KEY: ${{ secrets.CODE_OWL_LLM_MODEL_API_KEY }}
-          CODE_OWL_LLM_MODEL_API_KEY_FALLBACK: ${{ secrets.CODE_OWL_LLM_MODEL_API_KEY_FALLBACK }}
+          BATEYE_LLM_MODEL_API_KEY: ${{ secrets.BATEYE_LLM_MODEL_API_KEY }}
+          BATEYE_LLM_MODEL_API_KEY_FALLBACK: ${{ secrets.BATEYE_LLM_MODEL_API_KEY_FALLBACK }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # PR_NUMBER lets CodeOwl detect the PR in issue_comment events
+          # PR_NUMBER lets BatEye detect the PR in issue_comment events
           # (for pull_request events it is read from GITHUB_REF automatically)
           PR_NUMBER: ${{ steps.pr.outputs.pr-number }}
-          # COMMENT_ID lets CodeOwl add eyes reaction to /review trigger comments
+          # COMMENT_ID lets BatEye add eyes reaction to /review trigger comments
           COMMENT_ID: ${{ steps.pr.outputs.comment-id }}
         run: |
-          codeowl pr-review \
+          bateye pr-review \
             --base ${{ steps.pr.outputs.base-sha }} \
             --github \
             --pr-number ${{ steps.pr.outputs.pr-number }}
@@ -121,6 +121,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: codeowl-prompt-logs-${{ steps.pr.outputs.pr-number }}-${{ github.run_attempt }}
-          path: .codeowl/out/prompts/
+          name: bateye-prompt-logs-${{ steps.pr.outputs.pr-number }}-${{ github.run_attempt }}
+          path: .bateye/out/prompts/
           if-no-files-found: ignore

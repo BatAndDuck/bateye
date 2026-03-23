@@ -1,17 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { AuditResult, PRReviewResult, SystemDesignResult } from '../../types/index';
+import { AuditResult, PRReviewResult } from '../../types/index';
 
 export function ensureDir(dirPath: string): void {
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true });
-  }
-}
-
-function emptyDir(dirPath: string): void {
-  if (!fs.existsSync(dirPath)) return;
-  for (const entry of fs.readdirSync(dirPath)) {
-    fs.rmSync(path.join(dirPath, entry), { recursive: true, force: true });
   }
 }
 
@@ -31,67 +24,4 @@ export function writeAuditResult(outputPath: string, result: AuditResult): void 
 
 export function writePRReviewResult(outputPath: string, result: PRReviewResult): void {
   writeJson(outputPath, result);
-}
-
-export function writeSystemDesignResult(outputDir: string, result: SystemDesignResult): void {
-  ensureDir(outputDir);
-  const servicesDir = path.join(outputDir, 'services');
-  ensureDir(servicesDir);
-  emptyDir(servicesDir);
-  // Write each service
-  for (const service of result.services) {
-    writeJson(path.join(servicesDir, `${service.serviceId}.json`), service);
-    writeText(
-      path.join(servicesDir, `${service.serviceId}.md`),
-      generateServiceMarkdown(service)
-    );
-  }
-}
-
-function generateServiceMarkdown(service: import('../../types/index').ServiceDesignDoc): string {
-  const responsibilities = service.responsibilities ?? [];
-  const capabilities = service.capabilities ?? [];
-  const submodules = service.submodules ?? [];
-  const publicInterfaces = service.publicInterfaces ?? [];
-  const integrations = service.integrations ?? [];
-  const dependencies = service.dependencies ?? [];
-  const entities = service.entities ?? [];
-  const gaps = service.gaps ?? [];
-  const evidenceFilePaths = service.evidence?.filePaths ?? [];
-  return `# ${service.name}
-
-**Kind:** ${service.kind}
-${service.resourceCategory ? `**Resource Category:** ${service.resourceCategory}\n` : ''}**ID:** ${service.serviceId}
-${service.kind === 'resource' ? '' : `**Complexity:** ${service.complexityScore}/10\n`}
-
-## Purpose
-${service.purpose}
-
-## Responsibilities
-${responsibilities.map(r => `- ${r}`).join('\n')}
-
-## Capabilities
-${capabilities.length === 0 ? '_None detected_' : capabilities.map(capability => `- ${capability}`).join('\n')}
-
-## Submodules
-${submodules.length === 0 ? '_None detected_' : submodules.map(module => `- ${module}`).join('\n')}
-
-## Public Interfaces
-${publicInterfaces.length === 0 ? '_None_' : publicInterfaces.map(i => `- **${i.type}** \`${i.name}\`${i.description ? ': ' + i.description : ''}`).join('\n')}
-
-## Integrations
-${integrations.length === 0 ? '_None_' : integrations.map(i => `- ${i.name}${i.instanceKey ? ` (${i.instanceKey})` : ''}${i.category ? ` [${i.category}]` : ''}: ${i.description}`).join('\n')}
-
-## Dependencies
-${dependencies.length === 0 ? '_None_' : dependencies.map(d => `- ${d}`).join('\n')}
-
-## Entities / Data
-${entities.length === 0 ? '_None_' : entities.map(e => `### ${e.name}${e.description ? '\n' + e.description : ''}${e.fields ? '\n\nFields: ' + e.fields.join(', ') : ''}`).join('\n\n')}
-
-## Evidence
-${evidenceFilePaths.length === 0 ? '_None_' : evidenceFilePaths.map(file => `- ${file}`).join('\n')}
-
-## Gaps
-${gaps.length === 0 ? '_None_' : gaps.map(gap => `- ${gap}`).join('\n')}
-`;
 }

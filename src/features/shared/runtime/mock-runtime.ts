@@ -29,25 +29,25 @@ type MockRuntimeFixtures = {
 };
 
 function readFixtures(): MockRuntimeFixtures {
-  const fixturePath = process.env.CODEOWL_MOCK_RUNTIME_FIXTURES;
+  const fixturePath = process.env.BATEYE_MOCK_RUNTIME_FIXTURES;
   if (!fixturePath) {
-    throw new Error('CODEOWL_MOCK_RUNTIME_FIXTURES is required when CODEOWL_RUNTIME=mock');
+    throw new Error('BATEYE_MOCK_RUNTIME_FIXTURES is required when BATEYE_RUNTIME=mock');
   }
 
   return JSON.parse(fs.readFileSync(fixturePath, 'utf-8')) as MockRuntimeFixtures;
 }
 
 function writeFixtures(fixtures: MockRuntimeFixtures): void {
-  const fixturePath = process.env.CODEOWL_MOCK_RUNTIME_FIXTURES;
+  const fixturePath = process.env.BATEYE_MOCK_RUNTIME_FIXTURES;
   if (!fixturePath) {
-    throw new Error('CODEOWL_MOCK_RUNTIME_FIXTURES is required when CODEOWL_RUNTIME=mock');
+    throw new Error('BATEYE_MOCK_RUNTIME_FIXTURES is required when BATEYE_RUNTIME=mock');
   }
 
   fs.writeFileSync(fixturePath, JSON.stringify(fixtures, null, 2) + '\n', 'utf-8');
 }
 
 function appendLog(entry: unknown): void {
-  const logPath = process.env.CODEOWL_MOCK_RUNTIME_LOG;
+  const logPath = process.env.BATEYE_MOCK_RUNTIME_LOG;
   if (!logPath) {
     return;
   }

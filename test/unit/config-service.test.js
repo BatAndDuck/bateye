@@ -7,9 +7,9 @@ const path = require('node:path');
 const { resolveConfig } = require('../../dist/features/config/application/config-service');
 
 test('resolveConfig returns model and transport fields from config file', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-config-'));
-  fs.mkdirSync(path.join(repoPath, '.codeowl'), { recursive: true });
-  fs.writeFileSync(path.join(repoPath, '.codeowl', 'config.json'), JSON.stringify({
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-config-'));
+  fs.mkdirSync(path.join(repoPath, '.bateye'), { recursive: true });
+  fs.writeFileSync(path.join(repoPath, '.bateye', 'config.json'), JSON.stringify({
     model: 'anthropic/test-model',
     transport: 'vercel',
     apiBaseUrl: 'https://ai-gateway.vercel.sh/v1',
@@ -24,7 +24,7 @@ test('resolveConfig returns model and transport fields from config file', () => 
 });
 
 test('resolveConfig falls back to defaults when config is empty', () => {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'codeowl-config-defaults-'));
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-config-defaults-'));
   // No config file — resolveConfig should use defaults
   const config = resolveConfig(repoPath);
   assert.ok(typeof config.model === 'string' && config.model.length > 0);

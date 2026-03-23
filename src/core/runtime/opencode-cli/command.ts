@@ -15,7 +15,7 @@ interface PackageJsonWithBin {
 const VERCEL_AI_GATEWAY_BASE_URL = 'https://ai-gateway.vercel.sh/v1';
 
 export const OPEN_CODE_PROMPT_ATTACHMENT_MESSAGE =
-  'Read the attached CodeOwl prompt file and follow it exactly. '
+  'Read the attached BatEye prompt file and follow it exactly. '
   + 'Investigate the repository as needed and return only the requested JSON.';
 export const MAX_INLINE_OPEN_CODE_PROMPT_CHARS = 16_000;
 
