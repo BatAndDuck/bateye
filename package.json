@@ -1,7 +1,34 @@
 {
   "name": "bateye",
   "version": "0.1.0",
-  "description": "AI-powered code analysis CLI built on OpenCode",
+  "description": "AI-powered code analysis CLI — audit your codebase with a squad of LLM reviewers",
+  "license": "AGPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CodeNinjaArea/BatEye.git"
+  },
+  "homepage": "https://github.com/CodeNinjaArea/BatEye#readme",
+  "bugs": {
+    "url": "https://github.com/CodeNinjaArea/BatEye/issues"
+  },
+  "keywords": [
+    "ai",
+    "code-review",
+    "static-analysis",
+    "audit",
+    "llm",
+    "cli",
+    "anthropic",
+    "openai",
+    "pr-review",
+    "security"
+  ],
+  "files": [
+    "dist/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=18.0.0"
   },

@@ -6,6 +6,10 @@ const targets = [
     source: path.resolve(__dirname, '../src/features/audit/builtin-reviewers'),
     destination: path.resolve(__dirname, '../dist/features/audit/builtin-reviewers'),
   },
+  {
+    source: path.resolve(__dirname, '../src/schemas'),
+    destination: path.resolve(__dirname, '../dist/schemas'),
+  },
 ];
 
 function copyRecursive(source, destination) {
