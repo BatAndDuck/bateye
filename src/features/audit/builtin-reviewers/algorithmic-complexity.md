@@ -11,7 +11,7 @@ selectWhen: "select when code contains loops, sorting, searching, data processin
 Focus your review on:
 
 ## O(N²) and Worse Patterns
-- Nested loops over unbounded collections (outer.forEach inner.find — O(N²) search)
+- Nested loops over unbounded collections (outer.forEach inner.find - O(N²) search)
 - Array.includes() or Array.find() inside a loop over unbounded data (should use Set/Map for O(1) lookups)
 - Sorting inside a loop when you could sort once outside
 - Recursive functions without memoization on overlapping subproblems

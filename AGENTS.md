@@ -1,6 +1,6 @@
 # AGENTS
 
-## Session Log — Read Before Implementing
+## Session Log - Read Before Implementing
 
 **Always read `.ai-sessions-log` before starting any implementation task.**
 
@@ -11,12 +11,12 @@ Prevents repeating past mistakes and re-solving already-solved problems.
 cat .ai-sessions-log
 ```
 
-## Session Log — Update Before Pushing
+## Session Log - Update Before Pushing
 
 **Before every `git push`, add or update an entry in `.ai-sessions-log`.**
 
 Rules:
-- One entry per session/PR branch — update the same line for followup pushes
+- One entry per session/PR branch - update the same line for followup pushes
 - Max 300 chars: what changed + why (no fluff)
 - Format: `YYYY-MM-DD | branch-or-topic | summary`
 - Followup: append ` +YYYY-MM-DD <note>` to the existing line

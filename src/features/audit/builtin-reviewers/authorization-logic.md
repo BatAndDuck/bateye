@@ -18,7 +18,7 @@ Focus your review on:
 
 ## Role-Based Access Control (RBAC)
 - Privileged operations (admin actions, data exports, user management) not gated by a role check before execution
-- Role checks implemented inconsistently — some routes use middleware guards, others inline checks, others none at all
+- Role checks implemented inconsistently - some routes use middleware guards, others inline checks, others none at all
 - Hardcoded role strings compared with `==` to user-supplied values without normalization (case-sensitivity bugs like `"Admin"` vs `"admin"` bypassing a check)
 - Role checks that only verify the role name without validating that the role is still active or has not been revoked
 - Superuser or admin endpoints grouped with user endpoints where the authorization middleware is applied only to the user group
@@ -26,7 +26,7 @@ Focus your review on:
 ## Privilege Escalation
 - Vertical privilege escalation: a lower-privilege user able to call an endpoint reserved for a higher-privilege role due to missing or misconfigured guard
 - Horizontal privilege escalation: a user able to act on behalf of another user of the same role by supplying a different `userId` parameter
-- Privilege escalation via JWT manipulation — roles or permissions read directly from an unverified token payload without server-side verification of the signature and claims
+- Privilege escalation via JWT manipulation - roles or permissions read directly from an unverified token payload without server-side verification of the signature and claims
 - Escalation via parameter injection: endpoints that accept a `role` or `isAdmin` field in the request body that is applied without server-side authority check
 
 ## Client-Side Only Authorization
@@ -41,7 +41,7 @@ Focus your review on:
 - GraphQL mutations that resolve directly to ORM `update()` calls with the full input object
 
 ## Deny-By-Default Posture
-- Authorization logic structured as a denylist (block known bad roles) rather than an allowlist (only allow explicitly permitted roles) — new roles added later inherit access by default
+- Authorization logic structured as a denylist (block known bad roles) rather than an allowlist (only allow explicitly permitted roles) - new roles added later inherit access by default
 - Missing default `else` branch in authorization condition chains, falling through to allow access when no condition matches
 - Feature or route access controlled by a flag that defaults to `true` (enabled) rather than `false` (disabled) when not explicitly configured
 

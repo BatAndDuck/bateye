@@ -14,7 +14,7 @@ export function buildStructureRepairPrompt(
     'You receive malformed or schema-invalid JSON along with the validation errors.',
     'Your ONLY job is to fix the JSON so it passes validation.',
     'Rules:',
-    '- Preserve ALL data content (findings, text, values) — only fix structure.',
+    '- Preserve ALL data content (findings, text, values) - only fix structure.',
     '- Add missing required fields with sensible defaults (empty string for text, 0 for numbers, [] for arrays).',
     '- Fix type mismatches (e.g. string "3" → number 3 for numeric fields).',
     '- Remove unexpected fields only if they block validation.',

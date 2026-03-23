@@ -300,7 +300,7 @@ async function runWithOpenAI<T>(
 ): Promise<RunResult<T>> {
   // Use the caller-supplied timeout or the orchestrator default (10 min).
   // maxRetries is set to 0 to disable the OpenAI SDK's built-in 3-attempt retry
-  // loop — without this, the effective timeout is 3× the per-request value (e.g.
+  // loop - without this, the effective timeout is 3× the per-request value (e.g.
   // 3 × 5 min = 15 min), which we saw in practice as seemingly-frozen CI runs.
   // Application-level retries are handled by the orchestrator's own loop instead.
   const clientTimeoutMs = options.timeoutMs ?? MAX_ORCHESTRATOR_TIMEOUT_MS;
@@ -534,7 +534,7 @@ export class DirectAIRuntime implements IRuntime {
         }
         case 'ollama':
         case 'lmstudio': {
-          // Local providers — no API key required
+          // Local providers - no API key required
           const dummyKey = normalizedProvider === 'ollama' ? 'ollama' : 'lmstudio';
           const client = new OpenAI({ apiKey: dummyKey, baseURL });
           const models = await client.models.list();

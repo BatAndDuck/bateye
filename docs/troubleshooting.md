@@ -55,7 +55,7 @@ bateye config set model anthropic/claude-sonnet-4-5
 **Symptom:** `No reviewers found` or `0 reviewers selected`
 
 **Fix:**
-- Built-in reviewers load automatically from the BatEye install — if missing, reinstall: `npm install -g bateye`
+- Built-in reviewers load automatically from the BatEye install - if missing, reinstall: `npm install -g bateye`
 - Custom reviewers must be in `.bateye/reviewers/*.md` with valid frontmatter (the `id` and `name` fields are required)
 - Check `enabled: false` isn't set in your reviewer frontmatter
 
@@ -88,7 +88,7 @@ bateye reviewers   # lists what BatEye can see
    bateye config set model groq/llama-3.3-70b-versatile
    ```
 
-4. **Check the output for partial results** — `.bateye/out/audit.json` may have partial data even if the CLI didn't exit cleanly.
+4. **Check the output for partial results** - `.bateye/out/audit.json` may have partial data even if the CLI didn't exit cleanly.
 
 ---
 
@@ -101,7 +101,7 @@ bateye reviewers   # lists what BatEye can see
 - Name: `BATEYE_LLM_MODEL_API_KEY`
 - Value: your AI provider API key
 
-The workflow reads `BATEYE_LLM_MODEL_API_KEY` — not provider-specific names like `ANTHROPIC_API_KEY`.
+The workflow reads `BATEYE_LLM_MODEL_API_KEY` - not provider-specific names like `ANTHROPIC_API_KEY`.
 
 ---
 
@@ -127,7 +127,7 @@ npm install -g bateye   # reinstall
 bateye doctor
 ```
 
-BatEye bundles the OpenCode runtime — no separate `npm install -g opencode-ai` needed. A global `opencode` install is only used as a fallback.
+BatEye bundles the OpenCode runtime - no separate `npm install -g opencode-ai` needed. A global `opencode` install is only used as a fallback.
 
 ---
 

@@ -5,13 +5,13 @@ description: Detects hardcoded API keys, passwords, tokens, and credentials in s
 enabled: true
 mode: both
 category: security
-selectWhen: "almost always — select for any code change that touches configuration files, environment setup, API integration code, or authentication logic; skip only for pure documentation, CSS, or HTML-only changes with no code"
+selectWhen: "almost always - select for any code change that touches configuration files, environment setup, API integration code, or authentication logic; skip only for pure documentation, CSS, or HTML-only changes with no code"
 ---
 
 Focus your review on:
 
 ## API Keys and Service Tokens
-- Hardcoded API keys matching well-known prefixes committed directly in source: `sk-` (OpenAI/Stripe secret), `pk-` (Stripe public — acceptable in client code but worth noting), `ghp_` (GitHub personal access token), `ghs_` (GitHub Actions token), `xoxb-` / `xoxp-` (Slack tokens), `AKIA` (AWS access key ID prefix)
+- Hardcoded API keys matching well-known prefixes committed directly in source: `sk-` (OpenAI/Stripe secret), `pk-` (Stripe public - acceptable in client code but worth noting), `ghp_` (GitHub personal access token), `ghs_` (GitHub Actions token), `xoxb-` / `xoxp-` (Slack tokens), `AKIA` (AWS access key ID prefix)
 - Google API keys matching the pattern `AIza[0-9A-Za-z\-_]{35}`
 - Twilio auth tokens, SendGrid keys, Mailgun keys, or other SaaS API credentials assigned directly to variables
 - Database connection strings with embedded credentials (e.g., `mongodb://user:password@host`, `postgresql://user:pass@host/db`)
@@ -50,7 +50,7 @@ Focus your review on:
 - Kubernetes `Secret` manifest files with base64-encoded values committed to the repository without encryption (e.g., Sealed Secrets or SOPS)
 
 ## Confidence and Scope
-- Only flag findings where there is high confidence the value is a real secret — not a placeholder like `YOUR_API_KEY_HERE`, `<YOUR_TOKEN>`, or `changeme`
-- Do NOT flag environment variable reads (`process.env.API_KEY`, `os.environ["SECRET"]`) — these are the correct pattern
-- Do NOT flag references to secrets managers (AWS SSM, HashiCorp Vault, GCP Secret Manager) — these are correct
-- This reviewer does NOT cover OWASP injection vulnerabilities or authorization issues — only credential and secret exposure
+- Only flag findings where there is high confidence the value is a real secret - not a placeholder like `YOUR_API_KEY_HERE`, `<YOUR_TOKEN>`, or `changeme`
+- Do NOT flag environment variable reads (`process.env.API_KEY`, `os.environ["SECRET"]`) - these are the correct pattern
+- Do NOT flag references to secrets managers (AWS SSM, HashiCorp Vault, GCP Secret Manager) - these are correct
+- This reviewer does NOT cover OWASP injection vulnerabilities or authorization issues - only credential and secret exposure

@@ -15,7 +15,7 @@ Prompt injection is only a risk when **untrusted external content** reaches an L
 - **REAL risk**: end-user input (CLI args, chat messages, form fields, HTTP request bodies), responses from external APIs, database values from third parties, file content uploaded by users
 - **NOT a risk**: static template files or `.md` files bundled with the application, configuration files loaded from the local filesystem at startup, hard-coded strings in source code, values set by the application developers themselves
 
-If the interpolated value comes from a static template, local config file, or bundled reviewer/instruction file — do NOT report it as injection risk. These are trusted internal values, not attack vectors.
+If the interpolated value comes from a static template, local config file, or bundled reviewer/instruction file - do NOT report it as injection risk. These are trusted internal values, not attack vectors.
 
 ## Prompt Injection Defense
 - User-controlled content (CLI arguments, PR comments, file content from untrusted repos) concatenated directly into LLM system prompts without sanitization

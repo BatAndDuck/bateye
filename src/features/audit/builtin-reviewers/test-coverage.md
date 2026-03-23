@@ -33,4 +33,4 @@ Requirements:
 - Do not infer product features such as payments, signup, or browser journeys unless the repository clearly contains those flows.
 - Missing tests for a module is usually **medium**; reserve **high** only for concrete critical paths with a credible failure impact visible in code.
 - For prompt, configuration, or template files, only report coverage gaps when they drive structured runtime behavior and the missing tests could plausibly cause production failures or broken parsing.
-- **Score consistency**: Your score MUST reflect your findings. If you return 0 findings, your score MUST be 85 or higher. Never assign a score below 80 when you have no findings to justify it — a low score with 0 findings is contradictory. Only assign low scores when you have concrete findings to back them up.
+- **Score consistency**: Your score MUST reflect your findings. If you return 0 findings, your score MUST be 85 or higher. Never assign a score below 80 when you have no findings to justify it - a low score with 0 findings is contradictory. Only assign low scores when you have concrete findings to back them up.

@@ -1,6 +1,6 @@
 # Supported Providers
 
-BatEye supports 20+ AI providers. All use the same `BATEYE_LLM_MODEL_API_KEY` environment variable — just change the `model` field in your config.
+BatEye supports 20+ AI providers. All use the same `BATEYE_LLM_MODEL_API_KEY` environment variable - just change the `model` field in your config.
 
 ## Provider table
 

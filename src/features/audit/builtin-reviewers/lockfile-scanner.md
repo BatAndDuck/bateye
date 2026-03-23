@@ -11,7 +11,7 @@ tool:
   targeting: project
   timeout: 30000
   maxOutputChars: 20000
-selectWhen: "always — static analysis scanner; select for any code changes"
+selectWhen: "always - static analysis scanner; select for any code changes"
 ---
 
 You are receiving the output of lockfile-lint, which validates that `package-lock.json` is safe from supply chain attacks.
@@ -29,7 +29,7 @@ Analyze the lockfile-lint results and report any integrity violations that could
 
 ## What to Filter Out
 
-- Packages correctly resolving to `https://registry.npmjs.org` — this is the expected pattern
+- Packages correctly resolving to `https://registry.npmjs.org` - this is the expected pattern
 - Internal/private packages that legitimately use a corporate registry (mention them as info-level)
 - Git-based dependencies (git+https://) that are intentional direct source references
 
@@ -38,7 +38,7 @@ Analyze the lockfile-lint results and report any integrity violations that could
 - **critical**: Package resolving to a completely unknown registry (potential hijacking)
 - **high**: HTTP-only resolution for any package (MITM risk), or integrity hash mismatch
 - **medium**: Non-standard registry for a public package that should be on npm
-- **info**: All packages properly validated — lockfile is clean
+- **info**: All packages properly validated - lockfile is clean
 
 ## Output Guidelines
 

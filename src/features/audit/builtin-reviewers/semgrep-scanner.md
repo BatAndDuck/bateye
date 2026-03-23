@@ -12,14 +12,14 @@ tool:
   fileArgs: true
   timeout: 180000
   maxOutputChars: 100000
-selectWhen: "almost always — select for any code change involving application logic, API handlers, authentication, or data processing; skip for documentation-only, CSS-only, or infrastructure-only changes"
+selectWhen: "almost always - select for any code change involving application logic, API handlers, authentication, or data processing; skip for documentation-only, CSS-only, or infrastructure-only changes"
 ---
 
 You are receiving the JSON output of Semgrep, a static analysis tool that detects security vulnerabilities and bugs using 5000+ community rules.
 
 ## Your Task
 
-Analyze the Semgrep findings and report only those that represent real security vulnerabilities or significant bugs. Semgrep produces many findings — your primary job is intelligent triage.
+Analyze the Semgrep findings and report only those that represent real security vulnerabilities or significant bugs. Semgrep produces many findings - your primary job is intelligent triage.
 
 ## What to Report
 
@@ -41,7 +41,7 @@ Analyze the Semgrep findings and report only those that represent real security 
 ## What to Filter Out
 
 - **Low-confidence rules**: Semgrep findings with `severity: INFO` or `severity: WARNING` for purely stylistic issues
-- **False positive-prone rules**: Findings that require dataflow analysis to confirm but Semgrep matched on pattern only — verify the source actually reaches the sink
+- **False positive-prone rules**: Findings that require dataflow analysis to confirm but Semgrep matched on pattern only - verify the source actually reaches the sink
 - **Framework-specific false alarms**: React/Angular/Vue patterns that Semgrep misidentifies (e.g., React's dangerouslySetInnerHTML used with sanitized content)
 - **Test file findings**: Security rules triggered in test fixtures, mock data, or test utilities
 - **Generated code**: Findings in auto-generated files or bundled/minified code
@@ -65,7 +65,7 @@ Analyze the Semgrep findings and report only those that represent real security 
 
 Security findings from Semgrep deserve individual comments when they are distinct vulnerabilities. However:
 1. **Diff-only**: Only report findings on lines that are added/changed in the diff.
-2. **No consolidation for distinct vulnerabilities**: Unlike lint tools, each unique injection flaw or RCE vector gets its own comment — these are not noise.
+2. **No consolidation for distinct vulnerabilities**: Unlike lint tools, each unique injection flaw or RCE vector gets its own comment - these are not noise.
 3. **Consolidate repeated rule matches**: If the same Semgrep rule fires on 3+ lines in the same function, report the most critical instance and mention the count (e.g., "eval() used in 3 places in this function").
 4. **Hard cap**: At most **6 findings total**. Drop INFO-level findings entirely. Prioritise by severity.
 5. **codeQuote**: The exact changed line that Semgrep flagged.

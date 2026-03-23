@@ -11,7 +11,7 @@ tool:
   targeting: project
   timeout: 120000
   maxOutputChars: 60000
-selectWhen: "always — static analysis scanner; select for any code changes"
+selectWhen: "always - static analysis scanner; select for any code changes"
 ---
 
 You are receiving the JSON output of jscpd (JS Copy/Paste Detector), which identifies duplicated code blocks across the codebase.
@@ -38,7 +38,7 @@ Analyze the duplicated code blocks and determine which ones represent real DRY v
 
 ## Severity Guidelines
 
-- **high**: Critical business logic duplicated with no shared abstraction — high risk of divergent bugs
+- **high**: Critical business logic duplicated with no shared abstraction - high risk of divergent bugs
 - **medium**: Utility code or validation duplicated that could be cleanly extracted
 - **low**: Structural duplication that is more cosmetic than risky (similar patterns, not identical logic)
 - **info**: Minor duplicates that are acceptable engineering trade-offs

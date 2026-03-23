@@ -21,10 +21,10 @@ Focus your review on:
 
 ## Semantic HTML
 - `<div>` or `<span>` used where a semantically appropriate element exists: `<button>`, `<nav>`, `<main>`, `<header>`, `<footer>`, `<section>`, `<article>`, `<aside>`, `<h1>`–`<h6>`
-- Heading hierarchy violations — skipping heading levels (e.g., jumping from `<h1>` to `<h4>`) or using headings purely for visual sizing
+- Heading hierarchy violations - skipping heading levels (e.g., jumping from `<h1>` to `<h4>`) or using headings purely for visual sizing
 - `<table>` layouts without `<caption>`, `<th scope="col/row">`, or `<thead>`/`<tbody>` structure
 - `<ul>` or `<ol>` lists used without `<li>` children, or non-list content wrapped in list elements
-- `<a>` tags with no `href` used as buttons — these behave differently for keyboard and screen reader users
+- `<a>` tags with no `href` used as buttons - these behave differently for keyboard and screen reader users
 
 ## Images and Media
 - `<img>` elements missing `alt` attribute entirely
@@ -35,7 +35,7 @@ Focus your review on:
 
 ## Forms and Labels
 - `<input>`, `<textarea>`, or `<select>` without an associated `<label>` (via `for`/`id` pairing or wrapping)
-- Placeholder text used as the only label — placeholders disappear on input and are insufficient for screen readers
+- Placeholder text used as the only label - placeholders disappear on input and are insufficient for screen readers
 - Required form fields not marked with `required` / `aria-required="true"`
 - Form validation errors not programmatically associated to their field via `aria-describedby` or `aria-errormessage`
 - Fieldsets of related controls (radio groups, checkboxes) missing `<legend>`
@@ -56,7 +56,7 @@ Focus your review on:
 ## Color and Visual
 - Information conveyed by color alone with no text or icon fallback (e.g., red = error with no icon or text)
 - Interactive element states (hover, focus, selected) distinguished only by color change
-- Missing visible focus indicator — relying solely on browser default that may be removed by `outline: none` or `outline: 0` without a replacement
+- Missing visible focus indicator - relying solely on browser default that may be removed by `outline: none` or `outline: 0` without a replacement
 
 ## Navigation and Structure
 - Missing skip navigation link (`<a href="#main-content">Skip to main content</a>`) on pages with repeated navigation
@@ -64,4 +64,4 @@ Focus your review on:
 - Landmark regions (`<main>`, `<nav>`, `<aside>`) duplicated without distinct `aria-label` to differentiate them
 
 ## Requirements
-- Apply this reviewer only when the project contains user-facing HTML, JSX/TSX components, or browser-rendered UI. For CLI tools, backend services, infrastructure code, developer tooling, or any project with no browser-rendered user interface, return 0 findings — accessibility is not applicable.
+- Apply this reviewer only when the project contains user-facing HTML, JSX/TSX components, or browser-rendered UI. For CLI tools, backend services, infrastructure code, developer tooling, or any project with no browser-rendered user interface, return 0 findings - accessibility is not applicable.

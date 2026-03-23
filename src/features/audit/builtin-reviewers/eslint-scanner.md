@@ -12,7 +12,7 @@ tool:
   fileArgs: true
   timeout: 120000
   maxOutputChars: 80000
-selectWhen: "always — static analysis scanner; select for any code changes"
+selectWhen: "always - static analysis scanner; select for any code changes"
 ---
 
 You are receiving the JSON output of ESLint alongside the source code.
@@ -35,21 +35,21 @@ Analyze the ESLint results and report only findings that represent real code qua
 - Naming convention preferences unless they cause actual confusion
 - Warnings that are informational only with no real impact
 - Rules that are project-specific opinions (prefer-const vs let for never-reassigned)
-- Disabled rules (eslint-disable comments) — respect the developer's intent
+- Disabled rules (eslint-disable comments) - respect the developer's intent
 
 ## Output Guidelines
 
 - Map each reported finding to the exact file path and line number from the ESLint JSON output
 - Group related findings in the same file (e.g., multiple unsafe type assertions in one function)
 - Prioritize by actual bug potential: critical for security-related ESLint rules, high for likely bugs, medium for code quality concerns
-- If ESLint found zero significant issues, return an empty findings array with a high score — that is a valid outcome
+- If ESLint found zero significant issues, return an empty findings array with a high score - that is a valid outcome
 
 ## PR Review Mode (when you receive a diff with [Line N] markers)
 
-**Do NOT post one comment per lint rule violation** — that floods the PR and is unhelpful.
+**Do NOT post one comment per lint rule violation** - that floods the PR and is unhelpful.
 
 Instead follow these strict rules:
 1. **Consolidate per file**: All ESLint issues within the same function or block → ONE finding. Describe the dominant pattern (e.g., "3 unsafe type assignments in `handleRequest()`") and point to the most critical line.
 2. **Hard cap**: At most **2 findings per changed file** and **5 findings total** from this reviewer. Emit only the highest-severity issues.
 3. **Diff-only**: Only report on lines that appear as added/changed in the diff (marked with `+` or `[Line N]`). Do NOT flag pre-existing issues on context lines.
-4. **codeQuote**: Must be the exact changed line from the diff that triggered the issue — verbatim.
+4. **codeQuote**: Must be the exact changed line from the diff that triggered the issue - verbatim.

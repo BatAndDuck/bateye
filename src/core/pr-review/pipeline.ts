@@ -72,7 +72,7 @@ const CONFIDENCE_FLOORS: Record<Priority, number> = {
 
 /**
  * Build a lightweight RepoProfile by scanning the repo directory for
- * indicator files — no content reading required. Used in PR review where
+ * indicator files - no content reading required. Used in PR review where
  * a full index is not available.
  */
 function buildPRRepoProfile(repoPath: string, changedFiles: string[]): RepoProfile {
@@ -85,7 +85,7 @@ function buildPRRepoProfile(repoPath: string, changedFiles: string[]): RepoProfi
       allPaths.push(entry.name.toLowerCase());
     }
   } catch {
-    // ignore scan errors — changedFiles alone is sufficient for basic profiling
+    // ignore scan errors - changedFiles alone is sufficient for basic profiling
   }
 
   return buildRepoProfile({
@@ -147,7 +147,7 @@ function formatBreakingChangesComment(findings: PRFinding[]): string {
   }).join('\n\n---\n\n');
 
   return `${BATEYE_BREAKING_CHANGES_MARKER}
-## 🦉 BatEye — Breaking Changes Detected
+## 🦉 BatEye - Breaking Changes Detected
 
 This PR introduces **${findings.length} breaking change${findings.length === 1 ? '' : 's'}**. These are listed here for visibility. Auto-approve is disabled until breaking changes are reviewed and resolved or explicitly acknowledged.
 
@@ -273,14 +273,14 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
           repoPath,
         });
 
-        log('Posting review start comment...');
-        await platform.publishStartComment();
-
         const triggerCommentId = parseInt(process.env.COMMENT_ID || '', 10);
         if (!isNaN(triggerCommentId) && triggerCommentId > 0) {
           log('Adding reaction to trigger comment...');
           await platform.addReaction(triggerCommentId, 'eyes');
         }
+
+        log('Posting review start comment...');
+        await platform.publishStartComment();
 
         log('Reading existing PR conversation...');
         const [generalComments, reviewComments] = await Promise.all([
@@ -460,7 +460,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
 
   if (deterministic.rejected.length > 0) {
     for (const rejected of deterministic.rejected) {
-      log(`  ✗ Rejected (schema): "${rejected.finding.title}" — ${rejected.reason}`);
+      log(`  ✗ Rejected (schema): "${rejected.finding.title}" - ${rejected.reason}`);
     }
   }
 
@@ -473,7 +473,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
 
   if (diffGate.rejected.length > 0) {
     for (const rejected of diffGate.rejected) {
-      log(`  ✗ Rejected (diff-gate): "${rejected.finding.title}" — ${rejected.reason}`);
+      log(`  ✗ Rejected (diff-gate): "${rejected.finding.title}" - ${rejected.reason}`);
     }
   }
 
@@ -512,14 +512,14 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
 
     if (semantic.rejected.length > 0) {
       for (const rejected of semantic.rejected) {
-        log(`  ✗ Rejected (semantic): "${rejected.finding.title}" — ${rejected.reason}`);
+        log(`  ✗ Rejected (semantic): "${rejected.finding.title}" - ${rejected.reason}`);
       }
     }
   } else if (!semanticEnabled) {
-    log('Skipping semantic verification — disabled via config (prReview.semanticVerification.enabled: false).');
+    log('Skipping semantic verification - disabled via config (prReview.semanticVerification.enabled: false).');
     semanticVerified = deduped;
   } else {
-    log('Skipping semantic verification — no findings remain after deterministic/schema validation and deduplication.');
+    log('Skipping semantic verification - no findings remain after deterministic/schema validation and deduplication.');
   }
 
   let finalFindings = semanticVerified;
@@ -556,15 +556,15 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   if (hasGrandTotalData) {
     const reviewerTokensAreEstimated = hasTokenData && reviewerTokenTotal.estimated;
     const reviewerSuffix = reviewerTokensAreEstimated
-      ? ' ⚠ FIRST-TURN ESTIMATE — actual agentic usage is 5-20× higher'
+      ? ' ⚠ FIRST-TURN ESTIMATE - actual agentic usage is 5-20× higher'
       : '';
-    log(`[token-diag] ═══ GRAND TOTAL: ${formatTokenSummary(grandTotal)}${reviewerTokensAreEstimated ? ' (⚠ UNDERESTIMATED — see reviewers line)' : ''} ═══`);
+    log(`[token-diag] ═══ GRAND TOTAL: ${formatTokenSummary(grandTotal)}${reviewerTokensAreEstimated ? ' (⚠ UNDERESTIMATED - see reviewers line)' : ''} ═══`);
     log(`[token-diag]   orchestrator: ${orchestratorResult.tokensUsed ? formatTokenSummary(orchestratorResult.tokensUsed) : 'n/a'}`);
     log(`[token-diag]   reviewers (${selectedReviewers.length}x): ${hasTokenData ? formatTokenSummary(reviewerTokenTotal) + reviewerSuffix : 'n/a'}`);
     log(`[token-diag]   semantic verification: ${semanticTokens ? formatTokenSummary(semanticTokens) : 'skipped (no findings)'}`);
     if (reviewerTokensAreEstimated) {
       log(`[token-diag] ⚠ Reviewer token counts reflect the initial prompt size only. OpenCode does not`);
-      log(`[token-diag]   expose cumulative session usage — each tool call re-sends the full conversation`);
+      log(`[token-diag]   expose cumulative session usage - each tool call re-sends the full conversation`);
       log(`[token-diag]   history, so true input tokens per reviewer ≈ initial_tokens × number_of_turns.`);
     }
   }
@@ -643,8 +643,8 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     await platform.updateOrCreateSummary(result.summary);
 
     const statusBody = result.status === 'degraded'
-      ? `<!-- bateye-status -->\n🦉 **BatEye** review completed with warnings — ${postedFindings.length} findings posted.`
-      : `<!-- bateye-status -->\n🦉 **BatEye** review complete — ${postedFindings.length} findings posted.`;
+      ? `<!-- bateye-status -->\n🦉 **BatEye** review completed with warnings - ${postedFindings.length} findings posted.`
+      : `<!-- bateye-status -->\n🦉 **BatEye** review complete - ${postedFindings.length} findings posted.`;
     await platform.updateStatusComment(statusBody);
 
     const hasBreakingChanges = breakingChangeFindings.length > 0;
@@ -654,7 +654,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       const hasBlocker = postedFindings.some(f => SEVERITY_ORDER[f.priority] > threshold);
 
       if (hasBreakingChanges) {
-        log('Auto-approve skipped — breaking changes detected.');
+        log('Auto-approve skipped - breaking changes detected.');
       } else if (!hasBlocker) {
         log('Auto-approving PR (no findings exceed threshold)...');
         const approved = await platform.approvePR(
@@ -663,17 +663,17 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
         if (approved) {
           result.autoApproved = true;
         } else {
-          const failMsg = '⚠️  Auto-approve failed — enable **Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests"** in this repository.';
+          const failMsg = '⚠️  Auto-approve failed - enable **Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests"** in this repository.';
           log(failMsg);
           await platform.updateStatusComment(
-            `<!-- bateye-status -->\n🦉 **BatEye** review complete — ${postedFindings.length} findings posted.\n\n${failMsg}`
+            `<!-- bateye-status -->\n🦉 **BatEye** review complete - ${postedFindings.length} findings posted.\n\n${failMsg}`
           );
         }
       } else {
-        log(`Auto-approve skipped — findings exceed "${maxSev}" threshold.`);
+        log(`Auto-approve skipped - findings exceed "${maxSev}" threshold.`);
       }
     } else if (config.prReview?.autoApprove?.enabled && result.status !== 'complete') {
-      log('Auto-approve skipped — review completed with warnings.');
+      log('Auto-approve skipped - review completed with warnings.');
     }
 
     log('✓ GitHub comments posted');

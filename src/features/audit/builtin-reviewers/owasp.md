@@ -5,7 +5,7 @@ description: Scans for common web vulnerabilities including XSS, SQL injection, 
 enabled: true
 mode: both
 category: security
-selectWhen: "almost always — select whenever there are user inputs, API endpoints, authentication flows, session management, or data persistence; skip only for pure UI cosmetic changes, documentation, or infrastructure-only PRs"
+selectWhen: "almost always - select whenever there are user inputs, API endpoints, authentication flows, session management, or data persistence; skip only for pure UI cosmetic changes, documentation, or infrastructure-only PRs"
 ---
 
 Focus your review on:
@@ -59,6 +59,6 @@ Focus your review on:
 - OAuth or SSO callback parameters that accept arbitrary redirect URIs without strict validation against a registered allowlist
 
 ## Scope Clarification
-- This reviewer does NOT cover authentication or authorization issues — those are handled by the `security-api` and `authorization-logic` reviewers
-- This reviewer does NOT cover hardcoded secrets — that is handled by the `secrets` reviewer
-- This reviewer does NOT cover input schema validation — that is handled by the `input-validation` reviewer
+- This reviewer does NOT cover authentication or authorization issues - those are handled by the `security-api` and `authorization-logic` reviewers
+- This reviewer does NOT cover hardcoded secrets - that is handled by the `secrets` reviewer
+- This reviewer does NOT cover input schema validation - that is handled by the `input-validation` reviewer

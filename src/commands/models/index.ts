@@ -55,7 +55,7 @@ export async function runModels(repoPath: string, provider?: string): Promise<vo
         config.transport === p ? config.apiBaseUrl : undefined,
       );
       if (models.length === 0) {
-        console.log(chalk.gray('    (no models found — set BATEYE_LLM_MODEL_API_KEY and try again)'));
+        console.log(chalk.gray('    (no models found - set BATEYE_LLM_MODEL_API_KEY and try again)'));
       } else {
         for (const m of models) {
           const isCurrent = m === config.model || `${p}/${m}` === config.model;

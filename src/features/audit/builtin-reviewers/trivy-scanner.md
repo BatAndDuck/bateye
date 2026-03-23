@@ -11,14 +11,14 @@ tool:
   targeting: project
   timeout: 180000
   maxOutputChars: 100000
-selectWhen: "always — static analysis scanner; select for any code changes"
+selectWhen: "always - static analysis scanner; select for any code changes"
 ---
 
 You are receiving the JSON output of Trivy, a comprehensive security scanner that detects vulnerabilities (CVEs), hardcoded secrets, and IaC misconfigurations.
 
 ## Your Task
 
-Analyze the Trivy results and report findings that represent real, actionable security issues. Trivy covers three scan types simultaneously — assess each category appropriately.
+Analyze the Trivy results and report findings that represent real, actionable security issues. Trivy covers three scan types simultaneously - assess each category appropriately.
 
 ## Vulnerability Findings (`Results[].Vulnerabilities`)
 
@@ -31,7 +31,7 @@ Analyze the Trivy results and report findings that represent real, actionable se
 - Low/Medium CVEs with no practical exploit path in this project's context
 - Vulnerabilities only affecting devDependencies/test tools
 - CVEs already marked "will not fix" by the upstream maintainer with no alternative
-- Duplicate advisories (same CVE reported via multiple dependency paths — keep the highest severity instance)
+- Duplicate advisories (same CVE reported via multiple dependency paths - keep the highest severity instance)
 
 ## Secret Findings (`Results[].Secrets`)
 
@@ -41,7 +41,7 @@ Analyze the Trivy results and report findings that represent real, actionable se
 
 **Filter out:**
 - Placeholder/example values ("YOUR_KEY_HERE", "changeme", test fixtures)
-- Environment variable reads — these are correct patterns
+- Environment variable reads - these are correct patterns
 - Lock files or generated files containing registry tokens that are not secrets
 
 ## Misconfiguration Findings (`Results[].Misconfigurations`)

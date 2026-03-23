@@ -16,7 +16,7 @@ function buildRepoProfileSummary(profile: RepoProfile): string {
   if (profile.hasAiLibraries) features.push('AI / LLM integration');
 
   const likely = !profile.hasFrontendFiles && !profile.hasSqlFiles && !profile.hasDockerfile
-    ? '\nProject type: likely a local CLI tool or developer library — NOT a web service, NOT a multi-tenant system.'
+    ? '\nProject type: likely a local CLI tool or developer library - NOT a web service, NOT a multi-tenant system.'
     : '';
 
   const lines: string[] = [];
@@ -41,7 +41,7 @@ export function buildAuditSystemPrompt(
 ${profileSection}
 ${reviewerInstructions}
 
-## HOW TO DO THIS REVIEW — TWO PHASES
+## HOW TO DO THIS REVIEW - TWO PHASES
 
 ### PHASE 1: INVESTIGATE FIRST (form no opinions yet)
 1. Open and read the seed files listed in the user message.
@@ -76,7 +76,7 @@ Only report findings that are actionable for the current repository snapshot.
 - If resilience, package validity, or setup concerns are delegated to a shared abstraction, framework, or runtime layer visible in the code, do not report duplicate findings against higher-level orchestration code without evidence that the policy is actually missing there.
 - Do NOT treat a file being absent from your provided scope as proof that it is absent from the repository. Only claim something is missing when the repository snapshot or the analyzed code directly contradicts the documentation or expectation.
 - When the evidence is ambiguous, return no finding instead of a speculative one.
-- Do NOT report findings in documentation files (.md, .txt, .rst), template files, example files, or reviewer instruction files that DESCRIBE patterns rather than implement them. A ".md" file that documents "you should avoid doing X" is not itself a code defect — only report findings in actual source code, configuration, or build files where the problem concretely manifests.
+- Do NOT report findings in documentation files (.md, .txt, .rst), template files, example files, or reviewer instruction files that DESCRIBE patterns rather than implement them. A ".md" file that documents "you should avoid doing X" is not itself a code defect - only report findings in actual source code, configuration, or build files where the problem concretely manifests.
 
 ## Output Requirements
 
@@ -165,7 +165,7 @@ ${reviewerList}
 - Skip database reviewers if no SQL, migration files, or ORM patterns are found
 - Skip AI-specific reviewers if no LLM/AI library usage is detected
 - Skip reviewers whose output would be mostly speculative for this repo profile (for example reviewers requiring end-user journeys, browser flows, or operational runbooks when the repository does not show those concerns)
-- Prefer signal over breadth — when in doubt, exclude the reviewer unless the repository profile provides concrete evidence they can add value
+- Prefer signal over breadth - when in doubt, exclude the reviewer unless the repository profile provides concrete evidence they can add value
 - Select AT MOST 20 reviewers total to keep costs manageable
 - Avoid selecting reviewers with heavily overlapping concerns; prefer the more specialized one
 

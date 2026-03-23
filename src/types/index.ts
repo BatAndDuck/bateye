@@ -135,7 +135,7 @@ export type PRReviewConfig = {
    * absolute hard cap MAX_PR_REVIEWERS). */
   maxReviewers?: number;
   /** Controls the LLM-based semantic verification pass that confirms findings are real.
-   * Disabling it skips the pass entirely — faster and cheaper, but may let false-positives through.
+   * Disabling it skips the pass entirely - faster and cheaper, but may let false-positives through.
    * Defaults to enabled. */
   semanticVerification?: {
     enabled: boolean;
@@ -203,7 +203,7 @@ export type ReviewerMetadata = {
   enabled?: boolean;
   /** Short natural-language rule describing when this reviewer should be selected.
    * Used by the orchestrator to decide relevance for a given PR or audit.
-   * Example: "almost always — skip only for pure documentation or trivial config changes" */
+   * Example: "almost always - skip only for pure documentation or trivial config changes" */
   selectWhen?: string;
   model?: string;
   /** Which modes this reviewer participates in. Defaults to 'both'. */

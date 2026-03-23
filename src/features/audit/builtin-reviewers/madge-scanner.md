@@ -11,7 +11,7 @@ tool:
   targeting: project
   timeout: 120000
   maxOutputChars: 40000
-selectWhen: "always — static analysis scanner; select for any code changes"
+selectWhen: "always - static analysis scanner; select for any code changes"
 ---
 
 You are receiving the JSON output of Madge, which detects circular dependencies in the module import graph.
@@ -29,7 +29,7 @@ Analyze the circular dependency chains and assess which ones represent real arch
 
 ## What to Filter Out
 
-- **Barrel file cycles**: index.ts re-exports creating trivial cycles within the same directory — these are usually harmless
+- **Barrel file cycles**: index.ts re-exports creating trivial cycles within the same directory - these are usually harmless
 - **Type-only cycles**: Circular imports that only reference types/interfaces (TypeScript erases these at runtime)
 - **Co-located module cycles**: Files in the same feature directory that naturally reference each other (e.g., model.ts ↔ validator.ts)
 - **Test file cycles**: Test files importing from source and vice versa

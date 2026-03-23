@@ -42,7 +42,7 @@ Analyze the html-validate findings and report accessibility and correctness issu
 
 ## What to Filter Out
 
-- **Framework template syntax**: Angular `*ngIf`, React JSX expressions, Vue `v-if` — these are valid in their context
+- **Framework template syntax**: Angular `*ngIf`, React JSX expressions, Vue `v-if` - these are valid in their context
 - **Component placeholders**: Custom elements from web components or framework components
 - **Stylistic preferences**: Attribute ordering, self-closing tag style, quote style
 - **Generated HTML**: Build output or minified HTML files

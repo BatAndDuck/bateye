@@ -11,7 +11,7 @@ tool:
   targeting: project
   timeout: 60000
   maxOutputChars: 80000
-selectWhen: "always — static analysis scanner; select for any code changes"
+selectWhen: "always - static analysis scanner; select for any code changes"
 ---
 
 You are receiving the JSON output of `npm audit`, which reports known security vulnerabilities (CVEs) in the project's npm dependencies.
@@ -33,7 +33,7 @@ Analyze the npm audit results and report vulnerabilities that pose real risk to 
 - Vulnerabilities that require specific conditions not present in this project (e.g., server-side prototype pollution in a client-only app)
 - Low-severity vulnerabilities with no practical exploit path
 - Duplicate advisories for the same underlying issue across different dependency paths
-- Vulnerabilities already marked as "fix available" with a simple `npm audit fix` — just note the fix is available
+- Vulnerabilities already marked as "fix available" with a simple `npm audit fix` - just note the fix is available
 
 ## Severity Guidelines
 

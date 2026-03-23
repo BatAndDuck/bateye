@@ -39,7 +39,7 @@ test('bateye-config schema includes prReview.semanticVerification.enabled', () =
 // The pipeline evaluates:
 //   const semanticEnabled = config.prReview?.semanticVerification?.enabled !== false;
 //
-// This implements "enabled by default" — the pass runs unless the user
+// This implements "enabled by default" - the pass runs unless the user
 // explicitly sets enabled: false.  The tests below codify every branch.
 
 function resolveSemanticEnabled(config) {
