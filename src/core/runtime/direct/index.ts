@@ -74,6 +74,23 @@ function shouldRetryWithoutResponseFormat(err: unknown): boolean {
   );
 }
 
+function shouldRetryWithMaxCompletionTokens(err: unknown): boolean {
+  const candidate = err as {
+    status?: number;
+    message?: string;
+    error?: {
+      param?: string;
+      message?: string;
+    };
+  };
+
+  return candidate?.status === 400 && (
+    candidate?.error?.param === 'max_tokens'
+    || /max_tokens/i.test(candidate?.message || '')
+    || /max_tokens/i.test(candidate?.error?.message || '')
+  );
+}
+
 function normalizeRuntimeError(err: unknown, baseURL?: string): Error {
   const candidate = err as { error?: { message?: string } };
   const message = candidate?.error?.message || formatErrorWithCauses(err);
@@ -208,14 +225,16 @@ async function runWithAzure<T>(
   let lastError: Error | null = null;
   let lastRawJson: string | null = null;
   let includeResponseFormat = true;
+  let useMaxCompletionTokens = false;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     const retryNote = attempt > 0 ? `\n\nPREVIOUS ATTEMPT FAILED JSON VALIDATION. Return ONLY valid JSON.` : '';
     let response: Awaited<ReturnType<typeof client.chat.completions.create>>;
     try {
       response = await client.chat.completions.create({
         model: modelId,
-        max_tokens: options.maxTokens || 8096,
-        temperature: options.temperature ?? 0,
+        ...(useMaxCompletionTokens
+          ? { max_completion_tokens: options.maxTokens || 8096 }
+          : { max_tokens: options.maxTokens || 8096, temperature: options.temperature ?? 0 }),
         ...(includeResponseFormat ? { response_format: { type: 'json_object' as const } } : {}),
         messages: [
           { role: 'system', content: options.systemPrompt + retryNote },
@@ -225,6 +244,11 @@ async function runWithAzure<T>(
     } catch (err) {
       if (includeResponseFormat && shouldRetryWithoutResponseFormat(err)) {
         includeResponseFormat = false;
+        attempt -= 1;
+        continue;
+      }
+      if (!useMaxCompletionTokens && shouldRetryWithMaxCompletionTokens(err)) {
+        useMaxCompletionTokens = true;
         attempt -= 1;
         continue;
       }
@@ -260,8 +284,9 @@ async function runWithAzure<T>(
       const repair = buildStructureRepairPrompt(lastRawJson, formatZodErrors(lastError));
       const repairResponse = await client.chat.completions.create({
         model: modelId,
-        max_tokens: options.maxTokens || 8096,
-        temperature: 0,
+        ...(useMaxCompletionTokens
+          ? { max_completion_tokens: options.maxTokens || 8096 }
+          : { max_tokens: options.maxTokens || 8096, temperature: 0 }),
         ...(includeResponseFormat ? { response_format: { type: 'json_object' as const } } : {}),
         messages: [
           { role: 'system', content: repair.systemPrompt },
@@ -320,6 +345,7 @@ async function runWithOpenAI<T>(
   let lastError: Error | null = null;
   let lastRawJson: string | null = null;
   let includeResponseFormat = true;
+  let useMaxCompletionTokens = false;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     if (attempt > 0) {
       logRuntimeDebug(`[direct-${label}] Retry ${attempt + 1}/${MAX_RETRIES} for ${modelId}: ${lastError?.message?.slice(0, 200)}`);
@@ -329,8 +355,9 @@ async function runWithOpenAI<T>(
     try {
       response = await client.chat.completions.create({
         model: modelId,
-        max_tokens: options.maxTokens || 8096,
-        temperature: options.temperature ?? 0,
+        ...(useMaxCompletionTokens
+          ? { max_completion_tokens: options.maxTokens || 8096 }
+          : { max_tokens: options.maxTokens || 8096, temperature: options.temperature ?? 0 }),
         ...(includeResponseFormat ? { response_format: { type: 'json_object' as const } } : {}),
         messages: [
           { role: 'system', content: options.systemPrompt + retryNote },
@@ -341,6 +368,12 @@ async function runWithOpenAI<T>(
       if (includeResponseFormat && shouldRetryWithoutResponseFormat(err)) {
         logRuntimeDebug(`[direct-${label}] response_format not supported by ${modelId}, retrying without it`);
         includeResponseFormat = false;
+        attempt -= 1;
+        continue;
+      }
+      if (!useMaxCompletionTokens && shouldRetryWithMaxCompletionTokens(err)) {
+        logRuntimeDebug(`[direct-${label}] max_tokens not supported by ${modelId}, retrying with max_completion_tokens`);
+        useMaxCompletionTokens = true;
         attempt -= 1;
         continue;
       }
@@ -380,8 +413,9 @@ async function runWithOpenAI<T>(
       const repair = buildStructureRepairPrompt(lastRawJson, formatZodErrors(lastError));
       const repairResponse = await client.chat.completions.create({
         model: modelId,
-        max_tokens: options.maxTokens || 8096,
-        temperature: 0,
+        ...(useMaxCompletionTokens
+          ? { max_completion_tokens: options.maxTokens || 8096 }
+          : { max_tokens: options.maxTokens || 8096, temperature: 0 }),
         ...(includeResponseFormat ? { response_format: { type: 'json_object' as const } } : {}),
         messages: [
           { role: 'system', content: repair.systemPrompt },
