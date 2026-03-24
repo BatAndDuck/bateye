@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/bateye/schemas/bateye-config.schema.json",
-  "model": "vercel/deepseek/deepseek-v3.2",
+  "model": "openai/gpt-5.4-nano",
   "exclude": ["generated", "vendor"],
   "prReview": {
     "autoApprove": {
