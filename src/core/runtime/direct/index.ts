@@ -74,7 +74,7 @@ function shouldRetryWithoutResponseFormat(err: unknown): boolean {
   );
 }
 
-function shouldRetryWithMaxCompletionTokens(err: unknown): boolean {
+export function shouldRetryWithMaxCompletionTokens(err: unknown): boolean {
   const candidate = err as {
     status?: number;
     message?: string;
