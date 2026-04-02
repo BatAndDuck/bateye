@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import * as path from 'path';
+import packageJson from '../../package.json';
 import { runInit } from '../commands/init/index';
 import { runDoctor } from '../commands/doctor/index';
 import { runModels } from '../commands/models/index';
@@ -10,8 +11,7 @@ import { runReviewersList } from '../commands/reviewers/index';
 
 function resolveCLIVersion(): string {
   try {
-    const pkg = require('../../package.json') as { version?: string };
-    return pkg.version || '0.1.4';
+    return packageJson.version || '0.1.4';
   } catch {
     return '0.1.4';
   }
