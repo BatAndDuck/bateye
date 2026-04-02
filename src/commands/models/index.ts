@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { resolveConfig, resolveApiKey } from '../../core/config/loader';
-import { DirectAIRuntime } from '../../core/runtime/direct/index';
+import { OpenCodeCLIRuntime } from '../../core/runtime/opencode-cli/index';
 import { parseProviderAndModel } from '../../core/runtime/interface';
 
 export const SUPPORTED_PROVIDERS = [
@@ -23,7 +23,7 @@ export async function runModels(repoPath: string, provider?: string): Promise<vo
   const config = resolveConfig(repoPath);
   let apiKey: string;
   try {
-    apiKey = resolveApiKey(config);
+    apiKey = resolveApiKey(config, repoPath);
   } catch {
     apiKey = '';
   }
@@ -44,7 +44,7 @@ export async function runModels(repoPath: string, provider?: string): Promise<vo
     providers = [activeTransport];
   }
 
-  const runtime = new DirectAIRuntime();
+  const runtime = new OpenCodeCLIRuntime();
 
   for (const p of providers) {
     console.log(chalk.white(`  ${p}:`));
@@ -55,7 +55,7 @@ export async function runModels(repoPath: string, provider?: string): Promise<vo
         config.transport === p ? config.apiBaseUrl : undefined,
       );
       if (models.length === 0) {
-        console.log(chalk.gray('    (no models found - set BATEYE_LLM_MODEL_API_KEY and try again)'));
+        console.log(chalk.gray('    (no models found - set BATEYE_LLM_MODEL_API_KEY or run `bateye conf --apikey ...`)'));
       } else {
         for (const m of models) {
           const isCurrent = m === config.model || `${p}/${m}` === config.model;
@@ -72,6 +72,7 @@ export async function runModels(repoPath: string, provider?: string): Promise<vo
   console.log(chalk.gray(`  Transport:      ${config.transport || 'auto (default)'}`));
   console.log(chalk.gray(`\n  Supported providers: ${SUPPORTED_PROVIDERS.join(', ')}`));
   console.log(chalk.gray(`  To list a provider:  bateye models <provider>`));
+  console.log(chalk.gray(`  Quick setup:         bateye conf --model openai/gpt-5.4-nano --apikey <key>`));
   console.log(chalk.gray(`  To change model:     bateye config set model anthropic/claude-opus-4-6`));
   console.log();
 }

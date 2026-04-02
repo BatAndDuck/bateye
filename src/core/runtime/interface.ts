@@ -49,7 +49,7 @@ export interface RunResult<T> {
 
 /**
  * Abstract runtime for executing structured LLM calls.
- * Implementations include DirectAIRuntime (SDK) and any future CLI-based runtimes.
+ * Implementations include DirectAIRuntime (Vercel AI SDK) and CLI-based runtimes.
  */
 export interface IRuntime {
   run<T>(options: RunOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>>;

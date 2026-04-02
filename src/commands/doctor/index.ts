@@ -6,7 +6,8 @@ import { loadConfig, resolveConfig } from '../../core/config/loader';
 import { CONFIG_FILE } from '../../core/config/defaults';
 import { loadReviewers } from '../../core/reviewers/loader';
 import { isGitRepo } from '../../core/git/index';
-import { resolveAuthEnvName } from '../../features/config/application/config-service';
+import { resolveApiKey, resolveAuthEnvName } from '../../features/config/application/config-service';
+import { maskApiKey, resolveStoredApiKey } from '../../features/config/application/credential-store';
 import { resolveOpenCodeInvocation } from '../../core/runtime/opencode-cli/command';
 
 interface CheckResult {
@@ -40,18 +41,29 @@ export async function runDoctor(repoPath: string): Promise<void> {
 
   const config = resolveConfig(repoPath);
   const authEnv = resolveAuthEnvName(config);
-  const apiKey = process.env[authEnv];
+  const apiKey = (() => {
+    try {
+      return resolveApiKey(config, repoPath);
+    } catch {
+      return undefined;
+    }
+  })();
   if (apiKey) {
+    const detail = process.env[authEnv]
+      ? `${maskApiKey(apiKey)} from ${authEnv}`
+      : resolveStoredApiKey(repoPath)
+        ? `${maskApiKey(apiKey)} from BatEye credential store`
+        : maskApiKey(apiKey);
     checks.push({
       label: `API key (${authEnv})`,
       status: 'ok',
-      detail: '***' + apiKey.slice(-4),
+      detail,
     });
   } else {
     checks.push({
       label: `API key (${authEnv})`,
       status: 'error',
-      detail: `${authEnv} environment variable is not set`,
+      detail: `${authEnv} is not set and no BatEye stored credential was found`,
     });
   }
 
@@ -94,7 +106,7 @@ export async function runDoctor(repoPath: string): Promise<void> {
     checks.push({
       label: 'OpenCode CLI (agentic runtime)',
       status: 'warn',
-      detail: 'Not available - reinstall BatEye dependencies or add `opencode` to PATH for `audit` and `pr-review`.',
+      detail: 'Not available - reinstall BatEye dependencies or add `opencode` to PATH for `models`, `audit`, and `pr-review`.',
     });
   }
 

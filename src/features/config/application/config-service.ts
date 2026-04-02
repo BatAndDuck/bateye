@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { Config } from '../../../types/index';
 import { CONFIG_FILE, DEFAULT_MODEL, DEFAULT_API_KEY_ENV } from '../../../core/config/defaults';
+import { resolveStoredApiKey } from './credential-store';
 
 export type ResolvedConfig = {
   $schema?: string;
@@ -70,12 +71,13 @@ export function resolveAuthEnvName(config: Pick<ResolvedConfig, 'model' | 'trans
 export function resolveApiKey(config: Pick<ResolvedConfig, 'model' | 'transport'> = {
   model: DEFAULT_MODEL,
   transport: 'auto',
-}): string {
+}, repoPath = process.cwd()): string {
   if (usesVercelGateway(config)) {
     // Accept any of the three Vercel credential sources (same priority as the runtime).
     const key = process.env[DEFAULT_API_KEY_ENV]
       || process.env['AI_GATEWAY_API_KEY']
-      || process.env[VERCEL_OIDC_ENV];
+      || process.env[VERCEL_OIDC_ENV]
+      || resolveStoredApiKey(repoPath);
     if (!key) {
       throw new Error(`API key not found. Set one of: ${VERCEL_GATEWAY_ENV_NAMES.join(', ')}.`);
     }
@@ -83,9 +85,9 @@ export function resolveApiKey(config: Pick<ResolvedConfig, 'model' | 'transport'
   }
 
   const envName = resolveAuthEnvName(config);
-  const key = process.env[envName];
+  const key = process.env[envName] || resolveStoredApiKey(repoPath);
   if (!key) {
-    throw new Error(`API key not found. Set ${envName}.`);
+    throw new Error(`API key not found. Set ${envName} or configure it with \`bateye conf --apikey ...\`.`);
   }
   return key;
 }

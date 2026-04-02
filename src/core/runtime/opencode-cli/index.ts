@@ -6,11 +6,19 @@ import * as path from 'path';
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { Agent, setGlobalDispatcher } from 'undici';
-import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, TokenUsage, resolveModelTarget } from '../interface';
+import {
+  AgenticRepositoryReviewOptions,
+  IRuntime,
+  RunOptions,
+  RunResult,
+  TokenUsage,
+  normalizeTransport,
+} from '../interface';
 import { logRuntimeDebug } from '../debug';
 import { formatErrorWithCauses } from '../error-format';
 import { buildOpenCodeEnvironment, resolveOpenCodeInvocation } from './command';
 import { buildStructureRepairPrompt, formatZodErrors, tryParseAndValidate } from '../structure-repair';
+import { resolveOpenCodeModelTarget } from '../provider-routing';
 
 // Node.js built-in fetch (undici) has a 300s headersTimeout by default.
 // Thinking models can take > 300s before sending the first response byte, which
@@ -774,7 +782,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
   ): Promise<RunResult<T>> {
     const start = Date.now();
     const server = await getServer(options);
-    const target = resolveModelTarget(options.model, options.transport);
+    const target = resolveOpenCodeModelTarget(options.model, options.transport, options.apiBaseUrl);
 
     // Auto-strip the -thinking suffix (see stripThinkingSuffix for rationale).
     const stripped = stripThinkingSuffix(target.modelId);
@@ -1018,7 +1026,13 @@ export class OpenCodeCLIRuntime implements IRuntime {
 
   async listModels(_provider: string, _apiKey: string, _apiBaseUrl?: string): Promise<string[]> {
     try {
-      const server = await getServer({ model: 'openai/gpt-4o-mini', apiKey: _apiKey, apiBaseUrl: _apiBaseUrl });
+      const normalizedProvider = normalizeTransport(_provider);
+      const server = await getServer({
+        model: `${normalizedProvider}/model`,
+        transport: normalizedProvider,
+        apiKey: _apiKey,
+        apiBaseUrl: _apiBaseUrl,
+      });
       const providers = await this.request<{ providers: Array<{ id: string; models?: Record<string, unknown> }> }>(
         `${server.url}/config/providers`,
         {
@@ -1029,7 +1043,22 @@ export class OpenCodeCLIRuntime implements IRuntime {
         },
         30_000,
       );
-      return providers.providers.flatMap(provider => Object.keys(provider.models || {}).map(modelID => `${provider.id}/${modelID}`));
+      const allowedProviderIds = new Set<string>();
+      if (_apiBaseUrl?.trim() && normalizedProvider !== 'azure' && normalizedProvider !== 'vercel') {
+        allowedProviderIds.add('openai');
+      } else {
+        allowedProviderIds.add(normalizedProvider);
+        if (normalizedProvider === 'google') {
+          allowedProviderIds.add('gemini');
+        }
+        if (normalizedProvider === 'gemini') {
+          allowedProviderIds.add('google');
+        }
+      }
+
+      return providers.providers
+        .filter(provider => allowedProviderIds.has(normalizeTransport(provider.id)))
+        .flatMap(provider => Object.keys(provider.models || {}).map(modelID => `${provider.id}/${modelID}`));
     } catch (err) {
       logRuntimeDebug(
         `[opencode] listModels failed for provider=${_provider} baseUrl=${_apiBaseUrl || '(default)'}: ${formatErrorWithCauses(err)}`,

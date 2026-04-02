@@ -12,6 +12,10 @@ const {
   resolveApiKey,
   setConfigField,
 } = require('../../dist/features/config/application/config-service');
+const {
+  resolveStoredApiKey,
+  saveRepoApiKey,
+} = require('../../dist/features/config/application/credential-store');
 
 function makeTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-cfg-'));
@@ -21,6 +25,20 @@ function writeConfig(repoPath, data) {
   const configDir = path.join(repoPath, '.bateye');
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(path.join(configDir, 'config.json'), JSON.stringify(data, null, 2));
+}
+
+function withCredentialStore(testFn) {
+  return async () => {
+    const original = process.env.BATEYE_CREDENTIALS_FILE;
+    const storePath = path.join(makeTmpDir(), 'credentials.json');
+    process.env.BATEYE_CREDENTIALS_FILE = storePath;
+    try {
+      await testFn(storePath);
+    } finally {
+      if (original === undefined) delete process.env.BATEYE_CREDENTIALS_FILE;
+      else process.env.BATEYE_CREDENTIALS_FILE = original;
+    }
+  };
 }
 
 // loadConfig
@@ -164,7 +182,8 @@ test('resolveAuthEnvName returns VERCEL_OIDC_TOKEN for Vercel transport', () => 
   );
 });
 
-test('resolveApiKey throws when required environment variable is not set', () => {
+test('resolveApiKey throws when required environment variable is not set', withCredentialStore(() => {
+  const repoPath = makeTmpDir();
   const original = process.env.BATEYE_LLM_MODEL_API_KEY;
   const originalGatewayKey = process.env.AI_GATEWAY_API_KEY;
   const originalToken = process.env.VERCEL_OIDC_TOKEN;
@@ -173,7 +192,7 @@ test('resolveApiKey throws when required environment variable is not set', () =>
   delete process.env.VERCEL_OIDC_TOKEN;
   try {
     assert.throws(
-      () => resolveApiKey(),
+      () => resolveApiKey({ model: 'openai/gpt-5.4-nano', transport: 'auto' }, repoPath),
       /BATEYE_LLM_MODEL_API_KEY|AI_GATEWAY_API_KEY|VERCEL_OIDC_TOKEN/,
     );
   } finally {
@@ -184,7 +203,30 @@ test('resolveApiKey throws when required environment variable is not set', () =>
     if (originalToken === undefined) delete process.env.VERCEL_OIDC_TOKEN;
     else process.env.VERCEL_OIDC_TOKEN = originalToken;
   }
-});
+}));
+
+test('saveRepoApiKey stores a repo-scoped credential outside the repository config', withCredentialStore(storePath => {
+  const repoPath = makeTmpDir();
+  saveRepoApiKey(repoPath, 'stored-key-12345', storePath);
+
+  assert.equal(resolveStoredApiKey(repoPath, storePath), 'stored-key-12345');
+  const persisted = JSON.parse(fs.readFileSync(storePath, 'utf-8'));
+  assert.equal(persisted.repos[path.resolve(repoPath)].apiKey, 'stored-key-12345');
+}));
+
+test('resolveApiKey falls back to the BatEye credential store when env vars are absent', withCredentialStore(storePath => {
+  const repoPath = makeTmpDir();
+  const original = process.env.BATEYE_LLM_MODEL_API_KEY;
+  delete process.env.BATEYE_LLM_MODEL_API_KEY;
+  saveRepoApiKey(repoPath, 'stored-key-67890', storePath);
+
+  try {
+    assert.equal(resolveApiKey({ model: 'openai/gpt-5.4-nano', transport: 'auto' }, repoPath), 'stored-key-67890');
+  } finally {
+    if (original === undefined) delete process.env.BATEYE_LLM_MODEL_API_KEY;
+    else process.env.BATEYE_LLM_MODEL_API_KEY = original;
+  }
+}));
 
 // setConfigField
 test('setConfigField updates an existing field', () => {

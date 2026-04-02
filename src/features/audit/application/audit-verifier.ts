@@ -4,8 +4,12 @@ import { z } from 'zod';
 import { Finding } from '../../../types/index';
 import { IRuntime } from '../../../core/runtime/interface';
 import { formatErrorWithCauses } from '../../../core/runtime/error-format';
+import { logPrompt } from '../../../core/output/prompt-logger';
+import { resolveDiagnosticDir } from '../../../core/output/diagnostics';
 
 const BATCH_SIZE = 5;
+const AUDIT_VERIFIER_TIMEOUT_MS = 180_000;
+const AUDIT_VERIFIER_MAX_TOKENS = 1024;
 // Extra lines of context to show above/below the reported range so the verifier
 // can see WHERE the flagged values come from (e.g. function parameters, callers).
 const CONTEXT_LINES_BEFORE = 30;
@@ -159,18 +163,31 @@ export async function verifyAuditFindings(
 
   const kept: Finding[] = [];
   const rejected: AuditVerifierResult['rejected'] = [];
+  const diagnosticDir = resolveDiagnosticDir(repoPath);
 
   const systemPrompt = buildVerifierSystemPrompt();
 
   // Process in batches
   for (let batchStart = 0; batchStart < findings.length; batchStart += BATCH_SIZE) {
     const batch = findings.slice(batchStart, batchStart + BATCH_SIZE);
+    const batchNumber = Math.floor(batchStart / BATCH_SIZE) + 1;
     const batchWithContext = batch.map(finding => ({
       finding,
       codeContext: readCodeContext(repoPath, finding.filePath, finding.startLine, finding.endLine),
     }));
 
     const userMessage = buildVerifierUserMessage(batchWithContext);
+    const startedAt = Date.now();
+
+    if (diagnosticDir) {
+      logPrompt(diagnosticDir, `audit-verifier-batch${batchNumber}`, systemPrompt, userMessage);
+    }
+
+    log?.(
+      `  [audit-verifier] Batch ${batchNumber}: ${batch.length} finding(s), `
+      + `prompt=${systemPrompt.length + userMessage.length} chars, `
+      + `timeout=${Math.round(AUDIT_VERIFIER_TIMEOUT_MS / 1000)}s${diagnosticDir ? `, diagnostics=${diagnosticDir}` : ''}`,
+    );
 
     try {
       const result = await runtime.run(
@@ -181,9 +198,18 @@ export async function verifyAuditFindings(
           apiKey,
           transport,
           apiBaseUrl,
-          callLabel: `audit-verifier (batch ${Math.floor(batchStart / BATCH_SIZE) + 1})`,
+          callLabel: `audit-verifier (batch ${batchNumber})`,
+          cwd: repoPath,
+          maxTokens: AUDIT_VERIFIER_MAX_TOKENS,
+          temperature: 0,
+          timeoutMs: AUDIT_VERIFIER_TIMEOUT_MS,
         },
         verificationBatchSchema,
+      );
+
+      log?.(
+        `  [audit-verifier] Batch ${batchNumber} completed in `
+        + `${((Date.now() - startedAt) / 1000).toFixed(1)}s`,
       );
 
       const { verifications } = result.data;
