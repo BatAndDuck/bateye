@@ -12,6 +12,17 @@ type CredentialStore = {
   repos?: Record<string, RepoCredentialEntry>;
 };
 
+type CredentialLockMetadata = {
+  pid?: number;
+  token?: string;
+  createdAt?: string;
+};
+
+type CredentialLockHandle = {
+  fd: number;
+  token: string;
+};
+
 const repoCredentialEntrySchema = z.object({
   apiKey: z.string().trim().min(1),
   updatedAt: z.string().trim().min(1),
@@ -73,6 +84,52 @@ function resolveCredentialLockPath(storePath: string): string {
   return `${storePath}.lock`;
 }
 
+function createLockToken(): string {
+  return `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function writeCredentialLockMetadata(lockFd: number, metadata: CredentialLockMetadata): void {
+  fs.writeFileSync(lockFd, `${JSON.stringify(metadata)}\n`, { encoding: 'utf-8' });
+  fs.fsyncSync(lockFd);
+}
+
+function readCredentialLockMetadata(lockPath: string): CredentialLockMetadata | null {
+  try {
+    const raw = fs.readFileSync(lockPath, 'utf-8').trim();
+    if (!raw) {
+      return {};
+    }
+
+    if (/^\d+$/.test(raw)) {
+      return { pid: Number(raw) };
+    }
+
+    const parsed = JSON.parse(raw) as CredentialLockMetadata;
+    return typeof parsed === 'object' && parsed !== null ? parsed : null;
+  } catch (err) {
+    const error = err as NodeJS.ErrnoException;
+    if (error.code === 'ENOENT') {
+      return null;
+    }
+
+    return {};
+  }
+}
+
+function isProcessAlive(pid: number | undefined): boolean {
+  if (!Number.isInteger(pid) || (pid as number) <= 0) {
+    return false;
+  }
+
+  try {
+    process.kill(pid as number, 0);
+    return true;
+  } catch (err) {
+    const error = err as NodeJS.ErrnoException;
+    return error.code === 'EPERM';
+  }
+}
+
 function ensureCredentialStoreDir(storePath: string): void {
   const dir = path.dirname(storePath);
   if (!fs.existsSync(dir)) {
@@ -82,12 +139,33 @@ function ensureCredentialStoreDir(storePath: string): void {
   fs.chmodSync(dir, CREDENTIAL_DIR_MODE);
 }
 
-function acquireCredentialStoreLock(lockPath: string): number {
+function acquireCredentialStoreLock(lockPath: string): CredentialLockHandle {
   const start = Date.now();
 
   while (true) {
     try {
-      return fs.openSync(lockPath, 'wx', CREDENTIAL_FILE_MODE);
+      const fd = fs.openSync(lockPath, 'wx', CREDENTIAL_FILE_MODE);
+      const lockHandle = {
+        fd,
+        token: createLockToken(),
+      };
+
+      try {
+        writeCredentialLockMetadata(fd, {
+          pid: process.pid,
+          token: lockHandle.token,
+          createdAt: new Date().toISOString(),
+        });
+        return lockHandle;
+      } catch (metadataErr) {
+        try {
+          fs.closeSync(fd);
+        } catch {
+          // Ignore close failures while unwinding a failed lock acquisition.
+        }
+        fs.rmSync(lockPath, { force: true });
+        throw metadataErr;
+      }
     } catch (err) {
       const error = err as NodeJS.ErrnoException;
       if (error.code !== 'EEXIST') {
@@ -97,8 +175,11 @@ function acquireCredentialStoreLock(lockPath: string): number {
       try {
         const stat = fs.statSync(lockPath);
         if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
-          fs.rmSync(lockPath, { force: true });
-          continue;
+          const metadata = readCredentialLockMetadata(lockPath);
+          if (!metadata || !isProcessAlive(metadata.pid)) {
+            fs.rmSync(lockPath, { force: true });
+            continue;
+          }
         }
       } catch (statErr) {
         const statError = statErr as NodeJS.ErrnoException;
@@ -117,9 +198,15 @@ function acquireCredentialStoreLock(lockPath: string): number {
   }
 }
 
-function releaseCredentialStoreLock(lockFd: number, lockPath: string): void {
-  fs.closeSync(lockFd);
-  fs.rmSync(lockPath, { force: true });
+function releaseCredentialStoreLock(lockHandle: CredentialLockHandle, lockPath: string): void {
+  try {
+    fs.closeSync(lockHandle.fd);
+  } finally {
+    const metadata = readCredentialLockMetadata(lockPath);
+    if (!metadata || metadata.token === lockHandle.token) {
+      fs.rmSync(lockPath, { force: true });
+    }
+  }
 }
 
 function saveCredentialStore(store: CredentialStore, storePath = resolveCredentialStorePath()): void {
@@ -141,7 +228,7 @@ export function saveRepoApiKey(repoPath: string, apiKey: string, storePath = res
 
   ensureCredentialStoreDir(storePath);
   const lockPath = resolveCredentialLockPath(storePath);
-  const lockFd = acquireCredentialStoreLock(lockPath);
+  const lockHandle = acquireCredentialStoreLock(lockPath);
 
   try {
     const store = loadCredentialStore(storePath);
@@ -153,7 +240,7 @@ export function saveRepoApiKey(repoPath: string, apiKey: string, storePath = res
 
     saveCredentialStore({ ...store, repos }, storePath);
   } finally {
-    releaseCredentialStoreLock(lockFd, lockPath);
+    releaseCredentialStoreLock(lockHandle, lockPath);
   }
 }
 

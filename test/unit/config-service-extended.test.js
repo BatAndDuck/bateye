@@ -304,6 +304,45 @@ test('saveRepoApiKey waits for a lock held by another process and still persists
   assert.equal(resolveStoredApiKey(repoPath, storePath), 'locked-key-13579');
 }));
 
+test('saveRepoApiKey removes a stale lock only when its owner process is no longer alive', withCredentialStore(storePath => {
+  const repoPath = makeTmpDir();
+  const lockPath = `${storePath}.lock`;
+  fs.mkdirSync(path.dirname(storePath), { recursive: true });
+  fs.writeFileSync(lockPath, JSON.stringify({
+    pid: 999999,
+    token: 'dead-process-lock',
+    createdAt: new Date(0).toISOString(),
+  }), 'utf-8');
+  const staleDate = new Date(Date.now() - 60_000);
+  fs.utimesSync(lockPath, staleDate, staleDate);
+
+  saveRepoApiKey(repoPath, 'stale-lock-key-86420', storePath);
+
+  assert.equal(resolveStoredApiKey(repoPath, storePath), 'stale-lock-key-86420');
+  assert.equal(fs.existsSync(lockPath), false);
+}));
+
+test('saveRepoApiKey does not remove a stale-looking lock owned by a live process', withCredentialStore(storePath => {
+  const repoPath = makeTmpDir();
+  const lockPath = `${storePath}.lock`;
+  fs.mkdirSync(path.dirname(storePath), { recursive: true });
+  fs.writeFileSync(lockPath, JSON.stringify({
+    pid: process.pid,
+    token: 'live-process-lock',
+    createdAt: new Date(0).toISOString(),
+  }), 'utf-8');
+  const staleDate = new Date(Date.now() - 60_000);
+  fs.utimesSync(lockPath, staleDate, staleDate);
+
+  assert.throws(
+    () => saveRepoApiKey(repoPath, 'should-timeout', storePath),
+    /Timed out waiting for BatEye credential store lock/,
+  );
+  assert.equal(fs.existsSync(lockPath), true);
+
+  fs.rmSync(lockPath, { force: true });
+}));
+
 // setConfigField
 test('setConfigField updates an existing field', () => {
   const tmpDir = makeTmpDir();
