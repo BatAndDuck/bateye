@@ -17,7 +17,7 @@ interface CheckResult {
 }
 
 export async function runDoctor(repoPath: string): Promise<void> {
-  console.log(chalk.cyan('\n🦉 BatEye Doctor\n'));
+  console.log(chalk.cyan('\n🦇 BatEye Doctor\n'));
 
   const checks: CheckResult[] = [];
 

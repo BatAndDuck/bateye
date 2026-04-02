@@ -13,7 +13,7 @@ export interface AuditCommandOptions {
 
 export async function runAuditCommand(repoPath: string, options: AuditCommandOptions): Promise<void> {
   await runCliTask({
-    title: '🦉 BatEye Audit',
+    title: '🦇 BatEye Audit',
     startText: 'Starting audit...',
     successText: 'Audit complete',
     errorPrefix: 'Audit failed',

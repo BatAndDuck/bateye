@@ -18,7 +18,7 @@ export const SUPPORTED_PROVIDERS = [
 ];
 
 export async function runModels(repoPath: string, provider?: string): Promise<void> {
-  console.log(chalk.cyan('\n🦉 BatEye Models\n'));
+  console.log(chalk.cyan('\n🦇 BatEye Models\n'));
 
   const config = resolveConfig(repoPath);
   let apiKey: string;

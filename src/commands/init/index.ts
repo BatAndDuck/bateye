@@ -5,7 +5,7 @@ import { saveConfig } from '../../core/config/loader';
 import { CONFIG_DIR, REVIEWERS_DIR, CONFIG_FILE, DEFAULT_MODEL, DEFAULT_API_KEY_ENV } from '../../core/config/defaults';
 
 export async function runInit(repoPath: string): Promise<void> {
-  console.log(chalk.cyan('\n🦉 BatEye Init\n'));
+  console.log(chalk.cyan('\n🦇 BatEye Init\n'));
 
   const configDir = path.join(repoPath, CONFIG_DIR);
   const reviewersDir = path.join(repoPath, REVIEWERS_DIR);

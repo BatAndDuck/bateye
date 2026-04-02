@@ -26,7 +26,7 @@ function parsePrNumber(prNumber?: string): number | undefined {
 }
 
 export async function runPRReviewCommand(repoPath: string, options: PRReviewCommandOptions): Promise<void> {
-  console.log(chalk.cyan('\n🦉 BatEye PR Review\n'));
+  console.log(chalk.cyan('\n🦇 BatEye PR Review\n'));
 
   const interactive = Boolean(process.stdout.isTTY && !process.env.CI);
   const spinner = interactive ? ora({ text: 'Starting PR review...', color: 'cyan' }).start() : null;
