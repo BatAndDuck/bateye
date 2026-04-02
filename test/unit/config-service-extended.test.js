@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -247,6 +248,46 @@ test('resolveStoredApiKey ignores malformed credential entries', withCredentialS
 
   assert.equal(resolveStoredApiKey(repoPath, storePath), undefined);
   assert.equal(resolveStoredApiKey(otherRepoPath, storePath), 'stored-key-24680');
+}));
+
+test('saveRepoApiKey waits for a lock held by another process and still persists the credential', withCredentialStore(async storePath => {
+  const repoPath = makeTmpDir();
+  const lockPath = `${storePath}.lock`;
+  fs.mkdirSync(path.dirname(storePath), { recursive: true });
+  fs.writeFileSync(lockPath, String(process.pid), 'utf-8');
+
+  const script = `
+    const { saveRepoApiKey, resolveStoredApiKey } = require(${JSON.stringify(path.resolve(process.cwd(), 'dist/features/config/application/credential-store'))});
+    const [storePath, repoPath] = process.argv.slice(1);
+    saveRepoApiKey(repoPath, 'locked-key-13579', storePath);
+    process.stdout.write(resolveStoredApiKey(repoPath, storePath) || '');
+  `;
+
+  const child = spawn(process.execPath, ['-e', script, storePath, repoPath], {
+    cwd: process.cwd(),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', chunk => {
+    stdout += chunk.toString();
+  });
+  child.stderr.on('data', chunk => {
+    stderr += chunk.toString();
+  });
+
+  await new Promise(resolve => setTimeout(resolve, 150));
+  fs.rmSync(lockPath, { force: true });
+
+  const exitCode = await new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', resolve);
+  });
+
+  assert.equal(exitCode, 0, stderr);
+  assert.equal(stdout.trim(), 'locked-key-13579');
+  assert.equal(resolveStoredApiKey(repoPath, storePath), 'locked-key-13579');
 }));
 
 // setConfigField

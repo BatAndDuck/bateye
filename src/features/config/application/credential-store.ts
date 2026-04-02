@@ -21,6 +21,10 @@ const credentialStoreRootSchema = z.object({
   repos: z.record(z.unknown()).optional(),
 });
 
+const LOCK_RETRY_DELAY_MS = 25;
+const LOCK_TIMEOUT_MS = 5_000;
+const LOCK_STALE_MS = 30_000;
+
 export function resolveCredentialStorePath(env: NodeJS.ProcessEnv = process.env): string {
   return env.BATEYE_CREDENTIALS_FILE?.trim() || path.join(os.homedir(), '.bateye', 'credentials.json');
 }
@@ -57,13 +61,65 @@ function loadCredentialStore(storePath = resolveCredentialStorePath()): Credenti
   }
 }
 
+function sleepSync(ms: number): void {
+  const sab = new SharedArrayBuffer(4);
+  const int32 = new Int32Array(sab);
+  Atomics.wait(int32, 0, 0, ms);
+}
+
+function resolveCredentialLockPath(storePath: string): string {
+  return `${storePath}.lock`;
+}
+
+function acquireCredentialStoreLock(lockPath: string): number {
+  const start = Date.now();
+
+  while (true) {
+    try {
+      return fs.openSync(lockPath, 'wx');
+    } catch (err) {
+      const error = err as NodeJS.ErrnoException;
+      if (error.code !== 'EEXIST') {
+        throw error;
+      }
+
+      try {
+        const stat = fs.statSync(lockPath);
+        if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
+          fs.rmSync(lockPath, { force: true });
+          continue;
+        }
+      } catch (statErr) {
+        const statError = statErr as NodeJS.ErrnoException;
+        if (statError.code === 'ENOENT') {
+          continue;
+        }
+        throw statError;
+      }
+
+      if (Date.now() - start > LOCK_TIMEOUT_MS) {
+        throw new Error(`Timed out waiting for BatEye credential store lock: ${lockPath}`, { cause: err });
+      }
+
+      sleepSync(LOCK_RETRY_DELAY_MS);
+    }
+  }
+}
+
+function releaseCredentialStoreLock(lockFd: number, lockPath: string): void {
+  fs.closeSync(lockFd);
+  fs.rmSync(lockPath, { force: true });
+}
+
 function saveCredentialStore(store: CredentialStore, storePath = resolveCredentialStorePath()): void {
   const dir = path.dirname(storePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  fs.writeFileSync(storePath, JSON.stringify(store, null, 2) + '\n', 'utf-8');
+  const tempPath = `${storePath}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(store, null, 2) + '\n', 'utf-8');
+  fs.renameSync(tempPath, storePath);
 }
 
 export function saveRepoApiKey(repoPath: string, apiKey: string, storePath = resolveCredentialStorePath()): void {
@@ -72,14 +128,26 @@ export function saveRepoApiKey(repoPath: string, apiKey: string, storePath = res
     throw new Error('API key cannot be empty.');
   }
 
-  const store = loadCredentialStore(storePath);
-  const repos = store.repos || {};
-  repos[normalizeRepoPath(repoPath)] = {
-    apiKey: trimmedApiKey,
-    updatedAt: new Date().toISOString(),
-  };
+  const dir = path.dirname(storePath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
 
-  saveCredentialStore({ ...store, repos }, storePath);
+  const lockPath = resolveCredentialLockPath(storePath);
+  const lockFd = acquireCredentialStoreLock(lockPath);
+
+  try {
+    const store = loadCredentialStore(storePath);
+    const repos = store.repos || {};
+    repos[normalizeRepoPath(repoPath)] = {
+      apiKey: trimmedApiKey,
+      updatedAt: new Date().toISOString(),
+    };
+
+    saveCredentialStore({ ...store, repos }, storePath);
+  } finally {
+    releaseCredentialStoreLock(lockFd, lockPath);
+  }
 }
 
 export function resolveStoredApiKey(repoPath: string, storePath = resolveCredentialStorePath()): string | undefined {
