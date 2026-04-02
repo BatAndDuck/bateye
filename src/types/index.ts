@@ -244,7 +244,7 @@ export type OrchestratorResult = {
    * Brief description of what this PR is trying to accomplish and which changes are deliberate.
    * Passed to every reviewer so they can avoid flagging intentional decisions.
    */
-  intentSummary?: string;
+  intentSummary: string;
 };
 
 export type PRContext = {

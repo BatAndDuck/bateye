@@ -82,6 +82,7 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
     runs: [
       {
         data: {
+          intentSummary: 'The PR refactors normalization flow intentionally and should be checked by security and follow-up reviewers.',
           selectedReviewers: [
             { reviewerId: 'pr-tool', reason: 'Changed TypeScript logic needs a security scan.' , confidence: 0.9 },
             { reviewerId: 'pr-follow-up', reason: 'The updated function should get a code quality pass.' , confidence: 0.9 },
@@ -282,6 +283,7 @@ test('pr-review command uses exactly the reviewers the orchestrator selected, no
     runs: [
       {
         data: {
+          intentSummary: 'The PR changes a single TypeScript function, so a bug-focused reviewer is sufficient.',
           selectedReviewers: [
             { reviewerId: 'bug-hunter', reason: 'Changed TypeScript logic should get a bug pass.' , confidence: 0.9 },
           ],
@@ -340,6 +342,7 @@ test('pr-review command runs all reviewers the orchestrator selected without fil
     runs: [
       {
         data: {
+          intentSummary: 'The PR updates runtime behavior and logging, so the full set of selected reviewers should run.',
           selectedReviewers: [
             { reviewerId: 'error-handling', reason: 'Error path changed.' , confidence: 0.9 },
             { reviewerId: 'log-reviewer', reason: 'Logging changed.' , confidence: 0.9 },
@@ -426,6 +429,7 @@ Investigate code quality issues only.
     runs: [
       {
         data: {
+          intentSummary: 'The PR changes a single exported value, so both selected reviewers should inspect the same diff.',
           selectedReviewers: [
             { reviewerId: 'failing-tool-reviewer', reason: 'Security pass.' , confidence: 0.9 },
             { reviewerId: 'plain-reviewer', reason: 'Code quality pass.' , confidence: 0.9 },
@@ -498,6 +502,7 @@ export function buildRepoIndex(config) {
     runs: [
       {
         data: {
+          intentSummary: 'The helper was inlined intentionally, so reviewers should verify whether config.exclude handling still exists before reporting a regression.',
           selectedReviewers: [
             { reviewerId: 'bug-hunter-local', reason: 'Potential logic regression in config handling.' , confidence: 0.9 },
           ],
@@ -619,6 +624,7 @@ jobs:
     runs: [
       {
         data: {
+          intentSummary: 'The workflow change intentionally adds linting, so reviewers should inspect the current workflow before claiming any missing gates.',
           selectedReviewers: [
             { reviewerId: 'ci-cd-local', reason: 'Workflow file changed.' , confidence: 0.9 },
           ],
@@ -716,6 +722,7 @@ Report only concrete issues that still exist after investigating the current fil
     runs: [
       {
         data: {
+          intentSummary: 'The legacy unsafe call was intentionally removed, so reviewers must validate findings against the current file state.',
           selectedReviewers: [
             { reviewerId: 'removed-code-reviewer', reason: 'Changed function body.' , confidence: 0.9 },
           ],
@@ -825,6 +832,7 @@ Report only concrete code quality findings after investigating the current repos
     runs: [
       {
         data: {
+          intentSummary: 'The PR updates one TypeScript function and should be reviewed by the GitHub reviewer only.',
           selectedReviewers: [
             { reviewerId: 'github-reviewer', reason: 'Updated TypeScript code should be reviewed.' , confidence: 0.9 },
           ],
@@ -986,6 +994,7 @@ Report only concrete findings anchored to the changed file.
     runs: [
       {
         data: {
+          intentSummary: 'The PR updates one TypeScript function and should be reviewed by the inline GitHub reviewer only.',
           selectedReviewers: [
             { reviewerId: 'github-inline-reviewer', reason: 'Changed TypeScript code should be reviewed.' , confidence: 0.9 },
           ],

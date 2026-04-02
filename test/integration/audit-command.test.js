@@ -25,6 +25,7 @@ test('audit command uses built-in reviewers and reaches the mocked runtime', () 
       // First call: orchestrator selects the 3 core built-in reviewers
       {
         data: {
+          intentSummary: 'The repository contains a small TypeScript source tree, so the core built-in audit reviewers are appropriate.',
           selectedReviewers: [
             { reviewerId: 'code-quality',  reason: 'General code quality' , confidence: 0.9 },
             { reviewerId: 'documentation', reason: 'Documentation coverage' , confidence: 0.9 },
@@ -384,6 +385,7 @@ test('audit command prints and persists aggregated token usage', () => {
     runs: [
       {
         data: {
+          intentSummary: 'The repository changes are small and should be covered by code-quality and documentation reviewers.',
           selectedReviewers: [
             { reviewerId: 'code-quality', reason: 'General code quality' , confidence: 0.9 },
             { reviewerId: 'documentation', reason: 'Documentation coverage' , confidence: 0.9 },

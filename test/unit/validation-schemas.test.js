@@ -25,6 +25,7 @@ test('prioritySchema rejects invalid priority strings', () => {
 // orchestratorResultSchema
 test('orchestratorResultSchema accepts valid data with reviewers', () => {
   const result = orchestratorResultSchema.safeParse({
+    intentSummary: 'The PR updates application logic and intentionally changes reviewer routing behavior.',
     selectedReviewers: [
       { reviewerId: 'code-quality', reason: 'Relevant for this PR', confidence: 0.95 },
       { reviewerId: 'security-api', reason: 'API changes detected', confidence: 0.8 },
@@ -34,13 +35,18 @@ test('orchestratorResultSchema accepts valid data with reviewers', () => {
 });
 
 test('orchestratorResultSchema accepts empty reviewer list', () => {
-  const result = orchestratorResultSchema.safeParse({ selectedReviewers: [] });
+  const result = orchestratorResultSchema.safeParse({
+    intentSummary: 'The diff is documentation-only, so no specialist reviewers are needed.',
+    selectedReviewers: [],
+  });
   assert.ok(result.success);
 });
 
-test('orchestratorResultSchema rejects missing selectedReviewers', () => {
+test('orchestratorResultSchema rejects missing selectedReviewers or intentSummary', () => {
   const result = orchestratorResultSchema.safeParse({});
   assert.ok(!result.success);
+  assert.equal(result.error.issues.some(issue => issue.path.join('.') === 'selectedReviewers'), true);
+  assert.equal(result.error.issues.some(issue => issue.path.join('.') === 'intentSummary'), true);
 });
 
 // reviewerAnalysisSchema
