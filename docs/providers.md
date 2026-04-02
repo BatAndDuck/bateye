@@ -31,6 +31,7 @@ Structured, non-agentic LLM calls use the Vercel AI SDK. Agentic repository revi
 | Azure | `azure/gpt-4o` | Requires `AZURE_RESOURCE_NAME` |
 | Ollama (local) | `ollama/llama3.2` | No API key needed |
 | LM Studio (local) | `lmstudio/...` | No API key needed |
+| LiteLLM | `litellm/<provider>/<model>` | Local proxy; see below |
 | Vercel AI Gateway | `vercel/<provider>/<model>` | Uses `VERCEL_OIDC_TOKEN` |
 
 ## Picking a model
@@ -85,6 +86,35 @@ No API key needed. Start the local server, then:
 }
 ```
 
+### LiteLLM
+
+[LiteLLM](https://github.com/BerriAI/litellm) is a local proxy that exposes an OpenAI-compatible API and can forward requests to 100+ providers behind the scenes.
+
+Start your LiteLLM proxy (default port 4000), then set the model prefix to `litellm/`:
+
+```json
+{
+  "model": "litellm/anthropic/claude-sonnet-4-5"
+}
+```
+
+The `litellm` transport automatically points to `http://localhost:4000/v1`. Pass your LiteLLM master key as the API key:
+
+```bash
+export BATEYE_LLM_MODEL_API_KEY=your-litellm-master-key
+```
+
+To use a remote LiteLLM deployment, override `apiBaseUrl`:
+
+```json
+{
+  "model": "litellm/anthropic/claude-sonnet-4-5",
+  "apiBaseUrl": "https://your-litellm-host.example.com/v1"
+}
+```
+
+LiteLLM passes provider-prefixed model IDs (e.g. `anthropic/claude-sonnet-4-5`) through to the upstream provider, so the full model string is forwarded as-is.
+
 ### Custom OpenAI-compatible gateway
 
 Set `apiBaseUrl` in your config to point at any OpenAI-compatible endpoint:
@@ -96,7 +126,7 @@ Set `apiBaseUrl` in your config to point at any OpenAI-compatible endpoint:
 }
 ```
 
-With `apiBaseUrl` set, both structured calls and agentic OpenCode reviews are routed through the OpenAI-compatible path. This is useful for LiteLLM and similar gateways that accept provider-prefixed model IDs such as `anthropic/claude-sonnet-4-5`.
+With `apiBaseUrl` set, both structured calls and agentic reviews are routed through the OpenAI-compatible path.
 
 ## Recommendations
 

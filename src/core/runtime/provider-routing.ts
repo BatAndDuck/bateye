@@ -96,6 +96,8 @@ export function resolveOpenAICompatibleBaseUrl(transport: string, apiBaseUrl?: s
       return 'https://api.sambanova.ai/v1';
     case 'nebius':
       return 'https://api.studio.nebius.ai/v1';
+    case 'litellm':
+      return 'http://localhost:4000/v1';
     default:
       return undefined;
   }
