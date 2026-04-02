@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { resolveVercelGatewayCredential } = require('../../dist/core/runtime/direct/index');
+const { resolveOpenCodeModelTarget } = require('../../dist/core/runtime/provider-routing');
 const { createStructuredRuntime, resetRuntime } = require('../../dist/core/runtime/factory');
 
 test('resolveVercelGatewayCredential prefers configured key over .env OIDC token', () => {
@@ -34,6 +35,16 @@ test('resolveVercelGatewayCredential returns undefined when no configured key or
     if (originalDefaultKey === undefined) delete process.env.BATEYE_LLM_MODEL_API_KEY;
     else process.env.BATEYE_LLM_MODEL_API_KEY = originalDefaultKey;
   }
+});
+
+test('resolveOpenCodeModelTarget routes explicit apiBaseUrl through the OpenAI-compatible provider', () => {
+  assert.deepEqual(
+    resolveOpenCodeModelTarget('anthropic/claude-sonnet-4-5', 'auto', 'https://litellm.example/v1'),
+    {
+      transport: 'openai',
+      modelId: 'anthropic/claude-sonnet-4-5',
+    }
+  );
 });
 
 test('createStructuredRuntime uses mock runtime only when BATEYE_RUNTIME=mock', async () => {

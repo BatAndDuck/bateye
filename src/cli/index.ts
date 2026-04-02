@@ -1,12 +1,21 @@
 import { Command } from 'commander';
 import * as path from 'path';
+import packageJson from '../../package.json';
 import { runInit } from '../commands/init/index';
 import { runDoctor } from '../commands/doctor/index';
 import { runModels } from '../commands/models/index';
-import { runConfigShow, runConfigSet } from '../commands/config/index';
+import { runConf, runConfigShow, runConfigSet } from '../commands/config/index';
 import { runAuditCommand } from '../commands/audit/index';
 import { runPRReviewCommand } from '../commands/pr-review/index';
 import { runReviewersList } from '../commands/reviewers/index';
+
+function resolveCLIVersion(): string {
+  try {
+    return packageJson.version || '0.1.4';
+  } catch {
+    return '0.1.4';
+  }
+}
 
 /** Build the top-level BatEye CLI program and register every supported command. */
 export function createCLI(): Command {
@@ -15,7 +24,7 @@ export function createCLI(): Command {
   program
     .name('bateye')
     .description('AI-powered code analysis CLI')
-    .version('0.1.0');
+    .version(resolveCLIVersion());
 
   // Shared option helper
   const getRepoPath = (cmd: Command): string => {
@@ -25,12 +34,21 @@ export function createCLI(): Command {
 
   program
     .option('--cwd <path>', 'Working directory (defaults to current directory)')
-    .option('--verbose', 'Enable verbose runtime diagnostics');
+    .option('--verbose', 'Enable verbose runtime diagnostics')
+    .option('--diagnostic [dir]', 'Capture detailed diagnostics and prompt logs (optionally to a custom directory)');
 
   program.hook('preAction', command => {
     const opts = command.optsWithGlobals();
+    const repoPath = path.resolve(opts.cwd || process.cwd());
     if (opts.verbose) {
       process.env.BATEYE_VERBOSE = '1';
+    }
+    if (opts.diagnostic !== undefined) {
+      process.env.BATEYE_VERBOSE = '1';
+      process.env.BATEYE_DIAGNOSTIC = '1';
+      process.env.BATEYE_DIAGNOSTIC_DIR = typeof opts.diagnostic === 'string' && opts.diagnostic.trim()
+        ? path.resolve(repoPath, opts.diagnostic)
+        : path.join(repoPath, '.bateye', 'out', 'diagnostics');
     }
   });
 
@@ -75,6 +93,18 @@ export function createCLI(): Command {
     .description('Set a configuration field (model, transport, apiBaseUrl, exclude)')
     .action(async (field: string, value: string, _, cmd) => {
       await runConfigSet(getRepoPath(cmd.parent!.parent!), field, value);
+    });
+
+  program
+    .command('conf')
+    .description('Quickly set the active model and repository API key')
+    .option('--apikey <key>', 'Store the API key for the current repository')
+    .option('--model <model>', 'Set the active model, e.g. openai/gpt-5.4-nano')
+    .action(async (opts, cmd) => {
+      await runConf(getRepoPath(cmd), {
+        apiKey: opts.apikey,
+        model: opts.model,
+      });
     });
 
   // ── reviewers ──────────────────────────────────────────────────────────

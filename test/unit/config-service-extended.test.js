@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -12,6 +13,10 @@ const {
   resolveApiKey,
   setConfigField,
 } = require('../../dist/features/config/application/config-service');
+const {
+  resolveStoredApiKey,
+  saveRepoApiKey,
+} = require('../../dist/features/config/application/credential-store');
 
 function makeTmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-cfg-'));
@@ -21,6 +26,20 @@ function writeConfig(repoPath, data) {
   const configDir = path.join(repoPath, '.bateye');
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(path.join(configDir, 'config.json'), JSON.stringify(data, null, 2));
+}
+
+function withCredentialStore(testFn) {
+  return async () => {
+    const original = process.env.BATEYE_CREDENTIALS_FILE;
+    const storePath = path.join(makeTmpDir(), 'credentials.json');
+    process.env.BATEYE_CREDENTIALS_FILE = storePath;
+    try {
+      await testFn(storePath);
+    } finally {
+      if (original === undefined) delete process.env.BATEYE_CREDENTIALS_FILE;
+      else process.env.BATEYE_CREDENTIALS_FILE = original;
+    }
+  };
 }
 
 // loadConfig
@@ -164,7 +183,8 @@ test('resolveAuthEnvName returns VERCEL_OIDC_TOKEN for Vercel transport', () => 
   );
 });
 
-test('resolveApiKey throws when required environment variable is not set', () => {
+test('resolveApiKey throws when required environment variable is not set', withCredentialStore(() => {
+  const repoPath = makeTmpDir();
   const original = process.env.BATEYE_LLM_MODEL_API_KEY;
   const originalGatewayKey = process.env.AI_GATEWAY_API_KEY;
   const originalToken = process.env.VERCEL_OIDC_TOKEN;
@@ -173,7 +193,7 @@ test('resolveApiKey throws when required environment variable is not set', () =>
   delete process.env.VERCEL_OIDC_TOKEN;
   try {
     assert.throws(
-      () => resolveApiKey(),
+      () => resolveApiKey({ model: 'openai/gpt-5.4-nano', transport: 'auto' }, repoPath),
       /BATEYE_LLM_MODEL_API_KEY|AI_GATEWAY_API_KEY|VERCEL_OIDC_TOKEN/,
     );
   } finally {
@@ -184,7 +204,144 @@ test('resolveApiKey throws when required environment variable is not set', () =>
     if (originalToken === undefined) delete process.env.VERCEL_OIDC_TOKEN;
     else process.env.VERCEL_OIDC_TOKEN = originalToken;
   }
-});
+}));
+
+test('saveRepoApiKey stores a repo-scoped credential outside the repository config', withCredentialStore(storePath => {
+  const repoPath = makeTmpDir();
+  saveRepoApiKey(repoPath, 'stored-key-12345', storePath);
+
+  assert.equal(resolveStoredApiKey(repoPath, storePath), 'stored-key-12345');
+  const persisted = JSON.parse(fs.readFileSync(storePath, 'utf-8'));
+  assert.equal(persisted.repos[path.resolve(repoPath)].apiKey, 'stored-key-12345');
+}));
+
+test('saveRepoApiKey writes credential store with restrictive permissions on POSIX', withCredentialStore(storePath => {
+  if (process.platform === 'win32') {
+    return;
+  }
+
+  const repoPath = makeTmpDir();
+  saveRepoApiKey(repoPath, 'stored-key-12345', storePath);
+
+  const fileMode = fs.statSync(storePath).mode & 0o777;
+  const dirMode = fs.statSync(path.dirname(storePath)).mode & 0o777;
+  assert.equal(fileMode, 0o600);
+  assert.equal(dirMode, 0o700);
+}));
+
+test('resolveApiKey falls back to the BatEye credential store when env vars are absent', withCredentialStore(storePath => {
+  const repoPath = makeTmpDir();
+  const original = process.env.BATEYE_LLM_MODEL_API_KEY;
+  delete process.env.BATEYE_LLM_MODEL_API_KEY;
+  saveRepoApiKey(repoPath, 'stored-key-67890', storePath);
+
+  try {
+    assert.equal(resolveApiKey({ model: 'openai/gpt-5.4-nano', transport: 'auto' }, repoPath), 'stored-key-67890');
+  } finally {
+    if (original === undefined) delete process.env.BATEYE_LLM_MODEL_API_KEY;
+    else process.env.BATEYE_LLM_MODEL_API_KEY = original;
+  }
+}));
+
+test('resolveStoredApiKey ignores malformed credential entries', withCredentialStore(storePath => {
+  const repoPath = makeTmpDir();
+  const otherRepoPath = makeTmpDir();
+  fs.mkdirSync(path.dirname(storePath), { recursive: true });
+  fs.writeFileSync(storePath, JSON.stringify({
+    repos: {
+      [path.resolve(repoPath)]: {
+        apiKey: '',
+        updatedAt: '2026-04-02T00:00:00.000Z',
+      },
+      [path.resolve(otherRepoPath)]: {
+        apiKey: 'stored-key-24680',
+        updatedAt: '2026-04-02T00:00:00.000Z',
+      },
+    },
+  }, null, 2));
+
+  assert.equal(resolveStoredApiKey(repoPath, storePath), undefined);
+  assert.equal(resolveStoredApiKey(otherRepoPath, storePath), 'stored-key-24680');
+}));
+
+test('saveRepoApiKey waits for a lock held by another process and still persists the credential', withCredentialStore(async storePath => {
+  const repoPath = makeTmpDir();
+  const lockPath = `${storePath}.lock`;
+  fs.mkdirSync(path.dirname(storePath), { recursive: true });
+  fs.writeFileSync(lockPath, String(process.pid), 'utf-8');
+
+  const script = `
+    const { saveRepoApiKey, resolveStoredApiKey } = require(${JSON.stringify(path.resolve(process.cwd(), 'dist/features/config/application/credential-store'))});
+    const [storePath, repoPath] = process.argv.slice(1);
+    saveRepoApiKey(repoPath, 'locked-key-13579', storePath);
+    process.stdout.write(resolveStoredApiKey(repoPath, storePath) || '');
+  `;
+
+  const child = spawn(process.execPath, ['-e', script, storePath, repoPath], {
+    cwd: process.cwd(),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', chunk => {
+    stdout += chunk.toString();
+  });
+  child.stderr.on('data', chunk => {
+    stderr += chunk.toString();
+  });
+
+  await new Promise(resolve => setTimeout(resolve, 150));
+  fs.rmSync(lockPath, { force: true });
+
+  const exitCode = await new Promise((resolve, reject) => {
+    child.on('error', reject);
+    child.on('close', resolve);
+  });
+
+  assert.equal(exitCode, 0, stderr);
+  assert.equal(stdout.trim(), 'locked-key-13579');
+  assert.equal(resolveStoredApiKey(repoPath, storePath), 'locked-key-13579');
+}));
+
+test('saveRepoApiKey removes a stale lock only when its owner process is no longer alive', withCredentialStore(storePath => {
+  const repoPath = makeTmpDir();
+  const lockPath = `${storePath}.lock`;
+  fs.mkdirSync(path.dirname(storePath), { recursive: true });
+  fs.writeFileSync(lockPath, JSON.stringify({
+    pid: 999999,
+    token: 'dead-process-lock',
+    createdAt: new Date(0).toISOString(),
+  }), 'utf-8');
+  const staleDate = new Date(Date.now() - 60_000);
+  fs.utimesSync(lockPath, staleDate, staleDate);
+
+  saveRepoApiKey(repoPath, 'stale-lock-key-86420', storePath);
+
+  assert.equal(resolveStoredApiKey(repoPath, storePath), 'stale-lock-key-86420');
+  assert.equal(fs.existsSync(lockPath), false);
+}));
+
+test('saveRepoApiKey does not remove a stale-looking lock owned by a live process', withCredentialStore(storePath => {
+  const repoPath = makeTmpDir();
+  const lockPath = `${storePath}.lock`;
+  fs.mkdirSync(path.dirname(storePath), { recursive: true });
+  fs.writeFileSync(lockPath, JSON.stringify({
+    pid: process.pid,
+    token: 'live-process-lock',
+    createdAt: new Date(0).toISOString(),
+  }), 'utf-8');
+  const staleDate = new Date(Date.now() - 60_000);
+  fs.utimesSync(lockPath, staleDate, staleDate);
+
+  assert.throws(
+    () => saveRepoApiKey(repoPath, 'should-timeout', storePath),
+    /Timed out waiting for BatEye credential store lock/,
+  );
+  assert.equal(fs.existsSync(lockPath), true);
+
+  fs.rmSync(lockPath, { force: true });
+}));
 
 // setConfigField
 test('setConfigField updates an existing field', () => {

@@ -24,6 +24,7 @@ import { loadReviewersForMode } from '../../reviewers/application/reviewer-regis
 import { selectAuditReviewers } from './audit-orchestrator';
 import { verifyAuditFindings } from './audit-verifier';
 import { BATEYE_VERSION } from '../../../version';
+import { resolveDiagnosticDir } from '../../../core/output/diagnostics';
 
 /**
  * Minimum confidence required to keep a finding, by severity.
@@ -81,6 +82,10 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
 
   // Phase 1: Load config and reviewers
   const { config, apiKey, allReviewers, issues } = resolveAuditConfig(options, log);
+  const diagnosticDir = resolveDiagnosticDir(repoPath);
+  if (diagnosticDir) {
+    log(`Diagnostics enabled. Writing audit traces to ${diagnosticDir}`);
+  }
 
   // Phase 2: Index repository
   log('Indexing repository...');
@@ -220,7 +225,7 @@ function resolveAuditConfig(
 
   log('Loading configuration...');
   const config = resolveConfig(repoPath);
-  const apiKey = resolveApiKey(config);
+  const apiKey = resolveApiKey(config, repoPath);
 
   log('Loading reviewers into the owlery...');
   const { reviewers: allReviewers, warnings } = loadReviewersForMode(repoPath, 'audit', config);

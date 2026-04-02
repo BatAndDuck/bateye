@@ -110,6 +110,9 @@ If your model ends with `-thinking` (e.g. `vercel/deepseek/deepseek-v3.2-thinkin
 | `BATEYE_RUNTIME` | Set to `mock` to use fixture-based responses (development/testing) |
 | `BATEYE_MOCK_RUNTIME_FIXTURES` | Path to JSON fixtures file (required when `BATEYE_RUNTIME=mock`) |
 | `BATEYE_MOCK_RUNTIME_LOG` | Path to log file for recording mock runtime interactions |
+| `BATEYE_VERBOSE` | Enables verbose runtime diagnostics; set automatically by the `--verbose` CLI flag |
+| `BATEYE_DIAGNOSTIC` | Enables diagnostic capture mode; set automatically by the `--diagnostic` CLI flag |
+| `BATEYE_DIAGNOSTIC_DIR` | Output directory for diagnostic logs and captured prompts; defaults to `.bateye/out/diagnostics` when `--diagnostic` is enabled |
 
 PowerShell equivalents:
 
@@ -119,6 +122,12 @@ $env:VERCEL_OIDC_TOKEN='your-vercel-oidc-token'
 ```
 
 Alternatively, copy `.env.example` to `.env` and fill in the values.
+
+## Stored credentials
+
+`bateye conf --apikey ...` stores the API key in `~/.bateye/credentials.json` so you do not need to keep exporting it for that repository.
+
+BatEye stores that credential in plaintext JSON on disk and relies on local filesystem protections rather than application-level encryption. The credentials directory is created with owner-only permissions and the file is written with restrictive permissions, but anyone who can already read files as your user can still recover the key.
 
 ---
 

@@ -1,6 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { RunOptions, normalizeTransport, resolveModelTarget } from '../interface';
+import {
+  resolveOpenAICompatibleBaseUrl,
+  resolveOpenCodeModelTarget,
+} from '../provider-routing';
 
 export interface OpenCodeInvocation {
   command: string;
@@ -11,8 +15,6 @@ export interface OpenCodeInvocation {
 interface PackageJsonWithBin {
   bin?: string | Record<string, string>;
 }
-
-const VERCEL_AI_GATEWAY_BASE_URL = 'https://ai-gateway.vercel.sh/v1';
 
 export const OPEN_CODE_PROMPT_ATTACHMENT_MESSAGE =
   'Read the attached BatEye prompt file and follow it exactly. '
@@ -89,8 +91,10 @@ export function buildOpenCodeEnvironment(
   xdgDataHome?: string,
 ): NodeJS.ProcessEnv {
   const env = { ...baseEnv };
-  const { transport } = resolveModelTarget(options.model, options.transport);
-  const normalizedTransport = normalizeTransport(transport);
+  const originalTarget = resolveModelTarget(options.model, options.transport);
+  const effectiveTarget = resolveOpenCodeModelTarget(options.model, options.transport, options.apiBaseUrl);
+  const originalTransport = normalizeTransport(originalTarget.transport);
+  const normalizedTransport = normalizeTransport(effectiveTarget.transport);
 
   if (xdgDataHome) {
     env.XDG_DATA_HOME = xdgDataHome;
@@ -110,67 +114,13 @@ export function buildOpenCodeEnvironment(
     env.OPENAI_BASE_URL = baseUrl;
   }
 
-  if (normalizedTransport === 'vercel') {
+  if (originalTransport === 'vercel') {
     env.AI_GATEWAY_API_KEY = env.AI_GATEWAY_API_KEY || options.apiKey;
     env.OPENAI_API_KEY = env.OPENAI_API_KEY || options.apiKey;
-    env.OPENAI_BASE_URL = env.OPENAI_BASE_URL || VERCEL_AI_GATEWAY_BASE_URL;
+    env.OPENAI_BASE_URL = env.OPENAI_BASE_URL || baseUrl;
   }
 
   return env;
-}
-
-function resolveOpenAICompatibleBaseUrl(transport: string, apiBaseUrl?: string): string | undefined {
-  if (apiBaseUrl?.trim()) {
-    return apiBaseUrl.trim();
-  }
-
-  switch (normalizeTransport(transport)) {
-    case 'openrouter':
-      return 'https://openrouter.ai/api/v1';
-    case 'minimax':
-      return 'https://api.minimax.chat/v1';
-    case 'google':
-    case 'gemini':
-      return 'https://generativelanguage.googleapis.com/v1beta/openai';
-    case 'vercel':
-      return VERCEL_AI_GATEWAY_BASE_URL;
-    case 'deepseek':
-      return 'https://api.deepseek.com/v1';
-    case 'groq':
-      return 'https://api.groq.com/openai/v1';
-    case 'cerebras':
-      return 'https://api.cerebras.ai/v1';
-    case 'together':
-      return 'https://api.together.xyz/v1';
-    case 'fireworks':
-      return 'https://api.fireworks.ai/inference/v1';
-    case 'xai':
-      return 'https://api.x.ai/v1';
-    case 'mistral':
-      return 'https://api.mistral.ai/v1';
-    case 'cohere':
-      return 'https://api.cohere.com/compatibility/v1';
-    case 'perplexity':
-      return 'https://api.perplexity.ai';
-    case 'deepinfra':
-      return 'https://api.deepinfra.com/v1/openai';
-    case 'ollama':
-      return 'http://localhost:11434/v1';
-    case 'lmstudio':
-      return 'http://localhost:1234/v1';
-    case 'huggingface':
-      return 'https://router.huggingface.co/v1';
-    case 'moonshot':
-      return 'https://api.moonshot.ai/v1';
-    case 'novita':
-      return 'https://api.novita.ai/v3/openai';
-    case 'sambanova':
-      return 'https://api.sambanova.ai/v1';
-    case 'nebius':
-      return 'https://api.studio.nebius.ai/v1';
-    default:
-      return undefined;
-  }
 }
 
 function findBundledOpenCodePackageJson(): string | null {

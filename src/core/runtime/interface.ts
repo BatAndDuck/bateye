@@ -10,6 +10,8 @@ export interface RunOptions {
   transport?: string;  // e.g. "vercel" when routing anthropic/openai models through a gateway
   apiBaseUrl?: string; // Override for OpenAI-compatible gateways
   maxTokens?: number;
+  /** Approximate maximum combined prompt size in characters before runtime truncation. */
+  maxInputChars?: number;
   temperature?: number;
   /** Human-readable label for diagnostics (e.g. reviewer name). Shown in runtime log lines. */
   callLabel?: string;
@@ -49,7 +51,7 @@ export interface RunResult<T> {
 
 /**
  * Abstract runtime for executing structured LLM calls.
- * Implementations include DirectAIRuntime (SDK) and any future CLI-based runtimes.
+ * Implementations include DirectAIRuntime (Vercel AI SDK) and CLI-based runtimes.
  */
 export interface IRuntime {
   run<T>(options: RunOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>>;

@@ -147,7 +147,7 @@ function formatBreakingChangesComment(findings: PRFinding[]): string {
   }).join('\n\n---\n\n');
 
   return `${BATEYE_BREAKING_CHANGES_MARKER}
-## 🦉 BatEye - Breaking Changes Detected
+## 🦇 BatEye - Breaking Changes Detected
 
 This PR introduces **${findings.length} breaking change${findings.length === 1 ? '' : 's'}**. These are listed here for visibility. Auto-approve is disabled until breaking changes are reviewed and resolved or explicitly acknowledged.
 
@@ -233,7 +233,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
 
   log('Loading configuration...');
   const config = resolveConfig(repoPath);
-  const apiKey = resolveApiKey(config);
+  const apiKey = resolveApiKey(config, repoPath);
   const baseRef = options.baseRef || 'origin/main';
   const headRef = options.headRef || 'HEAD';
 
@@ -643,8 +643,8 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     await platform.updateOrCreateSummary(result.summary);
 
     const statusBody = result.status === 'degraded'
-      ? `<!-- bateye-status -->\n🦉 **BatEye** review completed with warnings - ${postedFindings.length} findings posted.`
-      : `<!-- bateye-status -->\n🦉 **BatEye** review complete - ${postedFindings.length} findings posted.`;
+      ? `<!-- bateye-status -->\n🦇 **BatEye** review completed with warnings - ${postedFindings.length} findings posted.`
+      : `<!-- bateye-status -->\n🦇 **BatEye** review complete - ${postedFindings.length} findings posted.`;
     await platform.updateStatusComment(statusBody);
 
     const hasBreakingChanges = breakingChangeFindings.length > 0;
@@ -658,7 +658,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       } else if (!hasBlocker) {
         log('Auto-approving PR (no findings exceed threshold)...');
         const approved = await platform.approvePR(
-          `🦉 **BatEye Auto-Approve**: No findings above "${maxSev}" severity. ✅`
+          `🦇 **BatEye Auto-Approve**: No findings above "${maxSev}" severity. ✅`
         );
         if (approved) {
           result.autoApproved = true;
@@ -666,7 +666,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
           const failMsg = '⚠️  Auto-approve failed - enable **Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests"** in this repository.';
           log(failMsg);
           await platform.updateStatusComment(
-            `<!-- bateye-status -->\n🦉 **BatEye** review complete - ${postedFindings.length} findings posted.\n\n${failMsg}`
+            `<!-- bateye-status -->\n🦇 **BatEye** review complete - ${postedFindings.length} findings posted.\n\n${failMsg}`
           );
         }
       } else {

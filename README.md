@@ -81,7 +81,7 @@ bateye pr-review --github --pr-number 42 # Post inline comments to a GitHub PR
 
 ## Configuration
 
-All behaviour is controlled by `.bateye/config.json` in your repo root. `bateye init` creates it, `bateye config set` edits it:
+All behaviour is controlled by `.bateye/config.json` in your repo root. `bateye init` creates it, `bateye config set` edits it, and `bateye conf` is the quickest way to change the active model or store a repo-scoped API key:
 
 ```json
 {
@@ -93,6 +93,14 @@ All behaviour is controlled by `.bateye/config.json` in your repo root. `bateye 
   }
 }
 ```
+
+Quick model/key setup:
+
+```bash
+bateye conf --model openai/gpt-5.4-nano --apikey <your-key>
+```
+
+`bateye conf --apikey` stores the key in `~/.bateye/credentials.json` with restrictive local file permissions. It is not encrypted, so prefer environment variables or short-lived keys on shared machines.
 
 Pick a model, exclude noisy paths, disable reviewers that don't apply to your stack. [Full config reference →](./docs/configuration.md)
 
@@ -139,6 +147,7 @@ Anthropic · OpenAI · OpenRouter · Google · DeepSeek · Groq · Cerebras · A
 bateye init                              # Set up .bateye/ in your repo
 bateye doctor                            # Verify config, API key, reviewers
 bateye models                            # List available AI models
+bateye conf --model <model> --apikey <key> # Set model and store a repo API key
 bateye reviewers                         # List all reviewers (built-in + custom)
 bateye config show                       # Show current config
 ```

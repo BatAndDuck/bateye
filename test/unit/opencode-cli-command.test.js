@@ -116,3 +116,16 @@ test('buildOpenCodeEnvironment uses OpenAI-compatible gateway env for vercel tra
   assert.equal(env.OPENAI_API_KEY, 'gateway-key');
   assert.equal(env.OPENAI_BASE_URL, 'https://ai-gateway.vercel.sh/v1');
 });
+
+test('buildOpenCodeEnvironment routes explicit apiBaseUrl through OpenAI-compatible env vars', () => {
+  const env = buildOpenCodeEnvironment({}, {
+    apiKey: 'gateway-key',
+    model: 'anthropic/claude-sonnet-4-5',
+    transport: 'auto',
+    apiBaseUrl: 'https://litellm.example.com/v1',
+  });
+
+  assert.equal(env.ANTHROPIC_API_KEY, undefined);
+  assert.equal(env.OPENAI_API_KEY, 'gateway-key');
+  assert.equal(env.OPENAI_BASE_URL, 'https://litellm.example.com/v1');
+});

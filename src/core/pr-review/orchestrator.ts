@@ -91,6 +91,7 @@ export async function selectReviewers(
       const trimmed = trimByConfidence(validSelection, availableReviewers, effectiveLimit);
 
       return {
+        intentSummary: result.data.intentSummary,
         selectedReviewers: trimmed,
         issues: [],
         tokensUsed: result.tokensUsed,

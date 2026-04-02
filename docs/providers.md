@@ -2,6 +2,8 @@
 
 BatEye supports 20+ AI providers. All use the same `BATEYE_LLM_MODEL_API_KEY` environment variable - just change the `model` field in your config.
 
+Structured, non-agentic LLM calls use the Vercel AI SDK. Agentic repository review calls use the OpenCode CLI runtime.
+
 ## Provider table
 
 | Provider | Model format | Notes |
@@ -93,6 +95,8 @@ Set `apiBaseUrl` in your config to point at any OpenAI-compatible endpoint:
   "apiBaseUrl": "https://your-gateway.example.com/v1"
 }
 ```
+
+With `apiBaseUrl` set, both structured calls and agentic OpenCode reviews are routed through the OpenAI-compatible path. This is useful for LiteLLM and similar gateways that accept provider-prefixed model IDs such as `anthropic/claude-sonnet-4-5`.
 
 ## Recommendations
 

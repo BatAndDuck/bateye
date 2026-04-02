@@ -71,6 +71,7 @@ function buildFallbackReviewers(availableReviewers: Reviewer[]): OrchestratorRes
   const selected = [...core, ...rest].slice(0, FALLBACK_MAX_REVIEWERS);
 
   return {
+    intentSummary: 'The audit reviewer orchestrator was unavailable, so BatEye selected a conservative core reviewer set as a fallback.',
     selectedReviewers: selected.map(r => ({
       reviewerId: r.id,
       reason: 'Selected by fallback (orchestrator unavailable)',

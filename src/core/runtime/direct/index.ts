@@ -1,99 +1,123 @@
-import Anthropic from '@anthropic-ai/sdk';
-import OpenAI, { AzureOpenAI } from 'openai';
-import { MAX_ORCHESTRATOR_TIMEOUT_MS } from '../../config/defaults';
-import * as fs from 'fs';
-import * as path from 'path';
+import { createAnthropic } from '@ai-sdk/anthropic';
+import { createAzure } from '@ai-sdk/azure';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createOpenAI } from '@ai-sdk/openai';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { generateObject, generateText, type LanguageModel } from 'ai';
 import { z } from 'zod';
-import { AgenticRepositoryReviewOptions, IRuntime, RunOptions, RunResult, TokenUsage, normalizeTransport, resolveModelTarget } from '../interface';
+import { MAX_ORCHESTRATOR_TIMEOUT_MS } from '../../config/defaults';
 import { logRuntimeDebug } from '../debug';
 import { formatErrorWithCauses } from '../error-format';
-import { buildStructureRepairPrompt, formatZodErrors, tryParseAndValidate, extractJsonFromText } from '../structure-repair';
+import {
+  AgenticRepositoryReviewOptions,
+  IRuntime,
+  RunOptions,
+  RunResult,
+  TokenUsage,
+  normalizeTransport,
+  resolveModelTarget,
+} from '../interface';
+import {
+  OPENAI_API_BASE_URL,
+  resolveOpenAICompatibleBaseUrl,
+  resolveOpenAICompatibleModelId,
+  resolveVercelGatewayCredential,
+  VERCEL_AI_GATEWAY_BASE_URL,
+} from '../provider-routing';
+import { buildStructureRepairPrompt, formatZodErrors } from '../structure-repair';
+import { OpenCodeCLIRuntime } from '../opencode-cli/index';
 
-const MAX_RETRIES = 3;
-const VERCEL_AI_GATEWAY_BASE_URL = 'https://ai-gateway.vercel.sh/v1';
+type PreparedModel = {
+  model: LanguageModel;
+  transport: string;
+  modelId: string;
+  baseURL?: string;
+};
 
-function resolveDotEnvValue(name: string, cwd = process.cwd()): string | undefined {
-  const fromEnv = process.env[name]?.trim();
-  if (fromEnv) return fromEnv;
+type BoundedPrompts = {
+  systemPrompt: string;
+  userMessage: string;
+  truncated: boolean;
+  originalChars: number;
+  boundedChars: number;
+};
 
-  // Walk up from cwd looking for a .env file that contains the requested key.
-  let dir = cwd;
-  for (let i = 0; i < 5; i++) {
-    const envFile = path.join(dir, '.env');
-    if (fs.existsSync(envFile)) {
-      const line = fs.readFileSync(envFile, 'utf-8')
-        .split('\n')
-        .find(l => l.startsWith(`${name}=`));
-      if (line) return line.slice(`${name}=`.length).trim().replace(/^["']|["']$/g, '');
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
+const DEFAULT_MAX_INPUT_CHARS = 96_000;
+const DEFAULT_MAX_SYSTEM_PROMPT_CHARS = 16_000;
+
+function normalizeBaseUrl(baseURL?: string): string | undefined {
+  const trimmed = baseURL?.trim();
+  if (!trimmed) {
+    return undefined;
   }
-  return undefined;
+
+  return trimmed.replace(/\/+$/, '');
 }
 
-function resolveVercelOidcToken(cwd?: string): string | undefined {
-  return resolveDotEnvValue('VERCEL_OIDC_TOKEN', cwd);
+function truncateWithMarker(text: string, maxChars: number, label: string): string {
+  if (text.length <= maxChars) {
+    return text;
+  }
+
+  const marker = `\n\n[...${label} truncated by BatEye...]\n\n`;
+  if (maxChars <= marker.length + 32) {
+    return text.slice(0, maxChars);
+  }
+
+  const head = Math.ceil((maxChars - marker.length) * 0.7);
+  const tail = maxChars - marker.length - head;
+  return text.slice(0, head) + marker + text.slice(text.length - tail);
 }
 
-function resolveVercelGatewayApiKey(cwd?: string): string | undefined {
-  return resolveDotEnvValue('AI_GATEWAY_API_KEY', cwd);
-}
+function boundPrompts(options: RunOptions): BoundedPrompts {
+  const originalChars = options.systemPrompt.length + options.userMessage.length;
+  const maxInputChars = options.maxInputChars ?? DEFAULT_MAX_INPUT_CHARS;
 
-export function resolveVercelGatewayCredential(configuredApiKey?: string, cwd?: string): string | undefined {
-  // Prefer the explicitly configured key so a stale pulled OIDC token cannot
-  // override a working local gateway API key.
-  return configuredApiKey?.trim() || resolveVercelGatewayApiKey(cwd) || resolveVercelOidcToken(cwd);
-}
-
-function extractJson(text: string): string {
-  // Try to extract JSON from markdown code blocks
-  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenceMatch) return fenceMatch[1].trim();
-  // Try to find raw JSON object/array
-  const objMatch = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-  if (objMatch) return objMatch[1];
-  return text.trim();
-}
-
-function shouldRetryWithoutResponseFormat(err: unknown): boolean {
-  const candidate = err as {
-    status?: number;
-    message?: string;
-    error?: {
-      param?: string;
-      message?: string;
+  if (originalChars <= maxInputChars) {
+    return {
+      systemPrompt: options.systemPrompt,
+      userMessage: options.userMessage,
+      truncated: false,
+      originalChars,
+      boundedChars: originalChars,
     };
-  };
+  }
 
-  return candidate?.status === 400 && (
-    candidate?.error?.param === 'response_format'
-    || /response_format/i.test(candidate?.message || '')
-    || /response_format/i.test(candidate?.error?.message || '')
-  );
+  const minimumSegmentChars = Math.min(512, Math.max(Math.floor(maxInputChars / 4), 0));
+  let systemBudget = Math.floor(maxInputChars * (options.systemPrompt.length / originalChars));
+  systemBudget = Math.max(systemBudget, Math.min(minimumSegmentChars, options.systemPrompt.length));
+  systemBudget = Math.min(systemBudget, DEFAULT_MAX_SYSTEM_PROMPT_CHARS);
+
+  if (systemBudget > maxInputChars - minimumSegmentChars) {
+    systemBudget = Math.max(maxInputChars - minimumSegmentChars, 0);
+  }
+
+  let userBudget = Math.max(maxInputChars - systemBudget, 0);
+  if (userBudget < minimumSegmentChars) {
+    userBudget = minimumSegmentChars;
+    systemBudget = Math.max(maxInputChars - userBudget, 0);
+  }
+
+  const boundedSystemPrompt = truncateWithMarker(options.systemPrompt, systemBudget, 'system prompt');
+  const boundedUserMessage = truncateWithMarker(options.userMessage, userBudget, 'user message');
+  const boundedChars = boundedSystemPrompt.length + boundedUserMessage.length;
+
+  return {
+    systemPrompt: boundedSystemPrompt,
+    userMessage: boundedUserMessage,
+    truncated: true,
+    originalChars,
+    boundedChars,
+  };
 }
 
-export function shouldRetryWithMaxCompletionTokens(err: unknown): boolean {
-  const candidate = err as {
-    status?: number;
-    message?: string;
-    error?: {
-      param?: string;
-      message?: string;
-    };
-  };
-
-  return candidate?.status === 400 && (
-    candidate?.error?.param === 'max_tokens'
-    || /max_tokens/i.test(candidate?.message || '')
-    || /max_tokens/i.test(candidate?.error?.message || '')
-  );
+function usesNativeOpenAIProvider(explicitApiBaseUrl?: string): boolean {
+  const normalized = normalizeBaseUrl(explicitApiBaseUrl);
+  return !normalized || normalized === OPENAI_API_BASE_URL;
 }
 
 function normalizeRuntimeError(err: unknown, baseURL?: string): Error {
-  const candidate = err as { error?: { message?: string } };
-  const message = candidate?.error?.message || formatErrorWithCauses(err);
+  const message = formatErrorWithCauses(err);
   if (baseURL === VERCEL_AI_GATEWAY_BASE_URL && /Error verifying OIDC token/i.test(message)) {
     return new Error(
       'Vercel AI Gateway rejected the configured bearer token for inference. '
@@ -105,506 +129,254 @@ function normalizeRuntimeError(err: unknown, baseURL?: string): Error {
   return err instanceof Error ? err : new Error(message);
 }
 
-async function runWithAnthropic<T>(
-  options: RunOptions,
-  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
-  modelId: string
-): Promise<RunResult<T>> {
-  const client = new Anthropic({ apiKey: options.apiKey });
-  const start = Date.now();
-  const estInputTokens = Math.ceil((options.systemPrompt.length + options.userMessage.length) / 4);
-
-  const labelTag = options.callLabel ? ` [${options.callLabel}]` : '';
-  logRuntimeDebug(`[direct-anthropic]${labelTag} Starting call: model=${modelId}, systemPrompt=${options.systemPrompt.length} chars, userMessage=${options.userMessage.length} chars, estInputTokens=~${estInputTokens}`);
-
-  let lastError: Error | null = null;
-  let lastRawJson: string | null = null;
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    if (attempt > 0) {
-      logRuntimeDebug(`[direct-anthropic] Retry ${attempt + 1}/${MAX_RETRIES} for ${modelId}: ${lastError?.message?.slice(0, 200)}`);
-    }
-
-    const retryNote = attempt > 0 ? `\n\nPREVIOUS ATTEMPT FAILED JSON VALIDATION. Return ONLY valid JSON.` : '';
-    const response = await client.messages.create({
-      model: modelId,
-      max_tokens: options.maxTokens || 8096,
-      temperature: options.temperature ?? 0,
-      system: options.systemPrompt + retryNote,
-      messages: [{ role: 'user', content: options.userMessage }],
-    });
-
-    const rawText = response.content
-      .filter(c => c.type === 'text')
-      .map(c => (c as { type: 'text'; text: string }).text)
-      .join('');
-    const tokensUsed: TokenUsage = {
-      inputTokens: response.usage.input_tokens,
-      outputTokens: response.usage.output_tokens,
+function buildTokenUsage(
+  usage: { inputTokens?: number; outputTokens?: number } | undefined,
+  options: Pick<RunOptions, 'systemPrompt' | 'userMessage'>,
+  rawResponse: string,
+): TokenUsage {
+  if (
+    usage
+    && (typeof usage.inputTokens === 'number' || typeof usage.outputTokens === 'number')
+  ) {
+    return {
+      inputTokens: usage.inputTokens ?? 0,
+      outputTokens: usage.outputTokens ?? 0,
+      estimated: false,
     };
-
-    const jsonStr = extractJson(rawText);
-    try {
-      const parsed = JSON.parse(jsonStr);
-      const validated = schema.parse(parsed);
-      const durationMs = Date.now() - start;
-      logRuntimeDebug(`[direct-anthropic] ✓ ${modelId} completed in ${(durationMs / 1000).toFixed(1)}s: ${tokensUsed.inputTokens} in + ${tokensUsed.outputTokens} out (actual), attempt ${attempt + 1}/${MAX_RETRIES}`);
-      return {
-        data: validated,
-        model: modelId,
-        runtime: 'sdk',
-        durationMs,
-        rawResponse: rawText,
-        tokensUsed,
-      };
-    } catch (err) {
-      lastError = err as Error;
-      lastRawJson = jsonStr;
-      logRuntimeDebug(`[direct-anthropic] ✗ ${modelId} validation failed (attempt ${attempt + 1}/${MAX_RETRIES}): ${lastError.message.slice(0, 200)}`);
-    }
   }
 
-  // AI structure repair: ask the model to fix the malformed JSON
-  if (lastRawJson) {
-    logRuntimeDebug(`[direct-anthropic] Attempting AI structure repair for ${modelId}...`);
+  return {
+    inputTokens: Math.ceil((options.systemPrompt.length + options.userMessage.length) / 4),
+    outputTokens: Math.ceil(rawResponse.length / 4),
+    estimated: true,
+  };
+}
+
+function buildRepairTextFunction(
+  options: RunOptions,
+  model: LanguageModel,
+  callId: string,
+): ((args: { text: string; error: Error }) => Promise<string | null>) | undefined {
+  return async ({ text, error }) => {
+    logRuntimeDebug(`[vercel-ai-sdk] Attempting AI structure repair for ${callId}...`);
+
     try {
-      const repair = buildStructureRepairPrompt(lastRawJson, formatZodErrors(lastError));
-      const repairResponse = await client.messages.create({
-        model: modelId,
-        max_tokens: options.maxTokens || 8096,
-        temperature: 0,
+      const repair = buildStructureRepairPrompt(text, formatZodErrors(error));
+      const result = await generateText({
+        model,
         system: repair.systemPrompt,
-        messages: [{ role: 'user', content: repair.userMessage }],
+        prompt: repair.userMessage,
+        maxOutputTokens: options.maxTokens || 8096,
+        temperature: 0,
+        timeout: Math.min(options.timeoutMs ?? MAX_ORCHESTRATOR_TIMEOUT_MS, 60_000),
+        maxRetries: 0,
       });
-      const repairText = repairResponse.content
-        .filter(c => c.type === 'text')
-        .map(c => (c as { type: 'text'; text: string }).text)
-        .join('');
-      const repairJson = extractJsonFromText(repairText);
-      const repairResult = tryParseAndValidate(repairJson, schema);
-      if ('data' in repairResult) {
-        const durationMs = Date.now() - start;
-        logRuntimeDebug(`[direct-anthropic] ✓ AI repair succeeded for ${modelId} in ${(durationMs / 1000).toFixed(1)}s`);
-        return {
-          data: repairResult.data,
-          model: modelId,
-          runtime: 'sdk',
-          durationMs,
-          rawResponse: repairText,
-          tokensUsed: {
-            inputTokens: repairResponse.usage.input_tokens,
-            outputTokens: repairResponse.usage.output_tokens,
-          },
-        };
-      }
-      logRuntimeDebug(`[direct-anthropic] ✗ AI repair also failed validation: ${('error' in repairResult ? repairResult.error.message : 'unknown').slice(0, 200)}`);
+
+      const repairedText = result.text.trim();
+      return repairedText || null;
     } catch (repairErr) {
-      logRuntimeDebug(`[direct-anthropic] ✗ AI repair call failed: ${(repairErr as Error).message.slice(0, 200)}`);
+      logRuntimeDebug(
+        `[vercel-ai-sdk] ✗ AI repair call failed for ${callId}: ${(repairErr as Error).message.slice(0, 200)}`
+      );
+      return null;
     }
-  }
-
-  throw new Error(`Failed to get valid JSON after ${MAX_RETRIES} attempts + AI repair: ${lastError?.message}`);
+  };
 }
 
-async function runWithAzure<T>(
-  options: RunOptions,
-  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
-  modelId: string
-): Promise<RunResult<T>> {
-  const resourceName = process.env['AZURE_RESOURCE_NAME'];
-  if (!resourceName) {
-    throw new Error('AZURE_RESOURCE_NAME environment variable is required for Azure OpenAI');
-  }
-  const client = new AzureOpenAI({
-    apiKey: options.apiKey,
-    endpoint: `https://${resourceName}.openai.azure.com/`,
-    apiVersion: '2024-02-01',
-    deployment: modelId,
-  });
-  const start = Date.now();
+function prepareModel(options: RunOptions): PreparedModel {
+  const target = resolveModelTarget(options.model, options.transport);
+  const normalizedTransport = normalizeTransport(target.transport);
+  const explicitApiBaseUrl = options.apiBaseUrl?.trim();
+  const baseURL = resolveOpenAICompatibleBaseUrl(normalizedTransport, options.apiBaseUrl);
 
-  let lastError: Error | null = null;
-  let lastRawJson: string | null = null;
-  let includeResponseFormat = true;
-  let useMaxCompletionTokens = false;
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    const retryNote = attempt > 0 ? `\n\nPREVIOUS ATTEMPT FAILED JSON VALIDATION. Return ONLY valid JSON.` : '';
-    let response: Awaited<ReturnType<typeof client.chat.completions.create>>;
-    try {
-      response = await client.chat.completions.create({
-        model: modelId,
-        ...(useMaxCompletionTokens
-          ? { max_completion_tokens: options.maxTokens || 8096 }
-          : { max_tokens: options.maxTokens || 8096, temperature: options.temperature ?? 0 }),
-        ...(includeResponseFormat ? { response_format: { type: 'json_object' as const } } : {}),
-        messages: [
-          { role: 'system', content: options.systemPrompt + retryNote },
-          { role: 'user', content: options.userMessage },
-        ],
-      });
-    } catch (err) {
-      if (includeResponseFormat && shouldRetryWithoutResponseFormat(err)) {
-        includeResponseFormat = false;
-        attempt -= 1;
-        continue;
-      }
-      if (!useMaxCompletionTokens && shouldRetryWithMaxCompletionTokens(err)) {
-        useMaxCompletionTokens = true;
-        attempt -= 1;
-        continue;
-      }
-      throw err;
-    }
-
-    const rawText = response.choices[0]?.message?.content || '';
-    const tokensUsed: TokenUsage = {
-      inputTokens: response.usage?.prompt_tokens ?? 0,
-      outputTokens: response.usage?.completion_tokens ?? 0,
-    };
-    const jsonStr = extractJson(rawText);
-    try {
-      const parsed = JSON.parse(jsonStr);
-      const validated = schema.parse(parsed);
-      return {
-        data: validated,
-        model: modelId,
-        runtime: 'sdk',
-        durationMs: Date.now() - start,
-        rawResponse: rawText,
-        tokensUsed,
-      };
-    } catch (err) {
-      lastError = err as Error;
-      lastRawJson = jsonStr;
-    }
-  }
-
-  // AI structure repair for Azure
-  if (lastRawJson) {
-    try {
-      const repair = buildStructureRepairPrompt(lastRawJson, formatZodErrors(lastError));
-      const repairResponse = await client.chat.completions.create({
-        model: modelId,
-        ...(useMaxCompletionTokens
-          ? { max_completion_tokens: options.maxTokens || 8096 }
-          : { max_tokens: options.maxTokens || 8096, temperature: 0 }),
-        ...(includeResponseFormat ? { response_format: { type: 'json_object' as const } } : {}),
-        messages: [
-          { role: 'system', content: repair.systemPrompt },
-          { role: 'user', content: repair.userMessage },
-        ],
-      });
-      const repairText = repairResponse.choices[0]?.message?.content || '';
-      const repairJson = extractJsonFromText(repairText);
-      const repairResult = tryParseAndValidate(repairJson, schema);
-      if ('data' in repairResult) {
-        return {
-          data: repairResult.data,
-          model: modelId,
-          runtime: 'sdk',
-          durationMs: Date.now() - start,
-          rawResponse: repairText,
-          tokensUsed: {
-            inputTokens: repairResponse.usage?.prompt_tokens ?? 0,
-            outputTokens: repairResponse.usage?.completion_tokens ?? 0,
-          },
-        };
-      }
-    } catch {
-      // Fall through to throw
-    }
-  }
-
-  throw new Error(`Failed to get valid JSON after ${MAX_RETRIES} attempts + AI repair: ${lastError?.message}`);
-}
-
-async function runWithOpenAI<T>(
-  options: RunOptions,
-  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
-  modelId: string,
-  baseURL?: string
-): Promise<RunResult<T>> {
-  // Use the caller-supplied timeout or the orchestrator default (10 min).
-  // maxRetries is set to 0 to disable the OpenAI SDK's built-in 3-attempt retry
-  // loop - without this, the effective timeout is 3× the per-request value (e.g.
-  // 3 × 5 min = 15 min), which we saw in practice as seemingly-frozen CI runs.
-  // Application-level retries are handled by the orchestrator's own loop instead.
-  const clientTimeoutMs = options.timeoutMs ?? MAX_ORCHESTRATOR_TIMEOUT_MS;
-  const client = new OpenAI({
-    apiKey: options.apiKey,
-    baseURL,
-    timeout: clientTimeoutMs,
-    maxRetries: 0,
-  });
-  const start = Date.now();
-  const estInputTokens = Math.ceil((options.systemPrompt.length + options.userMessage.length) / 4);
-  const label = baseURL ? `openai-compat(${baseURL})` : 'openai';
-
-  const labelTag = options.callLabel ? ` [${options.callLabel}]` : '';
-  logRuntimeDebug(`[direct-${label}]${labelTag} Starting call: model=${modelId}, systemPrompt=${options.systemPrompt.length} chars, userMessage=${options.userMessage.length} chars, estInputTokens=~${estInputTokens}`);
-
-  let lastError: Error | null = null;
-  let lastRawJson: string | null = null;
-  let includeResponseFormat = true;
-  let useMaxCompletionTokens = false;
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    if (attempt > 0) {
-      logRuntimeDebug(`[direct-${label}] Retry ${attempt + 1}/${MAX_RETRIES} for ${modelId}: ${lastError?.message?.slice(0, 200)}`);
-    }
-    const retryNote = attempt > 0 ? `\n\nPREVIOUS ATTEMPT FAILED JSON VALIDATION. Return ONLY valid JSON.` : '';
-    let response: Awaited<ReturnType<typeof client.chat.completions.create>>;
-    try {
-      response = await client.chat.completions.create({
-        model: modelId,
-        ...(useMaxCompletionTokens
-          ? { max_completion_tokens: options.maxTokens || 8096 }
-          : { max_tokens: options.maxTokens || 8096, temperature: options.temperature ?? 0 }),
-        ...(includeResponseFormat ? { response_format: { type: 'json_object' as const } } : {}),
-        messages: [
-          { role: 'system', content: options.systemPrompt + retryNote },
-          { role: 'user', content: options.userMessage },
-        ],
-      });
-    } catch (err) {
-      if (includeResponseFormat && shouldRetryWithoutResponseFormat(err)) {
-        logRuntimeDebug(`[direct-${label}] response_format not supported by ${modelId}, retrying without it`);
-        includeResponseFormat = false;
-        attempt -= 1;
-        continue;
-      }
-      if (!useMaxCompletionTokens && shouldRetryWithMaxCompletionTokens(err)) {
-        logRuntimeDebug(`[direct-${label}] max_tokens not supported by ${modelId}, retrying with max_completion_tokens`);
-        useMaxCompletionTokens = true;
-        attempt -= 1;
-        continue;
-      }
-      throw normalizeRuntimeError(err, baseURL);
-    }
-
-    const rawText = response.choices[0]?.message?.content || '';
-    const tokensUsed: TokenUsage = {
-      inputTokens: response.usage?.prompt_tokens ?? 0,
-      outputTokens: response.usage?.completion_tokens ?? 0,
-    };
-    const jsonStr = extractJson(rawText);
-    try {
-      const parsed = JSON.parse(jsonStr);
-      const validated = schema.parse(parsed);
-      const durationMs = Date.now() - start;
-      logRuntimeDebug(`[direct-${label}] ✓ ${modelId} completed in ${(durationMs / 1000).toFixed(1)}s: ${tokensUsed.inputTokens} in + ${tokensUsed.outputTokens} out, attempt ${attempt + 1}/${MAX_RETRIES}`);
-      return {
-        data: validated,
-        model: modelId,
-        runtime: 'sdk',
-        durationMs,
-        rawResponse: rawText,
-        tokensUsed,
-      };
-    } catch (err) {
-      lastError = err as Error;
-      lastRawJson = jsonStr;
-      logRuntimeDebug(`[direct-${label}] ✗ ${modelId} validation failed (attempt ${attempt + 1}/${MAX_RETRIES}): ${lastError.message.slice(0, 200)}`);
-    }
-  }
-
-  // AI structure repair: ask the model to fix the malformed JSON
-  if (lastRawJson) {
-    logRuntimeDebug(`[direct-${label}] Attempting AI structure repair for ${modelId}...`);
-    try {
-      const repair = buildStructureRepairPrompt(lastRawJson, formatZodErrors(lastError));
-      const repairResponse = await client.chat.completions.create({
-        model: modelId,
-        ...(useMaxCompletionTokens
-          ? { max_completion_tokens: options.maxTokens || 8096 }
-          : { max_tokens: options.maxTokens || 8096, temperature: 0 }),
-        ...(includeResponseFormat ? { response_format: { type: 'json_object' as const } } : {}),
-        messages: [
-          { role: 'system', content: repair.systemPrompt },
-          { role: 'user', content: repair.userMessage },
-        ],
-      });
-      const repairText = repairResponse.choices[0]?.message?.content || '';
-      const repairJson = extractJsonFromText(repairText);
-      const repairResult = tryParseAndValidate(repairJson, schema);
-      if ('data' in repairResult) {
-        const durationMs = Date.now() - start;
-        logRuntimeDebug(`[direct-${label}] ✓ AI repair succeeded for ${modelId} in ${(durationMs / 1000).toFixed(1)}s`);
-        return {
-          data: repairResult.data,
-          model: modelId,
-          runtime: 'sdk',
-          durationMs,
-          rawResponse: repairText,
-          tokensUsed: {
-            inputTokens: repairResponse.usage?.prompt_tokens ?? 0,
-            outputTokens: repairResponse.usage?.completion_tokens ?? 0,
-          },
-        };
-      }
-      logRuntimeDebug(`[direct-${label}] ✗ AI repair also failed validation: ${('error' in repairResult ? repairResult.error.message : 'unknown').slice(0, 200)}`);
-    } catch (repairErr) {
-      logRuntimeDebug(`[direct-${label}] ✗ AI repair call failed: ${(repairErr as Error).message.slice(0, 200)}`);
-    }
-  }
-
-  throw new Error(`Failed to get valid JSON after ${MAX_RETRIES} attempts + AI repair: ${lastError?.message}`);
-}
-
-function resolveOpenAICompatibleBaseUrl(transport: string, apiBaseUrl?: string): string | undefined {
-  if (apiBaseUrl?.trim()) {
-    return apiBaseUrl.trim();
-  }
-
-  switch (normalizeTransport(transport)) {
-    case 'openrouter':
-      return 'https://openrouter.ai/api/v1';
-    case 'minimax':
-      return 'https://api.minimax.chat/v1';
-    case 'google':
-    case 'gemini':
-      return 'https://generativelanguage.googleapis.com/v1beta/openai';
-    case 'vercel':
-      return VERCEL_AI_GATEWAY_BASE_URL;
-    case 'deepseek':
-      return 'https://api.deepseek.com/v1';
-    case 'groq':
-      return 'https://api.groq.com/openai/v1';
-    case 'cerebras':
-      return 'https://api.cerebras.ai/v1';
-    case 'together':
-      return 'https://api.together.xyz/v1';
-    case 'fireworks':
-      return 'https://api.fireworks.ai/inference/v1';
-    case 'xai':
-      return 'https://api.x.ai/v1';
-    case 'mistral':
-      return 'https://api.mistral.ai/v1';
-    case 'cohere':
-      return 'https://api.cohere.com/compatibility/v1';
-    case 'perplexity':
-      return 'https://api.perplexity.ai';
-    case 'deepinfra':
-      return 'https://api.deepinfra.com/v1/openai';
-    case 'ollama':
-      return 'http://localhost:11434/v1';
-    case 'lmstudio':
-      return 'http://localhost:1234/v1';
-    case 'huggingface':
-      return 'https://router.huggingface.co/v1';
-    case 'moonshot':
-      return 'https://api.moonshot.ai/v1';
-    case 'novita':
-      return 'https://api.novita.ai/v3/openai';
-    case 'sambanova':
-      return 'https://api.sambanova.ai/v1';
-    case 'nebius':
-      return 'https://api.studio.nebius.ai/v1';
-    default:
-      return undefined;
-  }
-}
-
-export class DirectAIRuntime implements IRuntime {
-  async run<T>(options: RunOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>> {
-    const { transport, modelId } = resolveModelTarget(options.model, options.transport);
-    const baseURL = resolveOpenAICompatibleBaseUrl(transport, options.apiBaseUrl);
-
-    // Prefer the configured gateway key before falling back to .env-provided auth.
-    if (transport === 'vercel') {
-      const apiKey = resolveVercelGatewayCredential(options.apiKey);
+  switch (normalizedTransport) {
+    case 'vercel': {
+      const apiKey = resolveVercelGatewayCredential(options.apiKey, options.cwd);
       if (!apiKey) {
         throw new Error(
           'Vercel AI Gateway requires a credential. Set BATEYE_LLM_MODEL_API_KEY, AI_GATEWAY_API_KEY, or VERCEL_OIDC_TOKEN.'
         );
       }
-      return runWithOpenAI({ ...options, apiKey }, schema, modelId, baseURL);
+
+      const provider = createOpenAICompatible({
+        name: normalizedTransport,
+        apiKey,
+        baseURL: baseURL || VERCEL_AI_GATEWAY_BASE_URL,
+        includeUsage: true,
+      });
+
+      return {
+        model: provider.chatModel(target.modelId),
+        transport: normalizedTransport,
+        modelId: target.modelId,
+        baseURL: baseURL || VERCEL_AI_GATEWAY_BASE_URL,
+      };
+    }
+    case 'openai':
+      if (usesNativeOpenAIProvider(explicitApiBaseUrl)) {
+        const provider = createOpenAI({
+          apiKey: options.apiKey,
+          ...(explicitApiBaseUrl ? { baseURL: normalizeBaseUrl(explicitApiBaseUrl) } : {}),
+        });
+
+        return {
+          model: provider(target.modelId),
+          transport: normalizedTransport,
+          modelId: target.modelId,
+          baseURL: normalizeBaseUrl(explicitApiBaseUrl) || OPENAI_API_BASE_URL,
+        };
+      }
+      break;
+    case 'anthropic':
+      if (!explicitApiBaseUrl) {
+        const provider = createAnthropic({ apiKey: options.apiKey });
+        return {
+          model: provider(target.modelId),
+          transport: normalizedTransport,
+          modelId: target.modelId,
+        };
+      }
+      break;
+    case 'google':
+    case 'gemini':
+      if (!explicitApiBaseUrl) {
+        const provider = createGoogleGenerativeAI({ apiKey: options.apiKey });
+        return {
+          model: provider(target.modelId),
+          transport: normalizedTransport,
+          modelId: target.modelId,
+        };
+      }
+      break;
+    case 'azure': {
+      const resourceName = process.env['AZURE_RESOURCE_NAME'];
+      if (!resourceName && !explicitApiBaseUrl) {
+        throw new Error('AZURE_RESOURCE_NAME environment variable is required for Azure OpenAI');
+      }
+
+      const provider = createAzure({
+        apiKey: options.apiKey,
+        apiVersion: process.env['AZURE_API_VERSION'] || '2024-02-01',
+        ...(explicitApiBaseUrl
+          ? { baseURL: explicitApiBaseUrl }
+          : { resourceName }),
+      });
+
+      return {
+        model: provider(target.modelId),
+        transport: normalizedTransport,
+        modelId: target.modelId,
+        baseURL: explicitApiBaseUrl,
+      };
+    }
+    default:
+      break;
+  }
+
+  if (!baseURL) {
+    throw new Error(
+      `No OpenAI-compatible base URL is configured for transport "${normalizedTransport}". `
+      + 'Set apiBaseUrl or use a built-in provider transport.'
+    );
+  }
+
+  const openAICompatibleModelId = resolveOpenAICompatibleModelId(
+    options.model,
+    target.modelId,
+    options.apiBaseUrl,
+  );
+  const provider = createOpenAICompatible({
+    name: normalizedTransport,
+    apiKey: options.apiKey,
+    baseURL,
+    includeUsage: true,
+  });
+
+  return {
+    model: provider.chatModel(openAICompatibleModelId),
+    transport: normalizedTransport,
+    modelId: openAICompatibleModelId,
+    baseURL,
+  };
+}
+
+export { resolveVercelGatewayCredential } from '../provider-routing';
+
+export class DirectAIRuntime implements IRuntime {
+  async run<T>(options: RunOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>> {
+    const prepared = prepareModel(options);
+    const boundedPrompts = boundPrompts(options);
+    const start = Date.now();
+    const estimatedInputTokens = Math.ceil(boundedPrompts.boundedChars / 4);
+    const callId = `${prepared.transport}/${prepared.modelId}`;
+    const labelTag = options.callLabel ? ` [${options.callLabel}]` : '';
+    const generateObjectUntyped = generateObject as unknown as (
+      callOptions: Record<string, unknown>,
+    ) => Promise<{ object: T; usage?: { inputTokens?: number; outputTokens?: number } }>;
+
+    if (boundedPrompts.truncated) {
+      logRuntimeDebug(
+        `[vercel-ai-sdk]${labelTag} Input prompts truncated from ${boundedPrompts.originalChars} to ${boundedPrompts.boundedChars} chars before model=${callId}`
+      );
     }
 
-    switch (transport) {
-      case 'azure':
-        return runWithAzure(options, schema, modelId);
-      case 'anthropic':
-        if (!baseURL) {
-          return runWithAnthropic(options, schema, modelId);
-        }
-        return runWithOpenAI(options, schema, modelId, baseURL);
-      default:
-        return runWithOpenAI(options, schema, modelId, baseURL);
+    logRuntimeDebug(
+      `[vercel-ai-sdk]${labelTag} Starting call: model=${callId}, systemPrompt=${boundedPrompts.systemPrompt.length} chars, `
+      + `userMessage=${boundedPrompts.userMessage.length} chars, estInputTokens=~${estimatedInputTokens}`
+    );
+
+    try {
+      const result = await generateObjectUntyped({
+        model: prepared.model,
+        schema,
+        schemaName: 'BatEyeResponse',
+        schemaDescription: 'Structured JSON response required by BatEye.',
+        system: boundedPrompts.systemPrompt,
+        prompt: boundedPrompts.userMessage,
+        maxOutputTokens: options.maxTokens || 8096,
+        ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+        timeout: options.timeoutMs ?? MAX_ORCHESTRATOR_TIMEOUT_MS,
+        maxRetries: 0,
+        experimental_repairText: buildRepairTextFunction(options, prepared.model, callId),
+      });
+
+      const rawResponse = JSON.stringify(result.object);
+      const tokensUsed = buildTokenUsage(result.usage, boundedPrompts, rawResponse);
+      const durationMs = Date.now() - start;
+      const tokenSummary = tokensUsed.estimated
+        ? `~${tokensUsed.inputTokens} in + ~${tokensUsed.outputTokens} out (estimated)`
+        : `${tokensUsed.inputTokens} in + ${tokensUsed.outputTokens} out`;
+
+      logRuntimeDebug(
+        `[vercel-ai-sdk]${labelTag} ✓ ${callId} completed in ${(durationMs / 1000).toFixed(1)}s: ${tokenSummary}`
+      );
+
+      return {
+        data: result.object,
+        model: options.model,
+        runtime: 'sdk',
+        durationMs,
+        rawResponse,
+        tokensUsed,
+      };
+    } catch (err) {
+      throw normalizeRuntimeError(err, prepared.baseURL);
     }
   }
 
   async listModels(provider: string, apiKey: string, apiBaseUrl?: string): Promise<string[]> {
-    const normalizedProvider = normalizeTransport(provider);
-    const baseURL = resolveOpenAICompatibleBaseUrl(normalizedProvider, apiBaseUrl);
-
-    try {
-      switch (normalizedProvider) {
-        case 'anthropic': {
-          return [
-            'anthropic/claude-opus-4-6',
-            'anthropic/claude-sonnet-4-6',
-            'anthropic/claude-sonnet-4-5',
-            'anthropic/claude-haiku-4-5-20251001',
-          ];
-        }
-        case 'google':
-        case 'gemini': {
-          return [
-            'google/gemini-2.5-pro-preview-03-25',
-            'google/gemini-2.0-flash',
-            'google/gemini-2.0-flash-lite',
-            'google/gemini-1.5-pro',
-            'google/gemini-1.5-flash',
-          ];
-        }
-        case 'azure': {
-          // Azure: return commonly deployed models since deployed model names vary per resource
-          return [
-            'azure/gpt-4o',
-            'azure/gpt-4o-mini',
-            'azure/gpt-4-turbo',
-            'azure/o3-mini',
-            'azure/o1',
-          ];
-        }
-        case 'ollama':
-        case 'lmstudio': {
-          // Local providers - no API key required
-          const dummyKey = normalizedProvider === 'ollama' ? 'ollama' : 'lmstudio';
-          const client = new OpenAI({ apiKey: dummyKey, baseURL });
-          const models = await client.models.list();
-          return models.data.map(m => `${normalizedProvider}/${m.id}`).sort();
-        }
-        case 'openai': {
-          const client = new OpenAI({ apiKey, baseURL });
-          const models = await client.models.list();
-          return models.data
-            .filter(m => m.id.includes('gpt') || m.id.startsWith('o'))
-            .map(m => `openai/${m.id}`)
-            .sort();
-        }
-        default: {
-          if (!apiKey) {
-            return [];
-          }
-          const client = new OpenAI({ apiKey, baseURL });
-          const models = await client.models.list();
-          return models.data.map(m => m.id).sort();
-        }
-      }
-    } catch (err) {
-      logRuntimeDebug(`Failed to list models for ${normalizedProvider}: ${formatErrorWithCauses(err)}`);
-      return [];
-    }
+    const runtime = new OpenCodeCLIRuntime();
+    return runtime.listModels(provider, apiKey, apiBaseUrl);
   }
 
   async isAvailable(): Promise<boolean> {
-    return true; // Direct runtime is always available
+    return true;
   }
 
   async runAgenticReview<T>(_options: AgenticRepositoryReviewOptions, _schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>> {
     throw new Error(
       'Agentic repository review requires the OpenCode CLI runtime or BATEYE_RUNTIME=mock. '
-      + 'The direct SDK runtime cannot inspect the repository before reporting findings.'
+      + 'The Vercel AI SDK runtime cannot inspect the repository before reporting findings.'
     );
   }
 }

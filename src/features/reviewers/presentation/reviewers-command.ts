@@ -2,7 +2,7 @@ import chalk from 'chalk';
 import { loadReviewers } from '../application/reviewer-registry';
 
 export async function runReviewersList(repoPath: string): Promise<void> {
-  console.log(chalk.cyan('\n🦉 BatEye Reviewers\n'));
+  console.log(chalk.cyan('\n🦇 BatEye Reviewers\n'));
 
   const { reviewers, warnings } = loadReviewers(repoPath);
 
