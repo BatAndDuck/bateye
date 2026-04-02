@@ -101,7 +101,7 @@ Start your LiteLLM proxy (default port 4000), then set the model prefix to `lite
 The `litellm` transport automatically points to `http://localhost:4000/v1`. Pass your LiteLLM master key as the API key:
 
 ```bash
-export CODEOWL_LLM_MODEL_API_KEY=your-litellm-master-key
+export BATEYE_LLM_MODEL_API_KEY=your-litellm-master-key
 ```
 
 To use a remote LiteLLM deployment, override `apiBaseUrl`:
