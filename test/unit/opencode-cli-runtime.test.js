@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  buildOpenCodeFetchInit,
   buildStructuredOutputSchema,
   extractStructuredOutput,
   coerceReviewerPayload,
@@ -21,6 +22,20 @@ test('buildStructuredOutputSchema emits a direct object schema without top-level
   assert.equal(schema.$ref, undefined);
   assert.equal(schema.$schema, undefined);
   assert.equal(schema.definitions, undefined);
+});
+
+test('buildOpenCodeFetchInit attaches the dedicated OpenCode dispatcher without mutating global fetch defaults', () => {
+  const controller = new AbortController();
+  const init = buildOpenCodeFetchInit({
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+  }, controller.signal);
+
+  assert.equal(init.method, 'POST');
+  assert.deepEqual(init.headers, { 'content-type': 'application/json' });
+  assert.equal(init.signal, controller.signal);
+  assert.ok(init.dispatcher);
+  assert.equal(typeof init.dispatcher.dispatch, 'function');
 });
 
 test('extractStructuredOutput supports the documented structured_output field', () => {
