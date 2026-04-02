@@ -21,6 +21,7 @@ jobs:
             provider: anthropic
             model: anthropic/claude-haiku-4.5
             transport: ''
+            # Intentionally matches the repository secret name requested for this workflow.
             secret_name: ANTRHOPIC_APIKEY
           - name: Gemini 3.1 flash lite preview
             provider: google

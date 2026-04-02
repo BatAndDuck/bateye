@@ -6,6 +6,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const WORKSPACE_ROOT = path.resolve(__dirname, '..');
+const ARTIFACTS_ROOT = path.join(WORKSPACE_ROOT, 'report', 'provider-smoke');
 const DIST_CLI_PATH = path.join(WORKSPACE_ROOT, 'dist', 'index.js');
 const DIST_REVIEWER_REGISTRY_PATH = path.join(
   WORKSPACE_ROOT,
@@ -15,6 +16,7 @@ const DIST_REVIEWER_REGISTRY_PATH = path.join(
   'application',
   'reviewer-registry.js',
 );
+const MAX_LOG_EXCERPT_CHARS = 4_000;
 
 const REVIEWER_ID = 'integration-smoke';
 const REVIEWER_NAME = 'Integration Smoke';
@@ -82,6 +84,49 @@ function writeJson(filePath, value) {
   writeText(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function collectSensitiveValues(env = process.env) {
+  const secretNamePattern = /(KEY|TOKEN|SECRET|PASSWORD)/i;
+
+  return Array.from(new Set(
+    Object.entries(env)
+      .filter(([name, value]) => secretNamePattern.test(name) && typeof value === 'string' && value.length >= 6)
+      .map(([, value]) => value.trim())
+      .filter(Boolean),
+  )).sort((left, right) => right.length - left.length);
+}
+
+function redactSensitiveText(text, env = process.env) {
+  if (!text) {
+    return '';
+  }
+
+  let redacted = String(text);
+  for (const secretValue of collectSensitiveValues(env)) {
+    redacted = redacted.replace(new RegExp(escapeRegExp(secretValue), 'g'), '[REDACTED]');
+  }
+
+  return redacted
+    .replace(/\b(sk-[A-Za-z0-9_-]{8,})\b/g, '[REDACTED]')
+    .replace(/\b(Bearer\s+)[A-Za-z0-9._-]{8,}\b/gi, '$1[REDACTED]');
+}
+
+function formatCommandOutput(label, text, env = process.env) {
+  const trimmed = redactSensitiveText(text || '', env).trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  if (trimmed.length <= MAX_LOG_EXCERPT_CHARS) {
+    return `${label}:\n${trimmed}`;
+  }
+
+  return `${label}:\n${trimmed.slice(0, MAX_LOG_EXCERPT_CHARS)}\n...[truncated]`;
+}
+
 function runCommand(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd || WORKSPACE_ROOT,
@@ -96,15 +141,17 @@ function runCommand(command, args, options = {}) {
   }
 
   if (result.status !== 0) {
+    const formattedStdout = formatCommandOutput('stdout', result.stdout, options.env || process.env);
+    const formattedStderr = formatCommandOutput('stderr', result.stderr, options.env || process.env);
     const error = new Error(
       [
         `Command failed (${result.status}): ${command} ${args.join(' ')}`.trim(),
-        result.stdout?.trim() ? `stdout:\n${result.stdout.trim()}` : '',
-        result.stderr?.trim() ? `stderr:\n${result.stderr.trim()}` : '',
+        formattedStdout,
+        formattedStderr,
       ].filter(Boolean).join('\n\n'),
     );
-    error.stdout = result.stdout || '';
-    error.stderr = result.stderr || '';
+    error.stdout = redactSensitiveText(result.stdout || '', options.env || process.env);
+    error.stderr = redactSensitiveText(result.stderr || '', options.env || process.env);
     error.status = result.status;
     throw error;
   }
@@ -143,8 +190,7 @@ Rules:
 `;
 }
 
-function createSmokeRepository(options) {
-  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), `bateye-provider-smoke-${options.provider}-`));
+function createSmokeRepository(repoPath, options) {
   const customReviewerPath = path.join(repoPath, '.bateye', 'reviewers', `${REVIEWER_ID}.md`);
   writeText(customReviewerPath, buildCustomReviewer());
 
@@ -248,12 +294,34 @@ function copyPathIfPresent(sourcePath, targetPath) {
   fs.cpSync(sourcePath, targetPath, { recursive: true });
 }
 
+function resolveArtifactsDir(artifactsDir) {
+  if (!artifactsDir) {
+    return null;
+  }
+
+  if (path.isAbsolute(artifactsDir)) {
+    throw new Error('The provider smoke test only accepts relative artifact directories.');
+  }
+
+  const absoluteArtifactsDir = path.resolve(WORKSPACE_ROOT, artifactsDir);
+  const relativeToArtifactsRoot = path.relative(ARTIFACTS_ROOT, absoluteArtifactsDir);
+  if (
+    relativeToArtifactsRoot.startsWith('..')
+    || path.isAbsolute(relativeToArtifactsRoot)
+    || relativeToArtifactsRoot.length === 0
+  ) {
+    throw new Error(`Artifact directory must stay within ${ARTIFACTS_ROOT}.`);
+  }
+
+  return absoluteArtifactsDir;
+}
+
 function saveArtifacts(repoPath, artifactsDir, metadata, cliOutput) {
   if (!artifactsDir) {
     return;
   }
 
-  const absoluteArtifactsDir = path.resolve(WORKSPACE_ROOT, artifactsDir);
+  const absoluteArtifactsDir = resolveArtifactsDir(artifactsDir);
   fs.rmSync(absoluteArtifactsDir, { recursive: true, force: true });
   ensureDir(absoluteArtifactsDir);
 
@@ -262,8 +330,8 @@ function saveArtifacts(repoPath, artifactsDir, metadata, cliOutput) {
   copyPathIfPresent(path.join(repoPath, 'package.json'), path.join(absoluteArtifactsDir, 'package.json'));
 
   writeJson(path.join(absoluteArtifactsDir, 'metadata.json'), metadata);
-  writeText(path.join(absoluteArtifactsDir, 'stdout.log'), cliOutput.stdout || '');
-  writeText(path.join(absoluteArtifactsDir, 'stderr.log'), cliOutput.stderr || '');
+  writeText(path.join(absoluteArtifactsDir, 'stdout.log'), redactSensitiveText(cliOutput.stdout || ''));
+  writeText(path.join(absoluteArtifactsDir, 'stderr.log'), redactSensitiveText(cliOutput.stderr || ''));
 
   try {
     const diff = runCommand('git', ['diff', 'HEAD~1', 'HEAD'], { cwd: repoPath });
@@ -286,11 +354,11 @@ function parseResult(resultPath) {
 }
 
 function validateResult(result) {
-  const problems = [];
-
   if (!result || typeof result !== 'object') {
-    problems.push('PR review output is not a JSON object.');
+    throw new Error('PR review output is not a JSON object.');
   }
+
+  const problems = [];
   if (result.command !== 'pr-review') {
     problems.push(`Expected command=pr-review, got ${JSON.stringify(result.command)}.`);
   }
@@ -329,21 +397,23 @@ function validateResult(result) {
 
 function main() {
   const options = parseArgs(process.argv.slice(2));
-  const smoke = createSmokeRepository(options);
   const invocation = resolveBateyeInvocation();
   const cliOutput = {
     stdout: '',
     stderr: '',
   };
-  const resultPath = path.join(smoke.repoPath, '.bateye', 'out', 'pr-review.json');
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), `bateye-provider-smoke-${options.provider}-`));
+  let smoke = null;
+  const resultPath = path.join(repoPath, '.bateye', 'out', 'pr-review.json');
 
   try {
+    smoke = createSmokeRepository(repoPath, options);
     const commandResult = runCommand(
       invocation.command,
       [
         ...invocation.args,
         '--cwd',
-        smoke.repoPath,
+        repoPath,
         '--diagnostic',
         '.bateye/out/diagnostics',
         'pr-review',
@@ -382,7 +452,7 @@ function main() {
     console.log(`Provider smoke test passed for ${options.provider} (${options.model}).`);
   } catch (error) {
     saveArtifacts(
-      smoke.repoPath,
+      repoPath,
       options.artifactsDir,
       {
         provider: options.provider,
@@ -390,7 +460,7 @@ function main() {
         transport: options.transport || 'auto',
         bateyeInvocation: invocation.source,
         expectedReviewerId: REVIEWER_ID,
-        disabledBuiltInReviewers: smoke.builtInReviewerIds,
+        disabledBuiltInReviewers: smoke?.builtInReviewerIds || [],
         status: 'failed',
         error: error.message,
       },
@@ -400,17 +470,28 @@ function main() {
     throw error;
   } finally {
     if (process.env.BATEYE_KEEP_SMOKE_REPO !== '1') {
-      fs.rmSync(smoke.repoPath, { recursive: true, force: true });
+      fs.rmSync(repoPath, { recursive: true, force: true });
     } else {
-      console.error(`BATEYE_KEEP_SMOKE_REPO=1, preserved temp repo at ${smoke.repoPath}`);
+      console.error(`BATEYE_KEEP_SMOKE_REPO=1, preserved temp repo at ${repoPath}`);
     }
   }
 }
 
-try {
-  ensureBuiltArtifacts();
-  main();
-} catch (error) {
-  console.error(error instanceof Error ? error.stack || error.message : String(error));
-  process.exit(1);
+if (require.main === module) {
+  try {
+    ensureBuiltArtifacts();
+    main();
+  } catch (error) {
+    console.error(error instanceof Error ? error.stack || error.message : String(error));
+    process.exit(1);
+  }
 }
+
+module.exports = {
+  collectSensitiveValues,
+  createSmokeRepository,
+  formatCommandOutput,
+  redactSensitiveText,
+  resolveArtifactsDir,
+  validateResult,
+};
