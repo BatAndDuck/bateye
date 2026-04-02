@@ -215,6 +215,20 @@ test('saveRepoApiKey stores a repo-scoped credential outside the repository conf
   assert.equal(persisted.repos[path.resolve(repoPath)].apiKey, 'stored-key-12345');
 }));
 
+test('saveRepoApiKey writes credential store with restrictive permissions on POSIX', withCredentialStore(storePath => {
+  if (process.platform === 'win32') {
+    return;
+  }
+
+  const repoPath = makeTmpDir();
+  saveRepoApiKey(repoPath, 'stored-key-12345', storePath);
+
+  const fileMode = fs.statSync(storePath).mode & 0o777;
+  const dirMode = fs.statSync(path.dirname(storePath)).mode & 0o777;
+  assert.equal(fileMode, 0o600);
+  assert.equal(dirMode, 0o700);
+}));
+
 test('resolveApiKey falls back to the BatEye credential store when env vars are absent', withCredentialStore(storePath => {
   const repoPath = makeTmpDir();
   const original = process.env.BATEYE_LLM_MODEL_API_KEY;

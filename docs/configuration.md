@@ -123,6 +123,12 @@ $env:VERCEL_OIDC_TOKEN='your-vercel-oidc-token'
 
 Alternatively, copy `.env.example` to `.env` and fill in the values.
 
+## Stored credentials
+
+`bateye conf --apikey ...` stores the API key in `~/.bateye/credentials.json` so you do not need to keep exporting it for that repository.
+
+BatEye stores that credential in plaintext JSON on disk and relies on local filesystem protections rather than application-level encryption. The credentials directory is created with owner-only permissions and the file is written with restrictive permissions, but anyone who can already read files as your user can still recover the key.
+
 ---
 
 ## Output files

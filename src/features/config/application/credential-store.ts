@@ -24,6 +24,8 @@ const credentialStoreRootSchema = z.object({
 const LOCK_RETRY_DELAY_MS = 25;
 const LOCK_TIMEOUT_MS = 5_000;
 const LOCK_STALE_MS = 30_000;
+const CREDENTIAL_DIR_MODE = 0o700;
+const CREDENTIAL_FILE_MODE = 0o600;
 
 export function resolveCredentialStorePath(env: NodeJS.ProcessEnv = process.env): string {
   return env.BATEYE_CREDENTIALS_FILE?.trim() || path.join(os.homedir(), '.bateye', 'credentials.json');
@@ -71,12 +73,21 @@ function resolveCredentialLockPath(storePath: string): string {
   return `${storePath}.lock`;
 }
 
+function ensureCredentialStoreDir(storePath: string): void {
+  const dir = path.dirname(storePath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true, mode: CREDENTIAL_DIR_MODE });
+  }
+
+  fs.chmodSync(dir, CREDENTIAL_DIR_MODE);
+}
+
 function acquireCredentialStoreLock(lockPath: string): number {
   const start = Date.now();
 
   while (true) {
     try {
-      return fs.openSync(lockPath, 'wx');
+      return fs.openSync(lockPath, 'wx', CREDENTIAL_FILE_MODE);
     } catch (err) {
       const error = err as NodeJS.ErrnoException;
       if (error.code !== 'EEXIST') {
@@ -112,14 +123,14 @@ function releaseCredentialStoreLock(lockFd: number, lockPath: string): void {
 }
 
 function saveCredentialStore(store: CredentialStore, storePath = resolveCredentialStorePath()): void {
-  const dir = path.dirname(storePath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-
+  ensureCredentialStoreDir(storePath);
   const tempPath = `${storePath}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tempPath, JSON.stringify(store, null, 2) + '\n', 'utf-8');
+  fs.writeFileSync(tempPath, JSON.stringify(store, null, 2) + '\n', {
+    encoding: 'utf-8',
+    mode: CREDENTIAL_FILE_MODE,
+  });
   fs.renameSync(tempPath, storePath);
+  fs.chmodSync(storePath, CREDENTIAL_FILE_MODE);
 }
 
 export function saveRepoApiKey(repoPath: string, apiKey: string, storePath = resolveCredentialStorePath()): void {
@@ -128,11 +139,7 @@ export function saveRepoApiKey(repoPath: string, apiKey: string, storePath = res
     throw new Error('API key cannot be empty.');
   }
 
-  const dir = path.dirname(storePath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-
+  ensureCredentialStoreDir(storePath);
   const lockPath = resolveCredentialLockPath(storePath);
   const lockFd = acquireCredentialStoreLock(lockPath);
 

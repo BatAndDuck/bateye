@@ -100,6 +100,8 @@ Quick model/key setup:
 bateye conf --model openai/gpt-5.4-nano --apikey <your-key>
 ```
 
+`bateye conf --apikey` stores the key in `~/.bateye/credentials.json` with restrictive local file permissions. It is not encrypted, so prefer environment variables or short-lived keys on shared machines.
+
 Pick a model, exclude noisy paths, disable reviewers that don't apply to your stack. [Full config reference →](./docs/configuration.md)
 
 ---
