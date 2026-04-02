@@ -450,3 +450,69 @@ test('audit command fails clearly when non-agentic direct runtime is requested',
   assert.equal(result.status, 1);
   assert.match(result.stdout + result.stderr, /Agentic audit cannot use BATEYE_RUNTIME=direct/);
 });
+
+test('audit command diagnostic mode writes verifier prompt captures', () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-audit-diagnostic-int-'));
+  fs.mkdirSync(path.join(repoPath, '.git'));
+  fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(repoPath, 'src', 'index.ts'), 'export const value = process.env.SECRET ?? "";\n');
+
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
+    model: 'openai/gpt-5.4-nano',
+    exclude: [],
+  });
+
+  const fixturePath = path.join(repoPath, 'mock-runtime.json');
+  writeJson(fixturePath, {
+    runs: [
+      {
+        data: {
+          verifications: [
+            { findingId: 'SECURITY_API-001', classification: 'concrete', reason: 'Confirmed by current code.' },
+          ],
+        },
+      },
+    ],
+    agenticRuns: [
+      {
+        data: {
+          score: 55,
+          summary: 'One issue found.',
+          findings: [
+            {
+              id: 'SECURITY_API-001',
+              title: 'Environment secret is read directly',
+              description: 'The code reads a sensitive environment variable directly.',
+              priority: 'high',
+              confidence: 0.9,
+              filePath: 'src/index.ts',
+              startLine: 1,
+              endLine: 1,
+              evidence: ['process.env.SECRET'],
+              recommendation: 'Use validated configuration indirection.',
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  const result = spawnSync('node', ['dist/index.js', '--diagnostic', '--cwd', repoPath, 'audit', '--reviewers', 'security-api'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+      BATEYE_RUNTIME: 'mock',
+      BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
+    },
+    encoding: 'utf-8',
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Diagnostics enabled\. Writing audit traces to/);
+
+  const diagnosticsDir = path.join(repoPath, '.bateye', 'out', 'diagnostics');
+  const files = fs.readdirSync(diagnosticsDir);
+  assert.ok(files.some(file => file.includes('audit-verifier-batch1-system')));
+  assert.ok(files.some(file => file.includes('audit-verifier-batch1-user')));
+});
