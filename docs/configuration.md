@@ -110,6 +110,9 @@ If your model ends with `-thinking` (e.g. `vercel/deepseek/deepseek-v3.2-thinkin
 | `BATEYE_RUNTIME` | Set to `mock` to use fixture-based responses (development/testing) |
 | `BATEYE_MOCK_RUNTIME_FIXTURES` | Path to JSON fixtures file (required when `BATEYE_RUNTIME=mock`) |
 | `BATEYE_MOCK_RUNTIME_LOG` | Path to log file for recording mock runtime interactions |
+| `BATEYE_VERBOSE` | Enables verbose runtime diagnostics; set automatically by the `--verbose` CLI flag |
+| `BATEYE_DIAGNOSTIC` | Enables diagnostic capture mode; set automatically by the `--diagnostic` CLI flag |
+| `BATEYE_DIAGNOSTIC_DIR` | Output directory for diagnostic logs and captured prompts; defaults to `.bateye/out/diagnostics` when `--diagnostic` is enabled |
 
 PowerShell equivalents:
 

@@ -228,6 +228,27 @@ test('resolveApiKey falls back to the BatEye credential store when env vars are 
   }
 }));
 
+test('resolveStoredApiKey ignores malformed credential entries', withCredentialStore(storePath => {
+  const repoPath = makeTmpDir();
+  const otherRepoPath = makeTmpDir();
+  fs.mkdirSync(path.dirname(storePath), { recursive: true });
+  fs.writeFileSync(storePath, JSON.stringify({
+    repos: {
+      [path.resolve(repoPath)]: {
+        apiKey: '',
+        updatedAt: '2026-04-02T00:00:00.000Z',
+      },
+      [path.resolve(otherRepoPath)]: {
+        apiKey: 'stored-key-24680',
+        updatedAt: '2026-04-02T00:00:00.000Z',
+      },
+    },
+  }, null, 2));
+
+  assert.equal(resolveStoredApiKey(repoPath, storePath), undefined);
+  assert.equal(resolveStoredApiKey(otherRepoPath, storePath), 'stored-key-24680');
+}));
+
 // setConfigField
 test('setConfigField updates an existing field', () => {
   const tmpDir = makeTmpDir();

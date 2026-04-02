@@ -41,6 +41,8 @@ export async function runDoctor(repoPath: string): Promise<void> {
 
   const config = resolveConfig(repoPath);
   const authEnv = resolveAuthEnvName(config);
+  const envApiKey = process.env[authEnv]?.trim() || undefined;
+  const storedApiKey = resolveStoredApiKey(repoPath);
   const apiKey = (() => {
     try {
       return resolveApiKey(config, repoPath);
@@ -49,9 +51,9 @@ export async function runDoctor(repoPath: string): Promise<void> {
     }
   })();
   if (apiKey) {
-    const detail = process.env[authEnv]
+    const detail = envApiKey && apiKey === envApiKey
       ? `${maskApiKey(apiKey)} from ${authEnv}`
-      : resolveStoredApiKey(repoPath)
+      : storedApiKey && apiKey === storedApiKey
         ? `${maskApiKey(apiKey)} from BatEye credential store`
         : maskApiKey(apiKey);
     checks.push({

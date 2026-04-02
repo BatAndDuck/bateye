@@ -39,6 +39,8 @@ function loadCommandWithMocks(commandModulePath, mocks) {
 }
 
 test('runDoctor reports when the API key comes from the BatEye credential store', async () => {
+  const originalApiKey = process.env.BATEYE_LLM_MODEL_API_KEY;
+  delete process.env.BATEYE_LLM_MODEL_API_KEY;
   const fixture = loadCommandWithMocks('../../dist/commands/doctor/index', {
     fs: { existsSync: () => true },
     path: require('node:path'),
@@ -92,6 +94,11 @@ test('runDoctor reports when the API key comes from the BatEye credential store'
       assert.match(output, /Model - openai\/gpt-5\.4-nano/);
     });
   } finally {
+    if (originalApiKey === undefined) {
+      delete process.env.BATEYE_LLM_MODEL_API_KEY;
+    } else {
+      process.env.BATEYE_LLM_MODEL_API_KEY = originalApiKey;
+    }
     fixture.restore();
   }
 });
