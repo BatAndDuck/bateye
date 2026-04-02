@@ -203,3 +203,28 @@ test('DirectAIRuntime.run resolves Vercel AI Gateway credentials from .env when 
     fixture.restore();
   }
 });
+
+test('DirectAIRuntime.run truncates oversized input prompts before sending them to the provider', async () => {
+  const { z } = require('zod');
+  const fixture = loadRuntimeWithMocks();
+
+  try {
+    const runtime = new fixture.runtimeModule.DirectAIRuntime();
+    await runtime.run(
+      {
+        model: 'openai/gpt-5.4-nano',
+        apiKey: 'sk-openai',
+        systemPrompt: 'S'.repeat(180),
+        userMessage: 'U'.repeat(600),
+        maxInputChars: 300,
+      },
+      z.object({ ok: z.boolean() }),
+    );
+
+    const sent = fixture.calls.generateObjectCalls[0];
+    assert.ok(sent.system.length + sent.prompt.length <= 300);
+    assert.match(sent.prompt, /\[\.\.\.user message truncated by BatEye\.\.\.\]/);
+  } finally {
+    fixture.restore();
+  }
+});

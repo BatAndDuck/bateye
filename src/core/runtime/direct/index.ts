@@ -34,6 +34,17 @@ type PreparedModel = {
   baseURL?: string;
 };
 
+type BoundedPrompts = {
+  systemPrompt: string;
+  userMessage: string;
+  truncated: boolean;
+  originalChars: number;
+  boundedChars: number;
+};
+
+const DEFAULT_MAX_INPUT_CHARS = 96_000;
+const DEFAULT_MAX_SYSTEM_PROMPT_CHARS = 16_000;
+
 function normalizeBaseUrl(baseURL?: string): string | undefined {
   const trimmed = baseURL?.trim();
   if (!trimmed) {
@@ -41,6 +52,63 @@ function normalizeBaseUrl(baseURL?: string): string | undefined {
   }
 
   return trimmed.replace(/\/+$/, '');
+}
+
+function truncateWithMarker(text: string, maxChars: number, label: string): string {
+  if (text.length <= maxChars) {
+    return text;
+  }
+
+  const marker = `\n\n[...${label} truncated by BatEye...]\n\n`;
+  if (maxChars <= marker.length + 32) {
+    return text.slice(0, maxChars);
+  }
+
+  const head = Math.ceil((maxChars - marker.length) * 0.7);
+  const tail = maxChars - marker.length - head;
+  return text.slice(0, head) + marker + text.slice(text.length - tail);
+}
+
+function boundPrompts(options: RunOptions): BoundedPrompts {
+  const originalChars = options.systemPrompt.length + options.userMessage.length;
+  const maxInputChars = options.maxInputChars ?? DEFAULT_MAX_INPUT_CHARS;
+
+  if (originalChars <= maxInputChars) {
+    return {
+      systemPrompt: options.systemPrompt,
+      userMessage: options.userMessage,
+      truncated: false,
+      originalChars,
+      boundedChars: originalChars,
+    };
+  }
+
+  const minimumSegmentChars = Math.min(512, Math.max(Math.floor(maxInputChars / 4), 0));
+  let systemBudget = Math.floor(maxInputChars * (options.systemPrompt.length / originalChars));
+  systemBudget = Math.max(systemBudget, Math.min(minimumSegmentChars, options.systemPrompt.length));
+  systemBudget = Math.min(systemBudget, DEFAULT_MAX_SYSTEM_PROMPT_CHARS);
+
+  if (systemBudget > maxInputChars - minimumSegmentChars) {
+    systemBudget = Math.max(maxInputChars - minimumSegmentChars, 0);
+  }
+
+  let userBudget = Math.max(maxInputChars - systemBudget, 0);
+  if (userBudget < minimumSegmentChars) {
+    userBudget = minimumSegmentChars;
+    systemBudget = Math.max(maxInputChars - userBudget, 0);
+  }
+
+  const boundedSystemPrompt = truncateWithMarker(options.systemPrompt, systemBudget, 'system prompt');
+  const boundedUserMessage = truncateWithMarker(options.userMessage, userBudget, 'user message');
+  const boundedChars = boundedSystemPrompt.length + boundedUserMessage.length;
+
+  return {
+    systemPrompt: boundedSystemPrompt,
+    userMessage: boundedUserMessage,
+    truncated: true,
+    originalChars,
+    boundedChars,
+  };
 }
 
 function usesNativeOpenAIProvider(explicitApiBaseUrl?: string): boolean {
@@ -237,17 +305,24 @@ export { resolveVercelGatewayCredential } from '../provider-routing';
 export class DirectAIRuntime implements IRuntime {
   async run<T>(options: RunOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>> {
     const prepared = prepareModel(options);
+    const boundedPrompts = boundPrompts(options);
     const start = Date.now();
-    const estimatedInputTokens = Math.ceil((options.systemPrompt.length + options.userMessage.length) / 4);
+    const estimatedInputTokens = Math.ceil(boundedPrompts.boundedChars / 4);
     const callId = `${prepared.transport}/${prepared.modelId}`;
     const labelTag = options.callLabel ? ` [${options.callLabel}]` : '';
     const generateObjectUntyped = generateObject as unknown as (
       callOptions: Record<string, unknown>,
     ) => Promise<{ object: T; usage?: { inputTokens?: number; outputTokens?: number } }>;
 
+    if (boundedPrompts.truncated) {
+      logRuntimeDebug(
+        `[vercel-ai-sdk]${labelTag} Input prompts truncated from ${boundedPrompts.originalChars} to ${boundedPrompts.boundedChars} chars before model=${callId}`
+      );
+    }
+
     logRuntimeDebug(
-      `[vercel-ai-sdk]${labelTag} Starting call: model=${callId}, systemPrompt=${options.systemPrompt.length} chars, `
-      + `userMessage=${options.userMessage.length} chars, estInputTokens=~${estimatedInputTokens}`
+      `[vercel-ai-sdk]${labelTag} Starting call: model=${callId}, systemPrompt=${boundedPrompts.systemPrompt.length} chars, `
+      + `userMessage=${boundedPrompts.userMessage.length} chars, estInputTokens=~${estimatedInputTokens}`
     );
 
     try {
@@ -256,8 +331,8 @@ export class DirectAIRuntime implements IRuntime {
         schema,
         schemaName: 'BatEyeResponse',
         schemaDescription: 'Structured JSON response required by BatEye.',
-        system: options.systemPrompt,
-        prompt: options.userMessage,
+        system: boundedPrompts.systemPrompt,
+        prompt: boundedPrompts.userMessage,
         maxOutputTokens: options.maxTokens || 8096,
         ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
         timeout: options.timeoutMs ?? MAX_ORCHESTRATOR_TIMEOUT_MS,
@@ -266,7 +341,7 @@ export class DirectAIRuntime implements IRuntime {
       });
 
       const rawResponse = JSON.stringify(result.object);
-      const tokensUsed = buildTokenUsage(result.usage, options, rawResponse);
+      const tokensUsed = buildTokenUsage(result.usage, boundedPrompts, rawResponse);
       const durationMs = Date.now() - start;
       const tokenSummary = tokensUsed.estimated
         ? `~${tokensUsed.inputTokens} in + ~${tokensUsed.outputTokens} out (estimated)`

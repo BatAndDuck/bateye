@@ -10,6 +10,8 @@ export interface RunOptions {
   transport?: string;  // e.g. "vercel" when routing anthropic/openai models through a gateway
   apiBaseUrl?: string; // Override for OpenAI-compatible gateways
   maxTokens?: number;
+  /** Approximate maximum combined prompt size in characters before runtime truncation. */
+  maxInputChars?: number;
   temperature?: number;
   /** Human-readable label for diagnostics (e.g. reviewer name). Shown in runtime log lines. */
   callLabel?: string;
