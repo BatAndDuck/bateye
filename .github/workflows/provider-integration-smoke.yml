@@ -1,0 +1,86 @@
+name: Provider Integration Smoke
+
+on:
+  workflow_dispatch:
+
+jobs:
+  provider-smoke:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: OpenAI gpt-5.4-nano
+            provider: openai
+            model: openai/gpt-5.4-nano
+            transport: ''
+            secret_name: OPENAI_APIKEY
+          - name: Anthropic claude-haiku-4.5
+            provider: anthropic
+            model: anthropic/claude-haiku-4.5
+            transport: ''
+            # Intentionally matches the repository secret name requested for this workflow.
+            secret_name: ANTRHOPIC_APIKEY
+          - name: Gemini 3.1 flash lite preview
+            provider: google
+            model: google/gemini-3.1-flash-lite-preview
+            transport: ''
+            secret_name: GEMINI_STUDIO_API_KEY
+          - name: Vercel DeepSeek v3.2 thinking
+            provider: vercel
+            model: deepseek/deepseek-v3.2-thinking
+            transport: vercel
+            secret_name: VERCEL_AI_API_KEY
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build BatEye
+        run: npm run build
+
+      - name: Link BatEye globally
+        run: npm link
+
+      - name: Export provider credential
+        shell: bash
+        env:
+          PROVIDER_SECRET: ${{ secrets[matrix.secret_name] }}
+        run: |
+          if [ -z "$PROVIDER_SECRET" ]; then
+            echo "Missing required repository secret: ${{ matrix.secret_name }}" >&2
+            exit 1
+          fi
+
+          echo "BATEYE_LLM_MODEL_API_KEY=$PROVIDER_SECRET" >> "$GITHUB_ENV"
+
+          if [ "${{ matrix.transport }}" = "vercel" ]; then
+            echo "AI_GATEWAY_API_KEY=$PROVIDER_SECRET" >> "$GITHUB_ENV"
+          fi
+
+      - name: Run provider smoke test
+        run: |
+          node scripts/provider-smoke-test.js \
+            --provider "${{ matrix.provider }}" \
+            --model "${{ matrix.model }}" \
+            --transport "${{ matrix.transport }}" \
+            --artifacts-dir "report/provider-smoke/${{ matrix.provider }}"
+
+      - name: Upload smoke-test artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: provider-smoke-${{ matrix.provider }}-${{ github.run_attempt }}
+          path: report/provider-smoke/${{ matrix.provider }}
+          if-no-files-found: ignore
