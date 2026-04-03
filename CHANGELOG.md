@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+- Repair failure debug logs now use `formatErrorWithCauses` instead of `.message?.slice(0,200)`, so nested cause chains (e.g. provider SDK wrapping) are fully visible in diagnostic output.
+- Provider smoke test `validateResult` now includes issue codes and messages in the failure output when `status=degraded`, making provider-specific failures diagnosable without downloading CI artifacts.
+
 ## 0.1.5
 
 ### Added

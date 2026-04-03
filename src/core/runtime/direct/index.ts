@@ -224,13 +224,13 @@ function buildRepairTextFunction(
           return result.text.trim() || null;
         } catch (retryErr) {
           logRuntimeDebug(
-            `[vercel-ai-sdk] ✗ AI repair call failed for ${callId}: ${(retryErr as Error).message?.slice(0, 200)}`
+            `[vercel-ai-sdk] ✗ AI repair call failed for ${callId}: ${formatErrorWithCauses(retryErr)}`
           );
           return null;
         }
       }
       logRuntimeDebug(
-        `[vercel-ai-sdk] ✗ AI repair call failed for ${callId}: ${(repairErr as Error).message?.slice(0, 200)}`
+        `[vercel-ai-sdk] ✗ AI repair call failed for ${callId}: ${formatErrorWithCauses(repairErr)}`
       );
       return null;
     }
@@ -298,7 +298,7 @@ async function fallbackGenerateText<T>(
     }
   } catch (repairErr) {
     logRuntimeDebug(
-      `[vercel-ai-sdk]${labelTag} Text fallback repair call failed for ${callId}: ${(repairErr as Error).message?.slice(0, 200)}`
+      `[vercel-ai-sdk]${labelTag} Text fallback repair call failed for ${callId}: ${formatErrorWithCauses(repairErr)}`
     );
   }
 
