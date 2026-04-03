@@ -113,9 +113,12 @@ test('Tier 3: structured output error triggers text fallback with valid JSON res
     const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
 
     assert.deepEqual(result.data, { ok: true });
-    // generateObject was called once (Tier 1), then generateText for fallback
+    // generateObject was called once (Tier 1), then exactly one generateText for fallback
+    // (JSON is valid so no repair call is needed)
     assert.equal(fixture.calls.generateObjectCalls.length, 1);
-    assert.ok(fixture.calls.generateTextCalls.length >= 1);
+    assert.equal(fixture.calls.generateTextCalls.length, 1);
+    assert.equal(fixture.calls.generateTextCalls[0].system, 'Return JSON.');
+    assert.equal(fixture.calls.generateTextCalls[0].prompt, 'Say ok.');
   } finally {
     fixture.restore();
   }
@@ -134,7 +137,7 @@ test('Tier 3: structured output error "does not support object generation" trigg
 
     assert.deepEqual(result.data, { ok: true });
     assert.equal(fixture.calls.generateObjectCalls.length, 1);
-    assert.ok(fixture.calls.generateTextCalls.length >= 1);
+    assert.equal(fixture.calls.generateTextCalls.length, 1);
   } finally {
     fixture.restore();
   }
@@ -152,6 +155,8 @@ test('Tier 3: "response_format is not supported" triggers fallback', async () =>
     const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
 
     assert.deepEqual(result.data, { ok: true });
+    assert.equal(fixture.calls.generateObjectCalls.length, 1);
+    assert.equal(fixture.calls.generateTextCalls.length, 1);
   } finally {
     fixture.restore();
   }
@@ -169,6 +174,8 @@ test('Tier 3: "Unsupported parameter: response_format" triggers fallback', async
     const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
 
     assert.deepEqual(result.data, { ok: true });
+    assert.equal(fixture.calls.generateObjectCalls.length, 1);
+    assert.equal(fixture.calls.generateTextCalls.length, 1);
   } finally {
     fixture.restore();
   }
@@ -186,6 +193,8 @@ test('Tier 3: "json_schema is not available" triggers fallback', async () => {
     const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
 
     assert.deepEqual(result.data, { ok: true });
+    assert.equal(fixture.calls.generateObjectCalls.length, 1);
+    assert.equal(fixture.calls.generateTextCalls.length, 1);
   } finally {
     fixture.restore();
   }
@@ -203,6 +212,8 @@ test('Tier 3: "tool_choice is not supported" triggers fallback', async () => {
     const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
 
     assert.deepEqual(result.data, { ok: true });
+    assert.equal(fixture.calls.generateObjectCalls.length, 1);
+    assert.equal(fixture.calls.generateTextCalls.length, 1);
   } finally {
     fixture.restore();
   }
@@ -220,6 +231,8 @@ test('Tier 3: "model does not support json" triggers fallback', async () => {
     const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
 
     assert.deepEqual(result.data, { ok: true });
+    assert.equal(fixture.calls.generateObjectCalls.length, 1);
+    assert.equal(fixture.calls.generateTextCalls.length, 1);
   } finally {
     fixture.restore();
   }
@@ -336,9 +349,9 @@ test('Tier 2→3: temperature error then structured output error falls through t
     );
 
     assert.deepEqual(result.data, { ok: true });
-    // Two generateObject attempts (Tier 1 + Tier 2), then text fallback (Tier 3)
+    // Two generateObject attempts (Tier 1 + Tier 2), then exactly one text fallback (Tier 3)
     assert.equal(fixture.calls.generateObjectCalls.length, 2);
-    assert.ok(fixture.calls.generateTextCalls.length >= 1);
+    assert.equal(fixture.calls.generateTextCalls.length, 1);
   } finally {
     fixture.restore();
   }
@@ -485,8 +498,8 @@ test('text fallback attempts repair when initial JSON is invalid', async () => {
     const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
 
     assert.deepEqual(result.data, { ok: true });
-    // At least 2 generateText calls: fallback + repair
-    assert.ok(fixture.calls.generateTextCalls.length >= 2);
+    // Exactly 2 generateText calls: one for the fallback (invalid JSON), one for repair
+    assert.equal(fixture.calls.generateTextCalls.length, 2);
   } finally {
     fixture.restore();
   }
@@ -674,7 +687,7 @@ test('nested cause error is detected as structured output error', async () => {
 
     assert.deepEqual(result.data, { ok: true });
     assert.equal(fixture.calls.generateObjectCalls.length, 1);
-    assert.ok(fixture.calls.generateTextCalls.length >= 1);
+    assert.equal(fixture.calls.generateTextCalls.length, 1);
   } finally {
     fixture.restore();
   }
@@ -846,7 +859,7 @@ test('Anthropic schema constraint error triggers fallback (minimum/maximum on nu
 
     assert.deepEqual(result.data, { ok: true });
     assert.equal(fixture.calls.generateObjectCalls.length, 1);
-    assert.ok(fixture.calls.generateTextCalls.length >= 1);
+    assert.equal(fixture.calls.generateTextCalls.length, 1);
   } finally {
     fixture.restore();
   }

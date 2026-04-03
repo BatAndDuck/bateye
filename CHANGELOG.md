@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.1.5
+
+### Added
+- Provider-agnostic cascading fallback in `DirectAIRuntime`: when `generateObject` is rejected by the provider, the runtime automatically retries without `temperature` (for models that reject it, e.g. reasoning/thinking models), then falls back to `generateText` + JSON extraction + Zod validation + AI-powered repair for models that do not support structured output at all.
+- Error classifiers (`isStructuredOutputError`, `isTemperatureError`) detect provider rejections by inspecting the full error cause chain — no model-name sniffing, works with any current or future provider.
+- Provider integration smoke test for Vercel / `deepseek-v3.2-thinking` now passes end-to-end.
+
+### Fixed
+- Anthropic API rejected Zod schemas containing `minimum`/`maximum` (number), `minLength`/`maxLength` (string), or `minItems`/`maxItems` (array) constraints — now caught by `isStructuredOutputError` and handled via the text fallback, fixing the orchestrator and reviewer analysis calls.
+- Gemini reviewer analysis failures causing `status=degraded` in the smoke test, root-caused to the same schema-constraint rejection.
+- Anthropic smoke test model ID corrected from `claude-haiku-4.5` to `claude-haiku-4-5-20251001`.
+- Token usage after text-fallback repair now reports the repair call's usage rather than the initial (failed) extraction call.
+
 ## 0.1.4
 
 ### Added

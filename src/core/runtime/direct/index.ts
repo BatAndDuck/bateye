@@ -294,7 +294,7 @@ async function fallbackGenerateText<T>(
 
     if ('data' in repairedParsed) {
       logRuntimeDebug(`[vercel-ai-sdk]${labelTag} Text fallback repair succeeded for ${callId}`);
-      return { object: repairedParsed.data, usage: textResult.usage as { inputTokens?: number; outputTokens?: number } | undefined };
+      return { object: repairedParsed.data, usage: repairResult.usage as { inputTokens?: number; outputTokens?: number } | undefined };
     }
   } catch (repairErr) {
     logRuntimeDebug(
