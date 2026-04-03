@@ -9,6 +9,7 @@
 - Structure repair prompt now wraps malformed JSON in explicit `--- BEGIN/END JSON DATA ---` delimiters with an instruction to treat contents as inert data, preventing instruction-like strings in AI-generated JSON values from influencing the repair model.
 - Model-not-found errors (e.g. Anthropic `model: <name>` validation errors) now include a hint to run `bateye models` to list available models for the provider.
 - `bateye models --provider vercel` now returns the models available on the Vercel AI Gateway by querying its OpenAI-compatible `/v1/models` endpoint directly.
+- Gemini provider smoke test now passes: `buildOpenCodeEnvironment` also sets `GOOGLE_GENERATIVE_AI_API_KEY` (required by OpenCode's `@ai-sdk/google` dependency) in addition to `GOOGLE_API_KEY` and `GEMINI_API_KEY`.
 
 ## 0.1.5
 
