@@ -822,3 +822,207 @@ test('text fallback with generateText failure propagates error', async () => {
     fixture.restore();
   }
 });
+
+// ---------------------------------------------------------------------------
+// Schema constraint errors (Anthropic, Gemini and similar providers that
+// support structured output but reject specific JSON schema keywords)
+// ---------------------------------------------------------------------------
+
+test('Anthropic schema constraint error triggers fallback (minimum/maximum on number)', async () => {
+  const { z } = require('zod');
+  // Exact error from Anthropic API when schema has .min()/.max() on number fields
+  const fixture = loadRuntimeWithMocks({
+    generateObject: async () => {
+      throw new Error(
+        "output_config.format.schema: For 'number' type, properties maximum, minimum are not supported",
+      );
+    },
+    generateText: async () => ({ text: '{"ok":true}', usage: { inputTokens: 5, outputTokens: 5 } }),
+  });
+
+  try {
+    const runtime = new fixture.runtimeModule.DirectAIRuntime();
+    const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
+
+    assert.deepEqual(result.data, { ok: true });
+    assert.equal(fixture.calls.generateObjectCalls.length, 1);
+    assert.ok(fixture.calls.generateTextCalls.length >= 1);
+  } finally {
+    fixture.restore();
+  }
+});
+
+test('output_config.format.schema prefix alone triggers fallback', async () => {
+  const { z } = require('zod');
+  const fixture = loadRuntimeWithMocks({
+    generateObject: async () => {
+      throw new Error('output_config.format.schema: property X is invalid');
+    },
+    generateText: async () => ({ text: '{"ok":true}', usage: { inputTokens: 5, outputTokens: 5 } }),
+  });
+
+  try {
+    const runtime = new fixture.runtimeModule.DirectAIRuntime();
+    const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
+
+    assert.deepEqual(result.data, { ok: true });
+  } finally {
+    fixture.restore();
+  }
+});
+
+test('schema constraint: "minimum not supported" triggers fallback', async () => {
+  const { z } = require('zod');
+  const fixture = loadRuntimeWithMocks({
+    generateObject: async () => {
+      throw new Error("Schema validation failed: 'minimum' is not supported for this model");
+    },
+    generateText: async () => ({ text: '{"ok":true}', usage: { inputTokens: 5, outputTokens: 5 } }),
+  });
+
+  try {
+    const runtime = new fixture.runtimeModule.DirectAIRuntime();
+    const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
+
+    assert.deepEqual(result.data, { ok: true });
+  } finally {
+    fixture.restore();
+  }
+});
+
+test('schema constraint: "maximum not supported" triggers fallback', async () => {
+  const { z } = require('zod');
+  const fixture = loadRuntimeWithMocks({
+    generateObject: async () => {
+      throw new Error("JSON schema error: maximum is not supported");
+    },
+    generateText: async () => ({ text: '{"ok":true}', usage: { inputTokens: 5, outputTokens: 5 } }),
+  });
+
+  try {
+    const runtime = new fixture.runtimeModule.DirectAIRuntime();
+    const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
+
+    assert.deepEqual(result.data, { ok: true });
+  } finally {
+    fixture.restore();
+  }
+});
+
+test('schema constraint: "minItems not supported" triggers fallback (array constraints)', async () => {
+  const { z } = require('zod');
+  const fixture = loadRuntimeWithMocks({
+    generateObject: async () => {
+      throw new Error("properties minItems, maxItems are not supported");
+    },
+    generateText: async () => ({ text: '{"ok":true}', usage: { inputTokens: 5, outputTokens: 5 } }),
+  });
+
+  try {
+    const runtime = new fixture.runtimeModule.DirectAIRuntime();
+    const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
+
+    assert.deepEqual(result.data, { ok: true });
+  } finally {
+    fixture.restore();
+  }
+});
+
+test('schema constraint: "minLength not supported" triggers fallback (string constraints)', async () => {
+  const { z } = require('zod');
+  const fixture = loadRuntimeWithMocks({
+    generateObject: async () => {
+      throw new Error("For 'string' type, properties minLength, maxLength are not supported");
+    },
+    generateText: async () => ({ text: '{"ok":true}', usage: { inputTokens: 5, outputTokens: 5 } }),
+  });
+
+  try {
+    const runtime = new fixture.runtimeModule.DirectAIRuntime();
+    const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
+
+    assert.deepEqual(result.data, { ok: true });
+  } finally {
+    fixture.restore();
+  }
+});
+
+test('schema constraint: "not supported" before keyword also triggers fallback', async () => {
+  const { z } = require('zod');
+  const fixture = loadRuntimeWithMocks({
+    generateObject: async () => {
+      throw new Error("Feature not supported: minimum constraint validation");
+    },
+    generateText: async () => ({ text: '{"ok":true}', usage: { inputTokens: 5, outputTokens: 5 } }),
+  });
+
+  try {
+    const runtime = new fixture.runtimeModule.DirectAIRuntime();
+    const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
+
+    assert.deepEqual(result.data, { ok: true });
+  } finally {
+    fixture.restore();
+  }
+});
+
+test('schema constraint error with schema having number min/max fields still validates correctly after fallback', async () => {
+  const { z } = require('zod');
+  // This simulates the real orchestratorResultSchema with confidence: z.number().min(0).max(1)
+  const orchestratorLikeSchema = z.object({
+    intentSummary: z.string(),
+    selectedReviewers: z.array(z.object({
+      reviewerId: z.string(),
+      reason: z.string(),
+      confidence: z.number().min(0).max(1),
+    })),
+  });
+
+  const fixture = loadRuntimeWithMocks({
+    generateObject: async () => {
+      throw new Error(
+        "output_config.format.schema: For 'number' type, properties maximum, minimum are not supported",
+      );
+    },
+    generateText: async () => ({
+      text: JSON.stringify({
+        intentSummary: 'Add multiply function',
+        selectedReviewers: [{ reviewerId: 'integration-smoke', reason: 'source change', confidence: 0.95 }],
+      }),
+      usage: { inputTokens: 10, outputTokens: 30 },
+    }),
+  });
+
+  try {
+    const runtime = new fixture.runtimeModule.DirectAIRuntime();
+    const result = await runtime.run(baseRunOptions(), orchestratorLikeSchema);
+
+    // Zod validation on the client side still enforces min/max (0.95 is within [0,1])
+    assert.equal(result.data.selectedReviewers[0].confidence, 0.95);
+    assert.equal(result.data.selectedReviewers[0].reviewerId, 'integration-smoke');
+  } finally {
+    fixture.restore();
+  }
+});
+
+test('schema constraint error in nested cause chain triggers fallback', async () => {
+  const { z } = require('zod');
+  const outerErr = new Error('Provider API error');
+  outerErr.cause = new Error(
+    "output_config.format.schema: For 'number' type, properties maximum, minimum are not supported",
+  );
+
+  const fixture = loadRuntimeWithMocks({
+    generateObject: async () => { throw outerErr; },
+    generateText: async () => ({ text: '{"ok":true}', usage: { inputTokens: 5, outputTokens: 5 } }),
+  });
+
+  try {
+    const runtime = new fixture.runtimeModule.DirectAIRuntime();
+    const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
+
+    assert.deepEqual(result.data, { ok: true });
+  } finally {
+    fixture.restore();
+  }
+});

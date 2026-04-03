@@ -147,6 +147,13 @@ function isStructuredOutputError(err: unknown): boolean {
     // Generic "Invalid input" from gateways (e.g. Vercel) when passing response_format
     // to a model that doesn't support it. Only match short messages to avoid false positives.
     || (msg.includes('invalid input') && msg.length < 200)
+    // Schema constraint errors: providers that support structured output but reject specific
+    // JSON schema keywords (minimum, maximum, minLength, maxLength, minItems, maxItems, etc.).
+    // Example — Anthropic: "output_config.format.schema: For 'number' type, properties maximum, minimum are not supported"
+    || /\b(minimum|maximum|minlength|maxlength|minitems|maxitems)\b.{0,60}not supported/i.test(msg)
+    || /not supported.{0,60}\b(minimum|maximum|minlength|maxlength|minitems|maxitems)\b/i.test(msg)
+    || /properties.{0,60}\b(minimum|maximum|minlength|maxlength|minitems|maxitems)\b.{0,60}not supported/i.test(msg)
+    || /output_config\.format\.schema/.test(msg)
   );
 }
 
