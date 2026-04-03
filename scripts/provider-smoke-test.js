@@ -368,7 +368,10 @@ function validateResult(result) {
   if (!Array.isArray(result.issues)) {
     problems.push('Expected issues to be an array.');
   } else if (result.issues.length > 0) {
-    problems.push(`Expected no issues, got ${result.issues.length}.`);
+    const issueLines = result.issues.map(
+      issue => `  [${issue.severity ?? 'unknown'}/${issue.code ?? 'no-code'}] ${issue.message ?? '(no message)'}`,
+    );
+    problems.push(`Expected no issues, got ${result.issues.length}:\n${issueLines.join('\n')}`);
   }
   if (!Array.isArray(result.selectedReviewers)) {
     problems.push('Expected selectedReviewers to be an array.');

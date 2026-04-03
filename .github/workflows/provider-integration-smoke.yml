@@ -17,9 +17,9 @@ jobs:
             model: openai/gpt-5.4-nano
             transport: ''
             secret_name: OPENAI_APIKEY
-          - name: Anthropic claude-haiku-4.5
+          - name: Anthropic claude-haiku-4-5
             provider: anthropic
-            model: anthropic/claude-haiku-4.5
+            model: anthropic/claude-haiku-4-5-20251001
             transport: ''
             # Intentionally matches the repository secret name requested for this workflow.
             secret_name: ANTRHOPIC_APIKEY

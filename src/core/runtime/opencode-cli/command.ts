@@ -105,6 +105,8 @@ export function buildOpenCodeEnvironment(
   } else if ((normalizedTransport === 'google' || normalizedTransport === 'gemini') && !env.GOOGLE_API_KEY) {
     env.GOOGLE_API_KEY = options.apiKey;
     env.GEMINI_API_KEY = env.GEMINI_API_KEY || options.apiKey;
+    // OpenCode's @ai-sdk/google expects GOOGLE_GENERATIVE_AI_API_KEY
+    env.GOOGLE_GENERATIVE_AI_API_KEY = env.GOOGLE_GENERATIVE_AI_API_KEY || options.apiKey;
   } else if (!env.OPENAI_API_KEY) {
     env.OPENAI_API_KEY = options.apiKey;
   }

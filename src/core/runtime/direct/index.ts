@@ -18,13 +18,14 @@ import {
   resolveModelTarget,
 } from '../interface';
 import {
+  fetchOpenAICompatibleModels,
   OPENAI_API_BASE_URL,
   resolveOpenAICompatibleBaseUrl,
   resolveOpenAICompatibleModelId,
   resolveVercelGatewayCredential,
   VERCEL_AI_GATEWAY_BASE_URL,
 } from '../provider-routing';
-import { buildStructureRepairPrompt, formatZodErrors } from '../structure-repair';
+import { buildStructureRepairPrompt, extractJsonFromText, formatZodErrors, tryParseAndValidate } from '../structure-repair';
 import { OpenCodeCLIRuntime } from '../opencode-cli/index';
 
 type PreparedModel = {
@@ -126,7 +127,66 @@ function normalizeRuntimeError(err: unknown, baseURL?: string): Error {
     );
   }
 
+  // Detect model-not-found patterns and hint about the models command.
+  // Patterns: Anthropic "model: <name>", generic "model not found", "model X does not exist".
+  if (/\bmodel[: ]+\S+.*not (found|exist|supported|available)/i.test(message)
+    || /model does not exist/i.test(message)
+    || /^model: \S/i.test(message)) {
+    return new Error(
+      `${message}\nHint: run \`bateye models --provider <provider> --apikey <key>\` to list available models.`
+    );
+  }
+
   return err instanceof Error ? err : new Error(message);
+}
+
+/**
+ * Detects errors indicating the model does not support structured output (JSON schema mode).
+ * Used to trigger fallback from generateObject to generateText + manual JSON extraction.
+ */
+function isStructuredOutputError(err: unknown): boolean {
+  const msg = formatErrorWithCauses(err).toLowerCase();
+  return (
+    /does not support (object|structured[- ]?output) generation/.test(msg)
+    || /response_format.{0,40}not (supported|available)/.test(msg)
+    || /not (supported|available).{0,40}response_format/.test(msg)
+    || /json_schema.{0,40}not (supported|available)/.test(msg)
+    || /unsupported.{0,30}response_format/.test(msg)
+    || /unsupported.{0,30}tool_choice/.test(msg)
+    || /tool_choice.{0,40}not (supported|available)/.test(msg)
+    || /model does not support.{0,20}json/.test(msg)
+    // Generic "Invalid input" from gateways (e.g. Vercel) when passing response_format
+    // to a model that doesn't support it. Only match short messages to avoid false positives.
+    || (msg.includes('invalid input') && msg.length < 200)
+    // Schema constraint errors: providers that support structured output but reject specific
+    // JSON schema keywords (minimum, maximum, minLength, maxLength, minItems, maxItems, etc.).
+    // Example — Anthropic: "output_config.format.schema: For 'number' type, properties maximum, minimum are not supported"
+    || /\b(minimum|maximum|minlength|maxlength|minitems|maxitems)\b.{0,60}not supported/i.test(msg)
+    || /not supported.{0,60}\b(minimum|maximum|minlength|maxlength|minitems|maxitems)\b/i.test(msg)
+    || /properties.{0,60}\b(minimum|maximum|minlength|maxlength|minitems|maxitems)\b.{0,60}not supported/i.test(msg)
+    || /output_config\.format\.schema/.test(msg)
+    // Vercel AI SDK errors thrown when generateObject cannot produce valid structured output after repair.
+    // Treat these as structured output failures so the text-based fallback is attempted instead.
+    || msg.includes('no object generated')
+    || msg.includes('no content generated')
+    || msg.includes('json parsing failed')
+    || msg.includes('type validation failed')
+  );
+}
+
+/**
+ * Detects errors indicating the model rejected the temperature parameter.
+ * Reasoning/thinking models often require specific temperature values or ignore the parameter entirely.
+ */
+function isTemperatureError(err: unknown): boolean {
+  const msg = formatErrorWithCauses(err).toLowerCase();
+  return (
+    /temperature.{0,30}not (supported|allowed|valid|available)/.test(msg)
+    || /unsupported.{0,30}temperature/.test(msg)
+    || /temperature must be/.test(msg)
+    || /temperature is not/.test(msg)
+    || /invalid.{0,20}temperature/.test(msg)
+  );
 }
 
 function buildTokenUsage(
@@ -160,27 +220,107 @@ function buildRepairTextFunction(
   return async ({ text, error }) => {
     logRuntimeDebug(`[vercel-ai-sdk] Attempting AI structure repair for ${callId}...`);
 
-    try {
-      const repair = buildStructureRepairPrompt(text, formatZodErrors(error));
-      const result = await generateText({
-        model,
-        system: repair.systemPrompt,
-        prompt: repair.userMessage,
-        maxOutputTokens: options.maxTokens || 8096,
-        temperature: 0,
-        timeout: Math.min(options.timeoutMs ?? MAX_ORCHESTRATOR_TIMEOUT_MS, 60_000),
-        maxRetries: 0,
-      });
+    const repair = buildStructureRepairPrompt(text, formatZodErrors(error));
+    const repairOpts = {
+      model,
+      system: repair.systemPrompt,
+      prompt: repair.userMessage,
+      maxOutputTokens: options.maxTokens || 8096,
+      timeout: Math.min(options.timeoutMs ?? MAX_ORCHESTRATOR_TIMEOUT_MS, 60_000),
+      maxRetries: 0,
+    };
 
-      const repairedText = result.text.trim();
-      return repairedText || null;
+    try {
+      const result = await generateText({ ...repairOpts, temperature: 0 });
+      return result.text.trim() || null;
     } catch (repairErr) {
+      // If temperature was rejected, retry without it
+      if (isTemperatureError(repairErr)) {
+        try {
+          const result = await generateText(repairOpts);
+          return result.text.trim() || null;
+        } catch (retryErr) {
+          logRuntimeDebug(
+            `[vercel-ai-sdk] ✗ AI repair call failed for ${callId}: ${formatErrorWithCauses(retryErr)}`
+          );
+          return null;
+        }
+      }
       logRuntimeDebug(
-        `[vercel-ai-sdk] ✗ AI repair call failed for ${callId}: ${(repairErr as Error).message.slice(0, 200)}`
+        `[vercel-ai-sdk] ✗ AI repair call failed for ${callId}: ${formatErrorWithCauses(repairErr)}`
       );
       return null;
     }
   };
+}
+
+/**
+ * Fallback path when generateObject fails because the model does not support structured output.
+ * Uses generateText with the same prompts (which already instruct JSON output), then extracts
+ * and validates JSON from the response text. Attempts AI-powered repair on validation failure.
+ */
+async function fallbackGenerateText<T>(
+  prepared: PreparedModel,
+  boundedPrompts: BoundedPrompts,
+  options: RunOptions,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
+  callId: string,
+  labelTag: string,
+  omitTemperature: boolean,
+): Promise<{ object: T; usage?: { inputTokens?: number; outputTokens?: number } }> {
+  logRuntimeDebug(
+    `[vercel-ai-sdk]${labelTag} Falling back to text generation + JSON extraction for ${callId}`
+  );
+
+  const textResult = await generateText({
+    model: prepared.model,
+    system: boundedPrompts.systemPrompt,
+    prompt: boundedPrompts.userMessage,
+    maxOutputTokens: options.maxTokens || 8096,
+    ...(!omitTemperature && options.temperature !== undefined ? { temperature: options.temperature } : {}),
+    timeout: options.timeoutMs ?? MAX_ORCHESTRATOR_TIMEOUT_MS,
+    maxRetries: 0,
+  });
+
+  const rawText = textResult.text ?? '';
+  const jsonStr = extractJsonFromText(rawText);
+  const parsed = tryParseAndValidate<T>(jsonStr, schema);
+
+  if ('data' in parsed) {
+    logRuntimeDebug(`[vercel-ai-sdk]${labelTag} Text fallback succeeded for ${callId}`);
+    return { object: parsed.data, usage: textResult.usage as { inputTokens?: number; outputTokens?: number } | undefined };
+  }
+
+  // Validation failed — attempt AI repair
+  logRuntimeDebug(`[vercel-ai-sdk]${labelTag} Text fallback JSON invalid for ${callId}, attempting repair...`);
+  const repair = buildStructureRepairPrompt(jsonStr, formatZodErrors(parsed.error));
+
+  try {
+    const repairResult = await generateText({
+      model: prepared.model,
+      system: repair.systemPrompt,
+      prompt: repair.userMessage,
+      maxOutputTokens: options.maxTokens || 8096,
+      ...(!omitTemperature && options.temperature !== undefined ? { temperature: options.temperature } : {}),
+      timeout: Math.min(options.timeoutMs ?? MAX_ORCHESTRATOR_TIMEOUT_MS, 60_000),
+      maxRetries: 0,
+    });
+
+    const repairedJson = extractJsonFromText(repairResult.text ?? '');
+    const repairedParsed = tryParseAndValidate<T>(repairedJson, schema);
+
+    if ('data' in repairedParsed) {
+      logRuntimeDebug(`[vercel-ai-sdk]${labelTag} Text fallback repair succeeded for ${callId}`);
+      return { object: repairedParsed.data, usage: repairResult.usage as { inputTokens?: number; outputTokens?: number } | undefined };
+    }
+  } catch (repairErr) {
+    logRuntimeDebug(
+      `[vercel-ai-sdk]${labelTag} Text fallback repair call failed for ${callId}: ${formatErrorWithCauses(repairErr)}`
+    );
+  }
+
+  // Both extraction and repair failed — throw the original validation error
+  throw parsed.error;
 }
 
 function prepareModel(options: RunOptions): PreparedModel {
@@ -325,21 +465,7 @@ export class DirectAIRuntime implements IRuntime {
       + `userMessage=${boundedPrompts.userMessage.length} chars, estInputTokens=~${estimatedInputTokens}`
     );
 
-    try {
-      const result = await generateObjectUntyped({
-        model: prepared.model,
-        schema,
-        schemaName: 'BatEyeResponse',
-        schemaDescription: 'Structured JSON response required by BatEye.',
-        system: boundedPrompts.systemPrompt,
-        prompt: boundedPrompts.userMessage,
-        maxOutputTokens: options.maxTokens || 8096,
-        ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
-        timeout: options.timeoutMs ?? MAX_ORCHESTRATOR_TIMEOUT_MS,
-        maxRetries: 0,
-        experimental_repairText: buildRepairTextFunction(options, prepared.model, callId),
-      });
-
+    const buildResult = (result: { object: T; usage?: { inputTokens?: number; outputTokens?: number } }): RunResult<T> => {
       const rawResponse = JSON.stringify(result.object);
       const tokensUsed = buildTokenUsage(result.usage, boundedPrompts, rawResponse);
       const durationMs = Date.now() - start;
@@ -359,12 +485,69 @@ export class DirectAIRuntime implements IRuntime {
         rawResponse,
         tokensUsed,
       };
-    } catch (err) {
-      throw normalizeRuntimeError(err, prepared.baseURL);
+    };
+
+    const generateObjectOpts = {
+      model: prepared.model,
+      schema,
+      schemaName: 'BatEyeResponse',
+      schemaDescription: 'Structured JSON response required by BatEye.',
+      system: boundedPrompts.systemPrompt,
+      prompt: boundedPrompts.userMessage,
+      maxOutputTokens: options.maxTokens || 8096,
+      timeout: options.timeoutMs ?? MAX_ORCHESTRATOR_TIMEOUT_MS,
+      maxRetries: 0,
+      experimental_repairText: buildRepairTextFunction(options, prepared.model, callId),
+    };
+
+    // Tier 1: generateObject with all options (native structured output)
+    try {
+      const result = await generateObjectUntyped({
+        ...generateObjectOpts,
+        ...(options.temperature !== undefined ? { temperature: options.temperature } : {}),
+      });
+      return buildResult(result);
+    } catch (tier1Err) {
+      // Tier 2: If temperature was rejected, retry generateObject without it
+      if (options.temperature !== undefined && isTemperatureError(tier1Err)) {
+        logRuntimeDebug(`[vercel-ai-sdk]${labelTag} Temperature rejected by ${callId}, retrying without temperature...`);
+        try {
+          const result = await generateObjectUntyped(generateObjectOpts);
+          return buildResult(result);
+        } catch (tier2Err) {
+          // If also a structured output error, fall through to Tier 3
+          if (isStructuredOutputError(tier2Err)) {
+            return buildResult(
+              await fallbackGenerateText(prepared, boundedPrompts, options, schema, callId, labelTag, true),
+            );
+          }
+          throw normalizeRuntimeError(tier2Err, prepared.baseURL);
+        }
+      }
+
+      // Tier 3: If structured output was rejected, fall back to generateText + JSON extraction
+      if (isStructuredOutputError(tier1Err)) {
+        const omitTemp = options.temperature !== undefined && isTemperatureError(tier1Err);
+        return buildResult(
+          await fallbackGenerateText(prepared, boundedPrompts, options, schema, callId, labelTag, omitTemp),
+        );
+      }
+
+      throw normalizeRuntimeError(tier1Err, prepared.baseURL);
     }
   }
 
   async listModels(provider: string, apiKey: string, apiBaseUrl?: string): Promise<string[]> {
+    const normalizedProvider = normalizeTransport(provider);
+
+    // Vercel AI Gateway is OpenAI-compatible; query its /v1/models endpoint directly
+    // since OpenCode's listModels intentionally skips the vercel transport.
+    if (normalizedProvider === 'vercel') {
+      const credential = resolveVercelGatewayCredential(apiKey);
+      const baseUrl = apiBaseUrl?.trim() || VERCEL_AI_GATEWAY_BASE_URL;
+      return fetchOpenAICompatibleModels(credential || '', baseUrl);
+    }
+
     const runtime = new OpenCodeCLIRuntime();
     return runtime.listModels(provider, apiKey, apiBaseUrl);
   }

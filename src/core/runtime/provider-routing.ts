@@ -103,6 +103,31 @@ export function resolveOpenAICompatibleBaseUrl(transport: string, apiBaseUrl?: s
   }
 }
 
+/**
+ * Fetches the list of model IDs from an OpenAI-compatible /v1/models endpoint.
+ * Returns an empty array on any failure (network error, auth, etc.) so callers
+ * can degrade gracefully.
+ */
+export async function fetchOpenAICompatibleModels(
+  apiKey: string,
+  baseUrl: string,
+): Promise<string[]> {
+  try {
+    const cleanBase = baseUrl.replace(/\/+$/, '');
+    const response = await fetch(`${cleanBase}/models`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      return [];
+    }
+    const body = await response.json() as { data?: Array<{ id: string }> };
+    return (body.data ?? []).map(m => m.id).filter(Boolean).sort();
+  } catch {
+    return [];
+  }
+}
+
 export function resolveOpenAICompatibleModelId(
   modelString: string,
   resolvedModelId: string,
