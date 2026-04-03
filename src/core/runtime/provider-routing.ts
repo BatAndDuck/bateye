@@ -140,22 +140,40 @@ export function resolveOpenAICompatibleModelId(
   return resolvedModelId;
 }
 
+/**
+ * Transports that OpenCode handles natively through dedicated provider integrations.
+ * All other OpenAI-compatible transports (litellm, groq, ollama, etc.) must be coerced
+ * to 'openai' so OpenCode routes through OPENAI_BASE_URL (set by buildOpenCodeEnvironment).
+ */
+const OPENCODE_NATIVE_TRANSPORTS = new Set(['anthropic', 'openai', 'google', 'gemini', 'azure', 'vercel']);
+
 export function resolveOpenCodeModelTarget(
   modelString: string,
   transport?: string,
   apiBaseUrl?: string,
 ): { transport: string; modelId: string } {
   const target = resolveModelTarget(modelString, transport);
-  if (!apiBaseUrl?.trim()) {
+  const normalizedTransport = normalizeTransport(target.transport);
+
+  if (normalizedTransport === 'azure' || normalizedTransport === 'vercel') {
     return target;
   }
 
-  if (normalizeTransport(target.transport) === 'azure' || normalizeTransport(target.transport) === 'vercel') {
-    return target;
+  if (apiBaseUrl?.trim()) {
+    return {
+      transport: 'openai',
+      modelId: resolveOpenAICompatibleModelId(modelString, target.modelId, apiBaseUrl),
+    };
   }
 
-  return {
-    transport: 'openai',
-    modelId: resolveOpenAICompatibleModelId(modelString, target.modelId, apiBaseUrl),
-  };
+  // Providers not natively supported by OpenCode must use 'openai' transport so OpenCode
+  // routes through OPENAI_BASE_URL (set to the provider's endpoint by buildOpenCodeEnvironment).
+  if (!OPENCODE_NATIVE_TRANSPORTS.has(normalizedTransport)) {
+    return {
+      transport: 'openai',
+      modelId: target.modelId,
+    };
+  }
+
+  return target;
 }

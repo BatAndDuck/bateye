@@ -25,17 +25,25 @@ Free and open source (AGPL-3.0). Use your own models - **Ollama, LM Studio, or a
 ## Quick start
 
 ```bash
-# 1. Get an API key (Anthropic, OpenAI, OpenRouter, etc.) - or use a local model
+# 1. Get an API key from your chosen provider (Anthropic, OpenAI, OpenRouter, etc.)
 export BATEYE_LLM_MODEL_API_KEY=your-key
 
 # 2. Initialize in your repo
 cd your-project
 bateye init
 
-# 3. Audit your codebase
+# 3. Set the model for your provider
+#    The default model requires the Vercel AI Gateway - pick one that matches your key:
+bateye conf --model anthropic/claude-sonnet-4-5   # Anthropic key
+bateye conf --model openai/gpt-4o                 # OpenAI key
+bateye conf --model openrouter/meta-llama/llama-3.3-70b-instruct  # OpenRouter key
+bateye conf --model ollama/llama3.2               # Local Ollama (no key needed)
+#    → See all supported models: bateye models
+
+# 4. Audit your codebase
 bateye audit
 
-# 4. Review your latest changes
+# 5. Review your latest changes
 bateye pr-review
 ```
 
@@ -133,11 +141,22 @@ Use any AI provider - just set `BATEYE_LLM_MODEL_API_KEY` and pick a model:
 ```bash
 bateye config set model anthropic/claude-sonnet-4-5
 bateye config set model openai/gpt-4o
-bateye config set model ollama/llama3.2        # local, free
+bateye config set model ollama/llama3.2                                    # local, free
 bateye config set model openrouter/meta-llama/llama-3.3-70b-instruct
+bateye config set model groq/llama-3.3-70b-versatile
 ```
 
-Anthropic · OpenAI · OpenRouter · Google · DeepSeek · Groq · Cerebras · Azure · **Ollama (local, free)** · **LM Studio (local, free)** · Vercel AI Gateway · [20+ providers →](./docs/providers.md)
+**LiteLLM proxy** — point BatEye at your LiteLLM instance using the `litellm` provider prefix.
+The model name after `litellm/` must match what your proxy exposes:
+
+```bash
+bateye conf --model litellm/gpt-4o --apikey sk-your-litellm-key
+# Non-default port or remote host:
+bateye config set apiBaseUrl http://your-host:4000/v1
+bateye conf --model openai/gpt-4o --apikey sk-your-litellm-key
+```
+
+Anthropic · OpenAI · OpenRouter · Google · DeepSeek · Groq · Cerebras · Azure · **LiteLLM proxy** · **Ollama (local, free)** · **LM Studio (local, free)** · Vercel AI Gateway · [20+ providers →](./docs/providers.md)
 
 ---
 
