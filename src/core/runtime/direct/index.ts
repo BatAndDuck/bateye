@@ -154,6 +154,12 @@ function isStructuredOutputError(err: unknown): boolean {
     || /not supported.{0,60}\b(minimum|maximum|minlength|maxlength|minitems|maxitems)\b/i.test(msg)
     || /properties.{0,60}\b(minimum|maximum|minlength|maxlength|minitems|maxitems)\b.{0,60}not supported/i.test(msg)
     || /output_config\.format\.schema/.test(msg)
+    // Vercel AI SDK errors thrown when generateObject cannot produce valid structured output after repair.
+    // Treat these as structured output failures so the text-based fallback is attempted instead.
+    || msg.includes('no object generated')
+    || msg.includes('no content generated')
+    || msg.includes('json parsing failed')
+    || msg.includes('type validation failed')
   );
 }
 

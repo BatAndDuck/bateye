@@ -5,6 +5,7 @@
 ### Fixed
 - Repair failure debug logs now use `formatErrorWithCauses` instead of `.message?.slice(0,200)`, so nested cause chains (e.g. provider SDK wrapping) are fully visible in diagnostic output.
 - Provider smoke test `validateResult` now includes issue codes and messages in the failure output when `status=degraded`, making provider-specific failures diagnosable without downloading CI artifacts.
+- Vercel AI SDK errors thrown when `generateObject` cannot produce valid structured output (`AI_NoObjectGeneratedError`, `AI_NoContentGeneratedError`, `AI_JSONParseError`, `AI_TypeValidationError`) now trigger the text-based fallback path, fixing Gemini models that fail schema validation after repair.
 
 ## 0.1.5
 

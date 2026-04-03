@@ -1039,3 +1039,117 @@ test('schema constraint error in nested cause chain triggers fallback', async ()
     fixture.restore();
   }
 });
+
+// ---------------------------------------------------------------------------
+// AI SDK structured output failures (NoObjectGeneratedError, JSONParseError,
+// TypeValidationError) — thrown when generateObject repair also fails.
+// These should trigger the same text fallback as a provider rejection.
+// ---------------------------------------------------------------------------
+
+test('AI_NoObjectGeneratedError triggers text fallback', async () => {
+  const { z } = require('zod');
+  const sdkErr = new Error('No object generated.');
+  sdkErr.name = 'AI_NoObjectGeneratedError';
+
+  const fixture = loadRuntimeWithMocks({
+    generateObject: async () => { throw sdkErr; },
+    generateText: async () => ({ text: '{"ok":true}', usage: { inputTokens: 5, outputTokens: 5 } }),
+  });
+
+  try {
+    const runtime = new fixture.runtimeModule.DirectAIRuntime();
+    const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
+
+    assert.deepEqual(result.data, { ok: true });
+    assert.equal(fixture.calls.generateObjectCalls.length, 1);
+    assert.equal(fixture.calls.generateTextCalls.length, 1);
+  } finally {
+    fixture.restore();
+  }
+});
+
+test('AI_NoContentGeneratedError triggers text fallback', async () => {
+  const { z } = require('zod');
+  const sdkErr = new Error('No content generated.');
+  sdkErr.name = 'AI_NoContentGeneratedError';
+
+  const fixture = loadRuntimeWithMocks({
+    generateObject: async () => { throw sdkErr; },
+    generateText: async () => ({ text: '{"ok":true}', usage: { inputTokens: 5, outputTokens: 5 } }),
+  });
+
+  try {
+    const runtime = new fixture.runtimeModule.DirectAIRuntime();
+    const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
+
+    assert.deepEqual(result.data, { ok: true });
+    assert.equal(fixture.calls.generateObjectCalls.length, 1);
+    assert.equal(fixture.calls.generateTextCalls.length, 1);
+  } finally {
+    fixture.restore();
+  }
+});
+
+test('AI_JSONParseError triggers text fallback', async () => {
+  const { z } = require('zod');
+  const sdkErr = new Error('JSON parsing failed: Text: invalid json. Error message: Unexpected token');
+  sdkErr.name = 'AI_JSONParseError';
+
+  const fixture = loadRuntimeWithMocks({
+    generateObject: async () => { throw sdkErr; },
+    generateText: async () => ({ text: '{"ok":true}', usage: { inputTokens: 5, outputTokens: 5 } }),
+  });
+
+  try {
+    const runtime = new fixture.runtimeModule.DirectAIRuntime();
+    const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
+
+    assert.deepEqual(result.data, { ok: true });
+    assert.equal(fixture.calls.generateObjectCalls.length, 1);
+    assert.equal(fixture.calls.generateTextCalls.length, 1);
+  } finally {
+    fixture.restore();
+  }
+});
+
+test('AI_TypeValidationError triggers text fallback', async () => {
+  const { z } = require('zod');
+  const sdkErr = new Error('Type validation failed: Value: {"score":2}. Error message: score must be <= 1');
+  sdkErr.name = 'AI_TypeValidationError';
+
+  const fixture = loadRuntimeWithMocks({
+    generateObject: async () => { throw sdkErr; },
+    generateText: async () => ({ text: '{"ok":true}', usage: { inputTokens: 5, outputTokens: 5 } }),
+  });
+
+  try {
+    const runtime = new fixture.runtimeModule.DirectAIRuntime();
+    const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
+
+    assert.deepEqual(result.data, { ok: true });
+    assert.equal(fixture.calls.generateObjectCalls.length, 1);
+    assert.equal(fixture.calls.generateTextCalls.length, 1);
+  } finally {
+    fixture.restore();
+  }
+});
+
+test('AI_NoObjectGeneratedError in nested cause chain triggers text fallback', async () => {
+  const { z } = require('zod');
+  const outerErr = new Error('generateObject failed after repair');
+  outerErr.cause = Object.assign(new Error('No object generated.'), { name: 'AI_NoObjectGeneratedError' });
+
+  const fixture = loadRuntimeWithMocks({
+    generateObject: async () => { throw outerErr; },
+    generateText: async () => ({ text: '{"ok":true}', usage: { inputTokens: 5, outputTokens: 5 } }),
+  });
+
+  try {
+    const runtime = new fixture.runtimeModule.DirectAIRuntime();
+    const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
+
+    assert.deepEqual(result.data, { ok: true });
+  } finally {
+    fixture.restore();
+  }
+});
