@@ -111,7 +111,10 @@ export function buildOpenCodeEnvironment(
     env.OPENAI_API_KEY = options.apiKey;
   }
 
-  const baseUrl = resolveOpenAICompatibleBaseUrl(normalizedTransport, options.apiBaseUrl);
+  // Use originalTransport for base URL resolution so OpenAI-compatible providers
+  // (e.g. litellm, groq, ollama) get their correct endpoint even when coerced to
+  // 'openai' in the OpenCode message body by resolveOpenCodeModelTarget.
+  const baseUrl = resolveOpenAICompatibleBaseUrl(originalTransport, options.apiBaseUrl);
   if (baseUrl && !env.OPENAI_BASE_URL) {
     env.OPENAI_BASE_URL = baseUrl;
   }
