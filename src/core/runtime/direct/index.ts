@@ -18,6 +18,7 @@ import {
   resolveModelTarget,
 } from '../interface';
 import {
+  fetchOpenAICompatibleModels,
   OPENAI_API_BASE_URL,
   resolveOpenAICompatibleBaseUrl,
   resolveOpenAICompatibleModelId,
@@ -123,6 +124,16 @@ function normalizeRuntimeError(err: unknown, baseURL?: string): Error {
       'Vercel AI Gateway rejected the configured bearer token for inference. '
       + 'Use an AI Gateway API key created in Vercel AI Gateway, or provide VERCEL_OIDC_TOKEN. '
       + `Original error: ${message}`
+    );
+  }
+
+  // Detect model-not-found patterns and hint about the models command.
+  // Patterns: Anthropic "model: <name>", generic "model not found", "model X does not exist".
+  if (/\bmodel[: ]+\S+.*not (found|exist|supported|available)/i.test(message)
+    || /model does not exist/i.test(message)
+    || /^model: \S/i.test(message)) {
+    return new Error(
+      `${message}\nHint: run \`bateye models --provider <provider> --apikey <key>\` to list available models.`
     );
   }
 
@@ -527,6 +538,16 @@ export class DirectAIRuntime implements IRuntime {
   }
 
   async listModels(provider: string, apiKey: string, apiBaseUrl?: string): Promise<string[]> {
+    const normalizedProvider = normalizeTransport(provider);
+
+    // Vercel AI Gateway is OpenAI-compatible; query its /v1/models endpoint directly
+    // since OpenCode's listModels intentionally skips the vercel transport.
+    if (normalizedProvider === 'vercel') {
+      const credential = resolveVercelGatewayCredential(apiKey);
+      const baseUrl = apiBaseUrl?.trim() || VERCEL_AI_GATEWAY_BASE_URL;
+      return fetchOpenAICompatibleModels(credential || '', baseUrl);
+    }
+
     const runtime = new OpenCodeCLIRuntime();
     return runtime.listModels(provider, apiKey, apiBaseUrl);
   }

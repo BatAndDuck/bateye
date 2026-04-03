@@ -294,6 +294,9 @@ test('Tier 2: "Unsupported parameter: temperature" triggers temperature retry', 
 
     assert.deepEqual(result.data, { ok: true });
     assert.equal(fixture.calls.generateObjectCalls.length, 2);
+    assert.equal(fixture.calls.generateObjectCalls[0].temperature, 0);
+    assert.equal(fixture.calls.generateObjectCalls[1].temperature, undefined);
+    assert.equal(fixture.calls.generateTextCalls.length, 0);
   } finally {
     fixture.restore();
   }
@@ -321,6 +324,9 @@ test('Tier 2: "temperature must be 1" triggers temperature retry', async () => {
 
     assert.deepEqual(result.data, { ok: true });
     assert.equal(fixture.calls.generateObjectCalls.length, 2);
+    assert.equal(fixture.calls.generateObjectCalls[0].temperature, 0);
+    assert.equal(fixture.calls.generateObjectCalls[1].temperature, undefined);
+    assert.equal(fixture.calls.generateTextCalls.length, 0);
   } finally {
     fixture.restore();
   }
@@ -754,21 +760,47 @@ test('result metadata is correct when text fallback is used', async () => {
 // ---------------------------------------------------------------------------
 
 test('repair text function retries without temperature on temperature error', async () => {
+  // This test exercises buildRepairTextFunction by making the mock generateObject
+  // call opts.experimental_repairText (simulating the Vercel AI SDK's repair flow).
+  // The first generateText (with temperature: 0) throws; the retry without
+  // temperature succeeds, and the repaired JSON is returned as the final object.
   const { z } = require('zod');
-  let textCallCount = 0;
+  const textCalls = [];
+
   const fixture = loadRuntimeWithMocks({
-    generateObject: async () => {
-      // Return invalid JSON that triggers repair
-      return { object: { ok: true }, usage: { inputTokens: 10, outputTokens: 20 } };
+    generateObject: async (opts) => {
+      // Simulate SDK: model returned malformed JSON, SDK calls experimental_repairText
+      if (opts.experimental_repairText) {
+        const repaired = await opts.experimental_repairText({
+          text: '{"broken":',
+          error: new Error('JSON parse error'),
+        });
+        if (repaired) {
+          return { object: JSON.parse(repaired), usage: { inputTokens: 10, outputTokens: 20 } };
+        }
+      }
+      throw new Error('repair returned null');
+    },
+    generateText: async (opts) => {
+      textCalls.push({ temperature: opts.temperature });
+      if (textCalls.length === 1) {
+        // First repair attempt (with temperature: 0) throws
+        throw new Error('temperature is not supported');
+      }
+      // Second attempt (without temperature) succeeds
+      return { text: '{"ok":true}', usage: { inputTokens: 5, outputTokens: 5 } };
     },
   });
 
-  // This test verifies repair indirectly — when generateObject succeeds, no repair
-  // is needed. We test repair separately below.
   try {
     const runtime = new fixture.runtimeModule.DirectAIRuntime();
     const result = await runtime.run(baseRunOptions(), z.object({ ok: z.boolean() }));
+
     assert.deepEqual(result.data, { ok: true });
+    // Two generateText calls: first with temperature: 0, second without
+    assert.equal(textCalls.length, 2);
+    assert.equal(textCalls[0].temperature, 0);
+    assert.equal(textCalls[1].temperature, undefined);
   } finally {
     fixture.restore();
   }

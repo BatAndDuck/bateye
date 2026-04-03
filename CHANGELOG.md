@@ -6,6 +6,9 @@
 - Repair failure debug logs now use `formatErrorWithCauses` instead of `.message?.slice(0,200)`, so nested cause chains (e.g. provider SDK wrapping) are fully visible in diagnostic output.
 - Provider smoke test `validateResult` now includes issue codes and messages in the failure output when `status=degraded`, making provider-specific failures diagnosable without downloading CI artifacts.
 - Vercel AI SDK errors thrown when `generateObject` cannot produce valid structured output (`AI_NoObjectGeneratedError`, `AI_NoContentGeneratedError`, `AI_JSONParseError`, `AI_TypeValidationError`) now trigger the text-based fallback path, fixing Gemini models that fail schema validation after repair.
+- Structure repair prompt now wraps malformed JSON in explicit `--- BEGIN/END JSON DATA ---` delimiters with an instruction to treat contents as inert data, preventing instruction-like strings in AI-generated JSON values from influencing the repair model.
+- Model-not-found errors (e.g. Anthropic `model: <name>` validation errors) now include a hint to run `bateye models` to list available models for the provider.
+- `bateye models --provider vercel` now returns the models available on the Vercel AI Gateway by querying its OpenAI-compatible `/v1/models` endpoint directly.
 
 ## 0.1.5
 
