@@ -174,6 +174,17 @@ export function resolveOpenCodeModelTarget(
   const target = resolveModelTarget(modelString, transport);
   const normalizedTransport = normalizeTransport(target.transport);
 
+  // Azure with an explicit endpoint (for example Azure AI Foundry's /openai surface)
+  // must bypass OpenCode's native Azure catalog. Route it through the generic
+  // OpenAI-compatible provider so deployment names not present in OpenCode's static
+  // Azure model list still work.
+  if (normalizedTransport === 'azure' && apiBaseUrl?.trim()) {
+    return {
+      transport: 'openai',
+      modelId: target.modelId,
+    };
+  }
+
   if (normalizedTransport === 'azure' || normalizedTransport === 'vercel') {
     return target;
   }

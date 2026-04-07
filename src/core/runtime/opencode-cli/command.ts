@@ -22,6 +22,24 @@ export const OPEN_CODE_PROMPT_ATTACHMENT_MESSAGE =
   + 'Investigate the repository as needed and return only the requested JSON.';
 export const MAX_INLINE_OPEN_CODE_PROMPT_CHARS = 16_000;
 
+function resolveOpenCodeBaseUrl(
+  baseUrl: string | undefined,
+  originalTransport: string,
+  effectiveTransport: string,
+): string | undefined {
+  if (!baseUrl) {
+    return undefined;
+  }
+
+  if (originalTransport === 'azure' && effectiveTransport === 'openai') {
+    return /\/openai\/v1\/?$/i.test(baseUrl)
+      ? baseUrl
+      : baseUrl.replace(/\/+$/, '').replace(/\/openai$/i, '/openai/v1');
+  }
+
+  return baseUrl;
+}
+
 export function resolveBundledOpenCodeInvocation(
   packageJsonPath: string | null = findBundledOpenCodePackageJson(),
 ): OpenCodeInvocation | null {
@@ -115,7 +133,11 @@ export function buildOpenCodeEnvironment(
   // Use originalTransport for base URL resolution so OpenAI-compatible providers
   // (e.g. litellm, groq, ollama) get their correct endpoint even when coerced to
   // 'openai' in the OpenCode message body by resolveOpenCodeModelTarget.
-  const baseUrl = resolveOpenAICompatibleBaseUrl(originalTransport, options.apiBaseUrl);
+  const baseUrl = resolveOpenCodeBaseUrl(
+    resolveOpenAICompatibleBaseUrl(originalTransport, options.apiBaseUrl),
+    originalTransport,
+    normalizedTransport,
+  );
   if (baseUrl && !env.OPENAI_BASE_URL) {
     env.OPENAI_BASE_URL = baseUrl;
   }

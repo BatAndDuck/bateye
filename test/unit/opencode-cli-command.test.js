@@ -129,3 +129,15 @@ test('buildOpenCodeEnvironment routes explicit apiBaseUrl through OpenAI-compati
   assert.equal(env.OPENAI_API_KEY, 'gateway-key');
   assert.equal(env.OPENAI_BASE_URL, 'https://litellm.example.com/v1');
 });
+
+test('buildOpenCodeEnvironment routes azure custom endpoints through OpenAI-compatible env vars', () => {
+  const env = buildOpenCodeEnvironment({}, {
+    apiKey: 'azure-key',
+    model: 'azure/gpt-5.4-nano',
+    transport: 'azure',
+    apiBaseUrl: 'https://foundry.example/openai',
+  });
+
+  assert.equal(env.OPENAI_API_KEY, 'azure-key');
+  assert.equal(env.OPENAI_BASE_URL, 'https://foundry.example/openai/v1');
+});

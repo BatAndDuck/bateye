@@ -47,6 +47,16 @@ test('resolveOpenCodeModelTarget routes explicit apiBaseUrl through the OpenAI-c
   );
 });
 
+test('resolveOpenCodeModelTarget routes azure custom endpoints through the OpenAI-compatible provider', () => {
+  assert.deepEqual(
+    resolveOpenCodeModelTarget('azure/gpt-5.4-nano', 'azure', 'https://foundry.example/openai'),
+    {
+      transport: 'openai',
+      modelId: 'gpt-5.4-nano',
+    }
+  );
+});
+
 test('createStructuredRuntime uses mock runtime only when BATEYE_RUNTIME=mock', async () => {
   const originalRuntime = process.env.BATEYE_RUNTIME;
 
