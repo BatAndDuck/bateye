@@ -33,6 +33,12 @@ jobs:
             model: deepseek/deepseek-v3.2-thinking
             transport: vercel
             secret_name: VERCEL_AI_API_KEY
+          - name: Azure Foundry gpt-5.4-nano
+            provider: azure-foundry
+            model: azure/gpt-5.4-nano
+            transport: azure
+            secret_name: AZURE_FOUNDRY_API_KEY
+            endpoint_secret_name: AZURE_FOUNDRY_ENDPOINT
 
     steps:
       - name: Checkout
@@ -57,6 +63,7 @@ jobs:
         shell: bash
         env:
           PROVIDER_SECRET: ${{ secrets[matrix.secret_name] }}
+          ENDPOINT_SECRET: ${{ secrets[matrix.endpoint_secret_name] }}
         run: |
           if [ -z "$PROVIDER_SECRET" ]; then
             echo "Missing required repository secret: ${{ matrix.secret_name }}" >&2
@@ -69,12 +76,19 @@ jobs:
             echo "AI_GATEWAY_API_KEY=$PROVIDER_SECRET" >> "$GITHUB_ENV"
           fi
 
+          if [ -n "$ENDPOINT_SECRET" ]; then
+            CLEAN_ENDPOINT="${ENDPOINT_SECRET%/}"
+            echo "BATEYE_PROVIDER_ENDPOINT=${CLEAN_ENDPOINT}/openai" >> "$GITHUB_ENV"
+            echo "AZURE_API_VERSION=2024-12-01-preview" >> "$GITHUB_ENV"
+          fi
+
       - name: Run provider smoke test
         run: |
           node scripts/provider-smoke-test.js \
             --provider "${{ matrix.provider }}" \
             --model "${{ matrix.model }}" \
             --transport "${{ matrix.transport }}" \
+            ${BATEYE_PROVIDER_ENDPOINT:+--api-base-url "$BATEYE_PROVIDER_ENDPOINT"} \
             --artifacts-dir "report/provider-smoke/${{ matrix.provider }}"
 
       - name: Upload smoke-test artifacts

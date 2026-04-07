@@ -26,6 +26,7 @@ function parseArgs(argv) {
     provider: '',
     model: '',
     transport: '',
+    apiBaseUrl: '',
     artifactsDir: '',
   };
 
@@ -44,6 +45,10 @@ function parseArgs(argv) {
         break;
       case '--transport':
         options.transport = next || '';
+        i++;
+        break;
+      case '--api-base-url':
+        options.apiBaseUrl = next || '';
         i++;
         break;
       case '--artifacts-dir':
@@ -203,6 +208,7 @@ function createSmokeRepository(repoPath, options) {
   const config = {
     model: options.model,
     ...(options.transport ? { transport: options.transport } : {}),
+    ...(options.apiBaseUrl ? { apiBaseUrl: options.apiBaseUrl } : {}),
     prReview: {
       maxReviewers: 1,
     },
