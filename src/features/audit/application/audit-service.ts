@@ -141,7 +141,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     const total = activeReviewers.length;
     const causeDetail = diag.category !== 'unknown' ? ` ${diag.brief}` : '';
     const hintDetail = diag.hint ? ` ${diag.hint}` : '';
-    throw new Error(`All reviewers failed (${total} reviewer(s)).${causeDetail}${hintDetail}`);
+    throw new Error(`All reviewers failed (${total} reviewer(s)).${causeDetail}${hintDetail}`, { cause: sampleMsg ? new Error(sampleMsg) : undefined });
   }
 
   // Phase 5: Confidence floor filtering

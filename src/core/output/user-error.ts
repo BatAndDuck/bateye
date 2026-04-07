@@ -101,8 +101,7 @@ export function briefError(err: unknown): string {
 
   const { brief, hint, category } = categorizeError(full);
   const hintSuffix = hint ? ` — ${hint}` : '';
-  const verboseSuffix = !hint ? ' (run with --verbose for details)' : '';
-  return brief + hintSuffix + (category === 'unknown' ? verboseSuffix : '');
+  return brief + hintSuffix;
 }
 
 /**
