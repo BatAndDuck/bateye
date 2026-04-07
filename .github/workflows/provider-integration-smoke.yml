@@ -79,7 +79,7 @@ jobs:
           if [ -n "$ENDPOINT_SECRET" ]; then
             CLEAN_ENDPOINT="${ENDPOINT_SECRET%/}"
             echo "BATEYE_PROVIDER_ENDPOINT=${CLEAN_ENDPOINT}/openai" >> "$GITHUB_ENV"
-            echo "AZURE_API_VERSION=2024-12-01-preview" >> "$GITHUB_ENV"
+            echo "AZURE_API_VERSION=2025-03-01-preview" >> "$GITHUB_ENV"
           fi
 
       - name: Run provider smoke test
