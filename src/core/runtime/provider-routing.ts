@@ -128,11 +128,30 @@ export async function fetchOpenAICompatibleModels(
   }
 }
 
+/**
+ * Resolves the model ID to send to an OpenAI-compatible endpoint.
+ *
+ * When a custom `apiBaseUrl` is set and the model string contains a provider prefix:
+ * - For native provider namespaces (anthropic, openai, google, etc.) the full
+ *   `provider/model-id` string is preserved, because multi-provider gateways (e.g.
+ *   a self-hosted OpenRouter-compatible proxy) need the prefix to route correctly.
+ * - For BatEye-internal transports (litellm, groq, ollama, etc.) the prefix is
+ *   stripped, because it is a routing hint only and the downstream endpoint (e.g. a
+ *   LiteLLM proxy) does not understand it.
+ */
 export function resolveOpenAICompatibleModelId(
-  _modelString: string,
+  modelString: string,
   resolvedModelId: string,
-  _apiBaseUrl?: string,
+  apiBaseUrl?: string,
+  transport?: string,
 ): string {
+  if (apiBaseUrl?.trim() && modelString.includes('/')) {
+    // Strip the prefix for BatEye-internal transports; preserve for real API namespaces.
+    if (transport && !OPENCODE_NATIVE_TRANSPORTS.has(normalizeTransport(transport))) {
+      return resolvedModelId;
+    }
+    return modelString.trim();
+  }
   return resolvedModelId;
 }
 
@@ -158,7 +177,7 @@ export function resolveOpenCodeModelTarget(
   if (apiBaseUrl?.trim()) {
     return {
       transport: 'openai',
-      modelId: resolveOpenAICompatibleModelId(modelString, target.modelId, apiBaseUrl),
+      modelId: resolveOpenAICompatibleModelId(modelString, target.modelId, apiBaseUrl, normalizedTransport),
     };
   }
 

@@ -424,6 +424,7 @@ function prepareModel(options: RunOptions): PreparedModel {
     options.model,
     target.modelId,
     options.apiBaseUrl,
+    normalizedTransport,
   );
   const provider = createOpenAICompatible({
     name: normalizedTransport,
