@@ -2,6 +2,7 @@ import chalk from 'chalk';
 import { resolveConfig, resolveApiKey } from '../../core/config/loader';
 import { OpenCodeCLIRuntime } from '../../core/runtime/opencode-cli/index';
 import { parseProviderAndModel } from '../../core/runtime/interface';
+import { resolveAuthEnvName } from '../../features/config/application/config-service';
 
 export const SUPPORTED_PROVIDERS = [
   // Direct API key providers
@@ -21,6 +22,7 @@ export async function runModels(repoPath: string, provider?: string, all?: boole
   console.log(chalk.cyan('\n🦇 BatEye Models\n'));
 
   const config = resolveConfig(repoPath);
+  const authEnv = resolveAuthEnvName(config);
   let apiKey: string;
   try {
     apiKey = resolveApiKey(config, repoPath);
@@ -61,7 +63,12 @@ export async function runModels(repoPath: string, provider?: string, all?: boole
         p === configuredProvider ? config.apiBaseUrl : undefined,
       );
       if (models.length === 0) {
-        console.log(chalk.gray('    (no models found - set BATEYE_LLM_MODEL_API_KEY or run `bateye conf --apikey ...`)'));
+        if (config.apiBaseUrl && p === configuredProvider) {
+          console.log(chalk.gray(`    (no models found from ${config.apiBaseUrl.replace(/\/$/, '')}/models)`));
+          console.log(chalk.gray(`    Set the model directly: bateye conf --model ${p}/your-model-id`));
+        } else {
+          console.log(chalk.gray(`    (no models found — set ${authEnv} or run \`bateye conf --apikey ...\`)`));
+        }
       } else {
         for (const m of models) {
           const isCurrent = m === config.model || `${p}/${m}` === config.model;

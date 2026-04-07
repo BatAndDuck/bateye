@@ -286,7 +286,8 @@ function shouldRetryStructuredOutput(err: unknown, attempt: number): boolean {
 
   return err instanceof z.ZodError
     || err instanceof SyntaxError
-    || (err instanceof Error && /no structured text response/i.test(err.message));
+    || (err instanceof Error && /no structured text response/i.test(err.message))
+    || (err instanceof Error && /invalid response structure/i.test(err.message));
 }
 
 /**
@@ -823,6 +824,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
     };
     let lastError: unknown;
     let lastRawJson: string | null = null;
+    let skipStructuredOutput = false;
     // Estimate input tokens from prompt character lengths (1 token ≈ 4 chars)
     const estimatedInputTokens = Math.ceil((options.systemPrompt.length + options.userMessage.length) / 4);
     const callId = `${target.transport}/${target.modelId}`;
@@ -852,7 +854,10 @@ export class OpenCodeCLIRuntime implements IRuntime {
         // Thinking / reasoning models (e.g. deepseek-reasoner, *-thinking) do not support
         // tool_choice, which OpenCode uses internally to enforce json_schema structured output.
         // For those models we omit the format field and rely on prompt-based JSON extraction.
-        const isThinkingModel = /thinking|reasoner/i.test(target.modelId);
+        // skipStructuredOutput is set on the first attempt when OpenCode returns an empty
+        // response (boolean true), which indicates the provider/model does not support the
+        // json_schema format (e.g. LiteLLM proxies with models that lack structured-output support).
+        const isThinkingModel = /thinking|reasoner/i.test(target.modelId) || skipStructuredOutput;
         const messageBody: Record<string, unknown> = {
           model: {
             providerID: target.transport,
@@ -882,6 +887,15 @@ export class OpenCodeCLIRuntime implements IRuntime {
         }
 
         if (!response?.info || !response?.parts) {
+          if ((response as unknown) === true && !skipStructuredOutput) {
+            // Empty response (body was absent or literally "true") typically means the provider
+            // or model does not support json_schema structured output. Flag for fallback so the
+            // retry attempt skips the format block and uses prompt-based JSON extraction instead.
+            skipStructuredOutput = true;
+            logRuntimeDebug(
+              `[opencode]${labelTag} Structured output returned empty response — falling back to prompt-based JSON extraction on retry.`,
+            );
+          }
           throw new Error(
             `OpenCode returned an invalid response structure (info=${typeof response?.info}, parts=${typeof response?.parts}). `
             + `Model: ${target.transport}/${target.modelId}. Raw: ${JSON.stringify(response).slice(0, 500)}`

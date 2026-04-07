@@ -18,6 +18,7 @@ import { ensureDir, writeAuditResult } from '../../../core/output/writer';
 import { IRuntime, TokenUsage } from '../../../core/runtime/interface';
 import { getAuditRuntime, createStructuredRuntime } from '../../../core/runtime/factory';
 import { formatErrorWithCauses } from '../../../core/runtime/error-format';
+import { briefError, categorizeError } from '../../../core/output/user-error';
 import { addTokens, formatTokenSummary } from '../../../core/runtime/token-utils';
 import { resolveApiKey, resolveConfig } from '../../config/application/config-service';
 import { loadReviewersForMode } from '../../reviewers/application/reviewer-registry';
@@ -132,7 +133,15 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   );
 
   if (successfulResults.length === 0) {
-    throw new Error('All reviewers failed. Check model/provider configuration or reviewer output constraints.');
+    const failedIssues = issues.filter(
+      i => i.code === 'audit-reviewer-failed' || i.code === 'audit-reviewer-timeout',
+    );
+    const sampleMsg = failedIssues[0]?.message ?? '';
+    const diag = categorizeError(sampleMsg);
+    const total = activeReviewers.length;
+    const causeDetail = diag.category !== 'unknown' ? ` ${diag.brief}` : '';
+    const hintDetail = diag.hint ? ` ${diag.hint}` : '';
+    throw new Error(`All reviewers failed (${total} reviewer(s)).${causeDetail}${hintDetail}`, { cause: sampleMsg ? new Error(sampleMsg) : undefined });
   }
 
   // Phase 5: Confidence floor filtering
@@ -174,7 +183,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       log(`Skeptic verifier rejected ${semanticRejectedCount} finding(s) as speculative or inapplicable.`);
     }
   } catch (err) {
-    log(`Warning: skeptic verifier failed, keeping all deduplicated findings: ${formatErrorWithCauses(err)}`);
+    log(`Warning: skeptic verifier failed (keeping all deduplicated findings): ${briefError(err)}`);
   }
 
   // Phase 8: Rebuild per-reviewer arrays using verified findings, then assemble result
@@ -271,15 +280,16 @@ async function executeReviewers(
         log(`  ✓ ${reviewer.name}: score=${result.score}, findings=${result.findings.length} (${durationSec}s${tokenSuffix})`);
         return result;
       } catch (err) {
-        const msg = formatErrorWithCauses(err);
-        const isTimeout = /timed out after/i.test(msg);
-        log(`  Warning: reviewer ${reviewer.name} failed and will be skipped: ${msg}`);
+        const fullMsg = formatErrorWithCauses(err);
+        const isTimeout = /timed out after/i.test(fullMsg);
+        // Progress message uses a brief, categorized description; full chain is stored in issues.
+        log(`  Warning: reviewer ${reviewer.name} failed and will be skipped: ${briefError(err)}`);
         issues.push({
           severity: 'warning',
           code: isTimeout ? 'audit-reviewer-timeout' : 'audit-reviewer-failed',
           message: isTimeout
-            ? `Reviewer "${reviewer.name}" (model=${reviewer.model || config.model}) timed out and was skipped: ${msg}`
-            : `Reviewer "${reviewer.name}" (model=${reviewer.model || config.model}) failed and was skipped: ${msg}`,
+            ? `Reviewer "${reviewer.name}" (model=${reviewer.model || config.model}) timed out: ${fullMsg}`
+            : `Reviewer "${reviewer.name}" (model=${reviewer.model || config.model}) failed: ${fullMsg}`,
           stage: 'run-reviewers',
           reviewerId: reviewer.id,
           reviewerName: reviewer.name,
