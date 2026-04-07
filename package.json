@@ -1,7 +1,7 @@
 {
   "name": "bateye",
   "version": "0.1.9",
-  "description": "AI-powered code analysis CLI - audit your codebase with a squad of LLM reviewers",
+  "description": "AI code review CLI for pull requests and repository audits with your choice of LLM",
   "license": "AGPL-3.0",
   "repository": {
     "type": "git",
@@ -13,13 +13,19 @@
   },
   "keywords": [
     "ai",
+    "ai-code-review",
     "code-review",
+    "pull-request",
+    "github-actions",
+    "developer-tools",
     "static-analysis",
     "audit",
+    "code-audit",
     "llm",
     "cli",
     "anthropic",
     "openai",
+    "ollama",
     "pr-review",
     "security"
   ],

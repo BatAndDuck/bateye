@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Documentation
+    url: https://github.com/BatAndDuck/bateye/tree/main/docs
+    about: Configuration, providers, reviewers, and GitHub Actions setup.
+  - name: Troubleshooting guide
+    url: https://github.com/BatAndDuck/bateye/blob/main/docs/troubleshooting.md
+    about: Common setup, runtime, and provider failures.

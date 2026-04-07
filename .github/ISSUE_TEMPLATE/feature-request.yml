@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest an improvement to BatEye.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What pain point are you trying to remove?
+      placeholder: Reviewing PRs in CI works, but ...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior you want.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing workaround, other tools, or why the current behavior is not enough.
+  - type: textarea
+    id: context
+    attributes:
+      label: Extra context
+      description: Repo type, provider, CI setup, or examples that make the request clearer.

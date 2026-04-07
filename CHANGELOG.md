@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+## 0.1.9
+
+### Changed
+- Reworked the README into a shorter landing page with a quicker install path and explicit links into the detailed docs.
+- Added docs index, contributing, security, issue templates, and a PR template to make the repository easier to navigate and contribute to.
+- Tightened package metadata for better GitHub discovery and version hygiene.
+
 ## 0.1.7
 
 ### Fixed
