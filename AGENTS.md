@@ -26,6 +26,16 @@ Example:
 2026-03-20 | pr-review-pipeline | Added 10-stage pipeline with diff parser + verifier. Replaces broken runner.ts flow that missed line ranges and duplicated findings across reviewers.
 ```
 
+## Publishing a New Version
+
+**Before committing any change intended for npm release:**
+
+1. Move the `## Unreleased` section in `CHANGELOG.md` to the new version number (e.g. `## 0.1.7`).
+2. Bump `"version"` in `package.json` to match.
+3. Commit both files together with the rest of the change.
+
+Do this **every time** — never publish to npm without a matching changelog entry and version bump.
+
 ---
 
 ## Design Principles

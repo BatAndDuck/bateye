@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.7
 
 ### Fixed
 - Repair failure debug logs now use `formatErrorWithCauses` instead of `.message?.slice(0,200)`, so nested cause chains (e.g. provider SDK wrapping) are fully visible in diagnostic output.
