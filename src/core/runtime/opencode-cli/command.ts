@@ -5,6 +5,7 @@ import {
   resolveOpenAICompatibleBaseUrl,
   resolveOpenCodeModelTarget,
 } from '../provider-routing';
+import { logRuntimeDebug } from '../debug';
 
 export interface OpenCodeInvocation {
   command: string;
@@ -118,6 +119,11 @@ export function buildOpenCodeEnvironment(
   if (baseUrl && !env.OPENAI_BASE_URL) {
     env.OPENAI_BASE_URL = baseUrl;
   }
+  logRuntimeDebug(
+    `[opencode-env] model=${options.model} originalTransport=${originalTransport} effectiveTransport=${normalizedTransport}`
+    + ` OPENAI_BASE_URL=${env.OPENAI_BASE_URL || '(not set)'} apiKey=${env.OPENAI_API_KEY ? 'set' : 'MISSING'}`
+    + ` ANTHROPIC_API_KEY=${env.ANTHROPIC_API_KEY ? 'set' : '(not set)'} GOOGLE_API_KEY=${env.GOOGLE_API_KEY ? 'set' : '(not set)'}`,
+  );
 
   if (originalTransport === 'vercel') {
     env.AI_GATEWAY_API_KEY = env.AI_GATEWAY_API_KEY || options.apiKey;

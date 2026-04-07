@@ -830,7 +830,8 @@ export class OpenCodeCLIRuntime implements IRuntime {
     const callId = `${target.transport}/${target.modelId}`;
 
     const labelTag = options.callLabel ? ` [${options.callLabel}]` : '';
-    logRuntimeDebug(`[opencode]${labelTag} Starting call: model=${callId}, systemPrompt=${options.systemPrompt.length} chars, userMessage=${options.userMessage.length} chars, estInputTokens=~${estimatedInputTokens}, timeout=${Math.round(timeoutMs / 1000)}s`);
+    const baseUrlForLog = options.apiBaseUrl?.trim() || '(provider default)';
+    logRuntimeDebug(`[opencode]${labelTag} Starting call: model=${callId}, apiBaseUrl=${baseUrlForLog}, systemPrompt=${options.systemPrompt.length} chars, userMessage=${options.userMessage.length} chars, estInputTokens=~${estimatedInputTokens}, timeout=${Math.round(timeoutMs / 1000)}s`);
 
     for (let attempt = 0; attempt < MAX_STRUCTURED_OUTPUT_ATTEMPTS; attempt++) {
       let sessionID: string | undefined;
@@ -839,7 +840,8 @@ export class OpenCodeCLIRuntime implements IRuntime {
         : `\n\nPREVIOUS ATTEMPT FAILED STRUCTURED OUTPUT VALIDATION. Return ONLY JSON matching the requested schema with all required fields and correct value types. Validation issue: ${formatValidationFeedback(lastError)}`;
 
       if (attempt > 0) {
-        logRuntimeDebug(`[opencode] Retry attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS} for ${callId}: previous error was ${summarizeSdkError(lastError)}`);
+        const fallbackNote = skipStructuredOutput ? ' (prompt-based JSON extraction, json_schema skipped)' : '';
+        logRuntimeDebug(`[opencode] Retry attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS} for ${callId}${fallbackNote}: previous error was ${summarizeSdkError(lastError)}`);
       }
 
       let serializedResponse = '';
@@ -858,6 +860,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
         // response (boolean true), which indicates the provider/model does not support the
         // json_schema format (e.g. LiteLLM proxies with models that lack structured-output support).
         const isThinkingModel = /thinking|reasoner/i.test(target.modelId) || skipStructuredOutput;
+        logRuntimeDebug(`[opencode]${labelTag} Attempt ${attempt + 1}/${MAX_STRUCTURED_OUTPUT_ATTEMPTS}: format=${isThinkingModel ? 'prompt-based' : 'json_schema'}`);
         const messageBody: Record<string, unknown> = {
           model: {
             providerID: target.transport,
@@ -893,7 +896,14 @@ export class OpenCodeCLIRuntime implements IRuntime {
             // retry attempt skips the format block and uses prompt-based JSON extraction instead.
             skipStructuredOutput = true;
             logRuntimeDebug(
-              `[opencode]${labelTag} Structured output returned empty response — falling back to prompt-based JSON extraction on retry.`,
+              `[opencode]${labelTag} json_schema structured output returned empty response (model=${callId}, apiBaseUrl=${baseUrlForLog})`
+              + ` — model likely does not support json_schema. Retrying with prompt-based JSON extraction.`,
+            );
+          } else if ((response as unknown) === true && skipStructuredOutput) {
+            logRuntimeDebug(
+              `[opencode]${labelTag} Prompt-based call also returned empty response (model=${callId}, apiBaseUrl=${baseUrlForLog}).`
+              + ` The model or LiteLLM proxy may not support OpenCode's agentic tool-calling protocol.`
+              + ` Check that OPENAI_BASE_URL is reachable and the model supports function/tool calls.`,
             );
           }
           throw new Error(
@@ -998,23 +1008,27 @@ export class OpenCodeCLIRuntime implements IRuntime {
         }, 30_000);
         repairSessionID = repairSession.id;
 
+        logRuntimeDebug(`[opencode] Repair format=${skipStructuredOutput ? 'prompt-based' : 'json_schema'}`);
+        const repairBody: Record<string, unknown> = {
+          model: {
+            providerID: target.transport,
+            modelID: target.modelId,
+          },
+          system: repair.systemPrompt,
+          parts: [{ type: 'text', text: repair.userMessage }],
+        };
+        if (!skipStructuredOutput) {
+          repairBody.format = {
+            type: 'json_schema',
+            name: 'BatEyeRepair',
+            schema: responseSchema,
+            retryCount: 0,
+          };
+        }
         const repairResponse = await this.request<OpenCodeMessageResponse>(`${server.url}/session/${repairSessionID}/message`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({
-            model: {
-              providerID: target.transport,
-              modelID: target.modelId,
-            },
-            format: {
-              type: 'json_schema',
-              name: 'BatEyeRepair',
-              schema: responseSchema,
-              retryCount: 0,
-            },
-            system: repair.systemPrompt,
-            parts: [{ type: 'text', text: repair.userMessage }],
-          }),
+          body: JSON.stringify(repairBody),
         }, 60_000);
 
         const repairSerialized = serializeOpenCodeResponse(repairResponse);
