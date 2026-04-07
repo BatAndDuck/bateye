@@ -114,6 +114,10 @@ export async function fetchOpenAICompatibleModels(
 ): Promise<string[]> {
   try {
     const cleanBase = baseUrl.replace(/\/+$/, '');
+    // Only allow http/https — reject non-HTTP schemes defensively.
+    if (!/^https?:\/\//i.test(cleanBase)) {
+      return [];
+    }
     const response = await fetch(`${cleanBase}/models`, {
       headers: { Authorization: `Bearer ${apiKey}` },
       signal: AbortSignal.timeout(10_000),
