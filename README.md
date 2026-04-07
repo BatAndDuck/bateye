@@ -146,14 +146,15 @@ bateye config set model openrouter/meta-llama/llama-3.3-70b-instruct
 bateye config set model groq/llama-3.3-70b-versatile
 ```
 
-**LiteLLM proxy** — point BatEye at your LiteLLM instance using the `litellm` provider prefix.
-The model name after `litellm/` must match what your proxy exposes:
+**LiteLLM proxy / custom gateway** — point BatEye at any OpenAI-compatible endpoint:
 
 ```bash
+# LiteLLM on localhost:4000 (default)
 bateye conf --model litellm/gpt-4o --apikey sk-your-litellm-key
-# Non-default port or remote host:
-bateye config set apiBaseUrl http://your-host:4000/v1
-bateye conf --model openai/gpt-4o --apikey sk-your-litellm-key
+
+# Remote or non-default host — set apiBaseUrl and use the model name your proxy exposes:
+bateye config set apiBaseUrl https://your-host/v1
+bateye conf --model litellm/gpt-4o --apikey sk-your-key
 ```
 
 Anthropic · OpenAI · OpenRouter · Google · DeepSeek · Groq · Cerebras · Azure · **LiteLLM proxy** · **Ollama (local, free)** · **LM Studio (local, free)** · Vercel AI Gateway · [20+ providers →](./docs/providers.md)
@@ -165,7 +166,9 @@ Anthropic · OpenAI · OpenRouter · Google · DeepSeek · Groq · Cerebras · A
 ```bash
 bateye init                              # Set up .bateye/ in your repo
 bateye doctor                            # Verify config, API key, reviewers
-bateye models                            # List available AI models
+bateye models                            # List models for current provider
+bateye models openai                     # List models for a specific provider
+bateye models --all                      # List all providers (slow)
 bateye conf --model <model> --apikey <key> # Set model and store a repo API key
 bateye reviewers                         # List all reviewers (built-in + custom)
 bateye config show                       # Show current config

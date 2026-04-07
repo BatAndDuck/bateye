@@ -129,14 +129,10 @@ export async function fetchOpenAICompatibleModels(
 }
 
 export function resolveOpenAICompatibleModelId(
-  modelString: string,
+  _modelString: string,
   resolvedModelId: string,
-  apiBaseUrl?: string,
+  _apiBaseUrl?: string,
 ): string {
-  if (apiBaseUrl?.trim() && modelString.includes('/')) {
-    return modelString.trim();
-  }
-
   return resolvedModelId;
 }
 
