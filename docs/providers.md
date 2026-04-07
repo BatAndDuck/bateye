@@ -299,11 +299,11 @@ bateye conf --model litellm/my-custom-deployment
 **Remote or non-default port** — set `apiBaseUrl` to override the default `localhost:4000`:
 
 ```bash
-bateye config set apiBaseUrl http://your-host:4000/v1
-bateye conf --model openai/gpt-4o --apikey sk-your-litellm-key
+bateye config set apiBaseUrl https://your-host:4000/v1
+bateye conf --model litellm/gpt-4o --apikey sk-your-litellm-key
 ```
 
-When `apiBaseUrl` is set, any provider prefix works — BatEye routes all traffic through that URL.
+When `apiBaseUrl` is set, BatEye routes all traffic through that URL. The model name after the prefix must match what your proxy exposes.
 
 **Common mistake** — do not nest the upstream provider name in the model string:
 
@@ -359,6 +359,7 @@ bateye models                  # list models for current provider
 bateye models anthropic        # list Anthropic models
 bateye models openai           # list OpenAI models
 bateye models groq             # list Groq models
+bateye models --all            # list models from all providers (slow)
 ```
 
 ## Recommendations

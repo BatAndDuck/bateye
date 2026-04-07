@@ -47,6 +47,43 @@ BatEye is configured via `.bateye/config.json` in your repo root. Run `bateye in
 | `prReview.autoApprove.enabled` | boolean | `false` | Auto-approve PRs with no high-severity findings |
 | `prReview.autoApprove.maxSeverity` | `"info"` \| `"low"` \| `"medium"` | `"low"` | Highest severity allowed for auto-approve |
 
+### Model format
+
+Models are specified as `provider/model-id`. The provider prefix determines which API endpoint and authentication method BatEye uses. Run `bateye models <provider>` to list available model IDs for a provider.
+
+```
+anthropic/claude-sonnet-4-5     → calls Anthropic API
+openai/gpt-4o                   → calls OpenAI API
+litellm/my-model                → calls LiteLLM proxy at localhost:4000
+vercel/openai/gpt-4o            → calls Vercel AI Gateway (three-part format)
+```
+
+### Custom API endpoint (`apiBaseUrl`)
+
+Set `apiBaseUrl` to route requests through a custom OpenAI-compatible endpoint (LiteLLM proxy, internal gateway, etc.):
+
+```json
+{
+  "model": "litellm/gpt-4o",
+  "apiBaseUrl": "https://llm.internal.company.com/v1"
+}
+```
+
+When `apiBaseUrl` is set, BatEye routes all LLM traffic through that URL. The model name after the prefix must match what your endpoint exposes. See [Providers → LiteLLM proxy](./providers.md#litellm-proxy) and [Providers → Custom gateway](./providers.md#custom-openai-compatible-gateway) for examples.
+
+### Transport override
+
+The `transport` field is usually left as `"auto"` — BatEye infers the transport from the model prefix. Set it explicitly only when routing through a gateway that differs from the model's native provider:
+
+```json
+{
+  "model": "anthropic/claude-sonnet-4-5",
+  "transport": "vercel"
+}
+```
+
+This sends Anthropic model requests through the Vercel AI Gateway instead of calling Anthropic directly.
+
 ### Vercel AI Gateway
 
 For Vercel-routed models, use `VERCEL_OIDC_TOKEN` instead of an API key:

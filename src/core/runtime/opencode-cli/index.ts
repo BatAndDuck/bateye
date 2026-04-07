@@ -1053,6 +1053,14 @@ export class OpenCodeCLIRuntime implements IRuntime {
   async listModels(_provider: string, _apiKey: string, _apiBaseUrl?: string): Promise<string[]> {
     try {
       const normalizedProvider = normalizeTransport(_provider);
+
+      // For custom API base URLs (e.g. LiteLLM, internal proxies), fetch models directly
+      // from the OpenAI-compatible /models endpoint instead of asking OpenCode's static catalogue.
+      if (_apiBaseUrl?.trim() && normalizedProvider !== 'azure' && normalizedProvider !== 'vercel') {
+        const { fetchOpenAICompatibleModels } = await import('../provider-routing');
+        return fetchOpenAICompatibleModels(_apiKey, _apiBaseUrl);
+      }
+
       const server = await getServer({
         model: `${normalizedProvider}/model`,
         transport: normalizedProvider,
@@ -1070,16 +1078,12 @@ export class OpenCodeCLIRuntime implements IRuntime {
         30_000,
       );
       const allowedProviderIds = new Set<string>();
-      if (_apiBaseUrl?.trim() && normalizedProvider !== 'azure' && normalizedProvider !== 'vercel') {
-        allowedProviderIds.add('openai');
-      } else {
-        allowedProviderIds.add(normalizedProvider);
-        if (normalizedProvider === 'google') {
-          allowedProviderIds.add('gemini');
-        }
-        if (normalizedProvider === 'gemini') {
-          allowedProviderIds.add('google');
-        }
+      allowedProviderIds.add(normalizedProvider);
+      if (normalizedProvider === 'google') {
+        allowedProviderIds.add('gemini');
+      }
+      if (normalizedProvider === 'gemini') {
+        allowedProviderIds.add('google');
       }
 
       return providers.providers
