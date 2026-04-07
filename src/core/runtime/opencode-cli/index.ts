@@ -906,9 +906,12 @@ export class OpenCodeCLIRuntime implements IRuntime {
               + ` Check that OPENAI_BASE_URL is reachable and the model supports function/tool calls.`,
             );
           }
+          logRuntimeDebug(
+            `[opencode]${labelTag} Raw response dump (first 500 chars): ${JSON.stringify(response).slice(0, 500)}`,
+          );
           throw new Error(
             `OpenCode returned an invalid response structure (info=${typeof response?.info}, parts=${typeof response?.parts}). `
-            + `Model: ${target.transport}/${target.modelId}. Raw: ${JSON.stringify(response).slice(0, 500)}`
+            + `Model: ${target.transport}/${target.modelId}.`
           );
         }
 
