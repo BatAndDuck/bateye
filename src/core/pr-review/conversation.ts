@@ -107,7 +107,7 @@ export function filterAlreadyPosted(
       // An existing inline comment on the exact same location means the finding
       // was already posted (regardless of resolution state).
       if (comment.path === finding.filePath && comment.line === finding.startLine) {
-        return false;
+        return true;
       }
 
       for (const existingTitleTokens of titleTokenSets) {

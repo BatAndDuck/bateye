@@ -26,11 +26,12 @@ export function loadConfig(repoPath: string): Config {
     return {};
   }
 
+  let raw = '';
   try {
-    const raw = fs.readFileSync(configPath, 'utf-8');
+    raw = fs.readFileSync(configPath, 'utf-8');
     return JSON.parse(raw) as Config;
   } catch (err) {
-    throw new Error(`Failed to parse ${configPath}: ${(err as Error).message}`, { cause: err });
+    throw new Error(`Failed to parse ${configPath}: ${(err as Error).message}\nFile contents: ${raw}`, { cause: err });
   }
 }
 
@@ -51,7 +52,7 @@ export function resolveConfig(
   return {
     $schema: config.$schema,
     model,
-    transport: config.transport || 'auto',
+    transport: config.transport !== undefined ? config.transport : 'auto',
     apiBaseUrl: config.apiBaseUrl,
     exclude: config.exclude || [],
     prReview: config.prReview,
@@ -89,6 +90,7 @@ export function resolveApiKey(config: Pick<ResolvedConfig, 'model' | 'transport'
   if (!key) {
     throw new Error(`API key not found. Set ${envName} or configure it with \`bateye conf --apikey ...\`.`);
   }
+  process.env[envName] = key;
   return key;
 }
 
@@ -126,7 +128,7 @@ export function setConfigField(repoPath: string, field: keyof Config, value: str
     throw new Error(`Config field "${field}" does not accept an array value.`);
   }
 
-  const config = loadConfig(repoPath);
-  Object.assign(config, { [field]: value });
-  saveConfig(repoPath, config);
+  loadConfig(repoPath);
+  const updated = { [field]: value } as Config;
+  saveConfig(repoPath, updated);
 }

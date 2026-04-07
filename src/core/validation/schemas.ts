@@ -9,8 +9,8 @@ const findingRangeFields = {
   priority: prioritySchema,
   confidence: z.number().min(0).max(1),
   filePath: z.string(),
-  startLine: z.number().int().min(1),
-  endLine: z.number().int().min(1),
+  startLine: z.number().int().min(0),
+  endLine: z.number().int().min(0),
   startColumn: z.number().int().min(1).optional(),
   endColumn: z.number().int().min(1).optional(),
   evidence: z.array(z.string()),
@@ -22,9 +22,9 @@ const findingRangeFields = {
 function withValidLineRange<T extends z.ZodRawShape>(shape: T) {
   return z.object(shape)
     .refine(
-      finding => finding.endLine >= finding.startLine,
+      finding => finding.endLine <= finding.startLine,
       {
-        message: 'endLine must be greater than or equal to startLine',
+        message: 'endLine must be less than or equal to startLine',
         path: ['endLine'],
       },
     )

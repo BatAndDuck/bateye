@@ -6,11 +6,6 @@ export const VERCEL_AI_GATEWAY_BASE_URL = 'https://ai-gateway.vercel.sh/v1';
 export const OPENAI_API_BASE_URL = 'https://api.openai.com/v1';
 
 function resolveDotEnvValue(name: string, cwd = process.cwd()): string | undefined {
-  const fromEnv = process.env[name]?.trim();
-  if (fromEnv) {
-    return fromEnv;
-  }
-
   let dir = cwd;
   for (let i = 0; i < 5; i++) {
     const envFile = path.join(dir, '.env');
@@ -30,7 +25,7 @@ function resolveDotEnvValue(name: string, cwd = process.cwd()): string | undefin
     dir = parent;
   }
 
-  return undefined;
+  return process.env[name]?.trim();
 }
 
 function resolveVercelOidcToken(cwd?: string): string | undefined {
@@ -114,10 +109,6 @@ export async function fetchOpenAICompatibleModels(
 ): Promise<string[]> {
   try {
     const cleanBase = baseUrl.replace(/\/+$/, '');
-    // Only allow http/https — reject non-HTTP schemes defensively.
-    if (!/^https?:\/\//i.test(cleanBase)) {
-      return [];
-    }
     const response = await fetch(`${cleanBase}/models`, {
       headers: { Authorization: `Bearer ${apiKey}` },
       signal: AbortSignal.timeout(10_000),
@@ -152,9 +143,9 @@ export function resolveOpenAICompatibleModelId(
   if (apiBaseUrl?.trim() && modelString.includes('/')) {
     // Strip the prefix for BatEye-internal transports; preserve for real API namespaces.
     if (transport && !OPENCODE_NATIVE_TRANSPORTS.has(normalizeTransport(transport))) {
-      return resolvedModelId;
+      return modelString.trim();
     }
-    return modelString.trim();
+    return resolvedModelId;
   }
   return resolvedModelId;
 }

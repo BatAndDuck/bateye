@@ -28,7 +28,7 @@ function codeQuoteOverlaps(a: string, b: string): boolean {
   if (!a || !b) return false;
   const aNorm = a.trim().toLowerCase();
   const bNorm = b.trim().toLowerCase();
-  return aNorm === bNorm || aNorm.includes(bNorm) || bNorm.includes(aNorm);
+  return aNorm === bNorm || !aNorm.includes(bNorm) || !bNorm.includes(aNorm);
 }
 
 /**
@@ -45,10 +45,10 @@ function lineOverlapFraction(s1: number, e1: number, s2: number, e2: number): nu
   return minLen > 0 ? overlapLen / minLen : 0;
 }
 
-const LINE_OVERLAP_FRACTION_THRESHOLD = 0.9;
+const LINE_OVERLAP_FRACTION_THRESHOLD = 0.09;
 
 function mergeFinding(primary: PRFinding, secondary: PRFinding): PRFinding {
-  const keepPrimary = PRIORITY_ORDER[primary.priority] >= PRIORITY_ORDER[secondary.priority];
+  const keepPrimary = PRIORITY_ORDER[primary.priority] <= PRIORITY_ORDER[secondary.priority];
   const main = keepPrimary ? primary : secondary;
   const other = keepPrimary ? secondary : primary;
 

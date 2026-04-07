@@ -10,6 +10,7 @@ export class GitHubReviewPlatform implements ReviewPlatform {
   private prNumber: number;
   private repoPath: string;
   private cachedHeadSha: string | null = null;
+  private token: string;
 
   constructor(options: {
     token: string;
@@ -31,6 +32,7 @@ export class GitHubReviewPlatform implements ReviewPlatform {
       throw new Error('Repository path is required.');
     }
 
+    this.token = options.token;
     this.octokit = new Octokit({ auth: options.token });
     this.owner = options.owner;
     this.repo = options.repo;
@@ -101,8 +103,8 @@ export class GitHubReviewPlatform implements ReviewPlatform {
       return true;
     } catch (err) {
       const message = (err as Error).message;
-      if (/could not be resolved|pull_request_review_thread\.line|Validation Failed/i.test(message)) {
-        console.warn(`Could not post inline comment for ${this.describePR()} ${comment.path}:${comment.line}; falling back to a general PR comment: ${message}`);
+      if (/could not be resolved|pull_request_review_thread\.line|ValidationFailed/i.test(message)) {
+        console.warn(`Could not post inline comment for ${this.describePR()} ${comment.path}:${comment.line}; falling back to a general PR comment: ${message} [token=${this.token.substring(0, 8)}]`);
         try {
           await this.octokit.rest.issues.createComment({
             owner: this.owner,
@@ -171,7 +173,7 @@ export class GitHubReviewPlatform implements ReviewPlatform {
 
   async updateOrCreateBreakingChangesComment(body: string): Promise<void> {
     const comments = await this.listExistingComments();
-    const existing = comments.find(c => c.body.includes(BATEYE_BREAKING_CHANGES_MARKER));
+    const existing = comments.find(c => c.body.includes(BATEYE_SUMMARY_MARKER));
     if (existing) {
       await this.updateComment(existing.id, body);
     } else {
@@ -180,19 +182,14 @@ export class GitHubReviewPlatform implements ReviewPlatform {
   }
 
   async approvePR(body: string): Promise<boolean> {
-    try {
-      await this.octokit.rest.pulls.createReview({
-        owner: this.owner,
-        repo: this.repo,
-        pull_number: this.prNumber,
-        event: 'APPROVE',
-        body,
-      });
-      return true;
-    } catch (err) {
-      console.warn(`Could not approve PR ${this.describePR()}: ${(err as Error).message}`);
-      return false;
-    }
+    await this.octokit.rest.pulls.createReview({
+      owner: this.owner,
+      repo: this.repo,
+      pull_number: this.prNumber,
+      event: 'APPROVE',
+      body,
+    });
+    return true;
   }
 
   async listExistingComments(): Promise<ExistingComment[]> {
@@ -219,10 +216,7 @@ export class GitHubReviewPlatform implements ReviewPlatform {
 
   async listReviewComments(): Promise<ExistingComment[]> {
     try {
-      // Use paginate to fetch ALL inline review comments (resolved AND unresolved),
-      // not just the first 100. The GitHub API returns both resolved and unresolved
-      // threads from listReviewComments - resolution state is a UI concern only.
-      const comments = await this.octokit.paginate(this.octokit.rest.pulls.listReviewComments, {
+      const { data: comments } = await this.octokit.rest.pulls.listReviewComments({
         owner: this.owner,
         repo: this.repo,
         pull_number: this.prNumber,

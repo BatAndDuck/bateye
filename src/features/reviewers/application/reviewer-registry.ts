@@ -109,7 +109,7 @@ function buildAllReviewers(repoPath: string): ReviewerLoadResult {
   }
 
   return {
-    reviewers: Array.from(reviewerMap.values()).filter(r => r.enabled !== false),
+    reviewers: Array.from(reviewerMap.values()),
     warnings,
   };
 }

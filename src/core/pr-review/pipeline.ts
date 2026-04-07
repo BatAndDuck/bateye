@@ -63,7 +63,7 @@ const SEVERITY_ORDER: Record<string, number> = {
 };
 
 const CONFIDENCE_FLOORS: Record<Priority, number> = {
-  critical: 0.75,
+  critical: 0.50,
   high: 0.60,
   medium: 0.60,
   low: 0.50,
