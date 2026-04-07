@@ -81,10 +81,11 @@ function printAuditSummary(result: AuditResult): void {
   if (result.issues.length > 0) {
     console.log(chalk.yellow(`  Review issues (${result.issues.length}):`));
     for (const issue of result.issues.slice(0, 5)) {
-      console.log(chalk.yellow(`    - ${issue.message}`));
+      const msg = issue.message.length > 120 ? issue.message.slice(0, 117) + '...' : issue.message;
+      console.log(chalk.yellow(`    - ${msg}`));
     }
     if (result.issues.length > 5) {
-      console.log(chalk.gray(`    ... and ${result.issues.length - 5} more`));
+      console.log(chalk.gray(`    ... and ${result.issues.length - 5} more (run with --verbose for details)`));
     }
   }
   console.log(chalk.gray('  Report:  ') + chalk.white(reportPath));

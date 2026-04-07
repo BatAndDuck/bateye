@@ -2,6 +2,9 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { runPRReview } from '../../core/pr-review/runner';
 import { PRReviewResult } from '../../types/index';
+import { briefError, categorizeError, ISSUE_TRACKER_URL } from '../../core/output/user-error';
+import { formatErrorWithCauses } from '../../core/runtime/error-format';
+import { isRuntimeDebugEnabled } from '../../core/runtime/debug';
 
 export interface PRReviewCommandOptions {
   base?: string;
@@ -67,11 +70,20 @@ export async function runPRReviewCommand(repoPath: string, options: PRReviewComm
       },
     });
   } catch (err) {
-    const message = err instanceof Error ? err.stack || err.message : String(err);
+    const verbose = isRuntimeDebugEnabled();
+    const fullMsg = formatErrorWithCauses(err instanceof Error ? err : new Error(String(err)));
+    const displayMsg = verbose ? fullMsg : briefError(err);
     if (spinner) {
-      spinner.fail(chalk.red(`PR review failed: ${message}`));
+      spinner.fail(chalk.red(`PR review failed: ${displayMsg}`));
     } else {
-      console.error(chalk.red(`PR review failed: ${message}`));
+      console.error(chalk.red(`✖ PR review failed: ${displayMsg}`));
+    }
+    if (!verbose) {
+      console.log(chalk.gray('  Run with --verbose for full diagnostic details.'));
+    }
+    const { category } = categorizeError(fullMsg);
+    if (category === 'unknown') {
+      console.log(chalk.gray(`  Report issues: ${ISSUE_TRACKER_URL}`));
     }
     process.exit(1);
   }

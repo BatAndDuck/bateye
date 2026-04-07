@@ -1,5 +1,8 @@
 import chalk from 'chalk';
 import ora from 'ora';
+import { briefError, categorizeError, ISSUE_TRACKER_URL } from '../../../core/output/user-error';
+import { formatErrorWithCauses } from '../../../core/runtime/error-format';
+import { isRuntimeDebugEnabled } from '../../../core/runtime/debug';
 
 export interface CliTaskOptions<TResult> {
   title: string;
@@ -52,11 +55,26 @@ export async function runCliTask<TResult>(options: CliTaskOptions<TResult>): Pro
       console.log(chalk.green(`√ ${options.successText}`));
     }
   } catch (err) {
+    const verbose = isRuntimeDebugEnabled();
+    const fullMsg = formatErrorWithCauses(err instanceof Error ? err : new Error(String(err)));
+    const displayMsg = verbose ? fullMsg : briefError(err);
+
     if (spinner) {
-      spinner.fail(chalk.red(`${options.errorPrefix}: ${(err as Error).message}`));
+      spinner.fail(chalk.red(`${options.errorPrefix}: ${displayMsg}`));
     } else {
-      console.error(chalk.red(`${options.errorPrefix}: ${(err as Error).message}`));
+      console.error(chalk.red(`✖ ${options.errorPrefix}: ${displayMsg}`));
     }
+
+    if (!verbose) {
+      console.log(chalk.gray('  Run with --verbose for full diagnostic details.'));
+    }
+
+    // For unrecognised errors, point to the issue tracker
+    const { category } = categorizeError(fullMsg);
+    if (category === 'unknown') {
+      console.log(chalk.gray(`  Report issues: ${ISSUE_TRACKER_URL}`));
+    }
+
     process.exit(1);
   }
 }
