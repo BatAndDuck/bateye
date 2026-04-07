@@ -110,6 +110,8 @@ bateye conf --model openai/gpt-5.4-nano --apikey <your-key>
 
 `bateye conf --apikey` stores the key in `~/.bateye/credentials.json` with restrictive local file permissions. It is not encrypted, so prefer environment variables or short-lived keys on shared machines.
 
+If you are using an OpenAI-compatible gateway instead of api.openai.com, set `apiBaseUrl` to that gateway's `/v1` base. For Azure AI Foundry, use your resource endpoint with `/openai` in config and BatEye will normalize the OpenCode review path to `/openai/v1`.
+
 Pick a model, exclude noisy paths, disable reviewers that don't apply to your stack. [Full config reference →](./docs/configuration.md)
 
 ---
@@ -155,6 +157,19 @@ bateye conf --model litellm/gpt-4o --apikey sk-your-litellm-key
 # Remote or non-default host — set apiBaseUrl and use the model name your proxy exposes:
 bateye config set apiBaseUrl https://your-host/v1
 bateye conf --model litellm/gpt-4o --apikey sk-your-key
+```
+
+**Azure AI Foundry / Azure OpenAI compatible endpoint**:
+
+```bash
+export BATEYE_LLM_MODEL_API_KEY=<your-azure-key>
+
+# Use the deployment name after the provider prefix.
+bateye conf --model azure/gpt-5.4-nano
+
+# Set your Azure endpoint root with /openai.
+# BatEye uses the correct OpenAI-compatible /openai/v1 path for agentic reviews.
+bateye config set apiBaseUrl https://<resource>.cognitiveservices.azure.com/openai
 ```
 
 Anthropic · OpenAI · OpenRouter · Google · DeepSeek · Groq · Cerebras · Azure · **LiteLLM proxy** · **Ollama (local, free)** · **LM Studio (local, free)** · Vercel AI Gateway · [20+ providers →](./docs/providers.md)
