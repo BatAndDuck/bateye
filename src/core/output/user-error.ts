@@ -99,7 +99,7 @@ export function briefError(err: unknown): string {
   const full = formatErrorWithCauses(err instanceof Error ? err : new Error(String(err)));
   if (isRuntimeDebugEnabled()) return full;
 
-  const { brief, hint, category } = categorizeError(full);
+  const { brief, hint } = categorizeError(full);
   const hintSuffix = hint ? ` — ${hint}` : '';
   return brief + hintSuffix;
 }
