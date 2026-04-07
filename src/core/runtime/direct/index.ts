@@ -397,13 +397,18 @@ function prepareModel(options: RunOptions): PreparedModel {
       const provider = createAzure({
         apiKey: options.apiKey,
         apiVersion: process.env['AZURE_API_VERSION'] || '2024-02-01',
+        // useDeploymentBasedUrls produces {baseURL}/deployments/{model}/chat/completions,
+        // which is the correct URL structure for both Azure OpenAI and Azure AI Foundry.
+        // Without this flag, @ai-sdk/azure v3 generates {baseURL}/v1/responses (Responses API)
+        // which is not supported on cognitiveservices.azure.com endpoints.
+        useDeploymentBasedUrls: true,
         ...(explicitApiBaseUrl
           ? { baseURL: explicitApiBaseUrl }
           : { resourceName }),
       });
 
       return {
-        model: provider(target.modelId),
+        model: provider.chat(target.modelId),
         transport: normalizedTransport,
         modelId: target.modelId,
         baseURL: explicitApiBaseUrl,
