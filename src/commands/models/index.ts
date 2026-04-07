@@ -24,8 +24,10 @@ export async function runModels(repoPath: string, provider?: string, all?: boole
   let apiKey: string;
   try {
     apiKey = resolveApiKey(config, repoPath);
-  } catch {
+  } catch (err) {
     apiKey = '';
+    console.log(chalk.yellow(`  ! ${(err as Error).message}`));
+    console.log(chalk.gray('    Model listing will be limited without an API key.\n'));
   }
 
   // Determine the effective provider for the configured model.
