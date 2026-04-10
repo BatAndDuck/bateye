@@ -55,6 +55,78 @@ function normalizeBaseUrl(baseURL?: string): string | undefined {
   return trimmed.replace(/\/+$/, '');
 }
 
+/**
+ * Maps a generic reasoningEffort string to Google Gemini's token-budget parameter.
+ * Returns undefined for unrecognized values so the whole Google provider-options block is omitted.
+ */
+function effortToGoogleBudget(effort: string): number | undefined {
+  switch (effort.toLowerCase()) {
+    case 'minimal':
+    case 'none':
+      return 0;
+    case 'low':
+      return 2048;
+    case 'medium':
+      return 8192;
+    case 'high':
+      return 24576;
+    case 'xhigh':
+      return 32768;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Per-provider options passed to generateObject/generateText. The Vercel AI SDK
+ * expects a `SharedV3ProviderOptions` (Record<string, JSONObject>) but that type
+ * rejects arbitrary `unknown` nesting, so we model the shape explicitly and cast
+ * at the call site.
+ */
+type ProviderOptionsMap = Record<string, Record<string, unknown>>;
+
+/**
+ * Builds a Vercel AI SDK `providerOptions` object for the given transport and reasoning effort.
+ * Returns undefined when effort is falsy or the transport does not support reasoning — in
+ * which case the caller must omit `providerOptions` entirely from the generateObject call.
+ */
+export function buildProviderOptions(
+  transport: string,
+  effort: string | undefined,
+): ProviderOptionsMap | undefined {
+  if (!effort) {
+    return undefined;
+  }
+
+  switch (normalizeTransport(transport)) {
+    case 'openai':
+    case 'azure':
+      return { openai: { reasoningEffort: effort } };
+    case 'vercel':
+      // Vercel AI Gateway is OpenAI-compatible; the OpenAI provider-options
+      // shape passes through to the gateway for reasoning-capable models.
+      return { openai: { reasoningEffort: effort } };
+    case 'openrouter':
+      return { openrouter: { reasoning: { effort } } };
+    case 'groq':
+      return { groq: { reasoningEffort: effort } };
+    case 'anthropic':
+      // Claude 4.6+ adaptive thinking. Older Claude versions will reject the
+      // call — per user decision, we fail loudly rather than silently fall back.
+      return { anthropic: { thinking: { type: 'adaptive', effort } } };
+    case 'google':
+    case 'gemini': {
+      const budget = effortToGoogleBudget(effort);
+      if (budget === undefined) {
+        return undefined;
+      }
+      return { google: { thinkingConfig: { thinkingBudget: budget } } };
+    }
+    default:
+      return undefined;
+  }
+}
+
 function truncateWithMarker(text: string, maxChars: number, label: string): string {
   if (text.length <= maxChars) {
     return text;
@@ -272,7 +344,16 @@ async function fallbackGenerateText<T>(
     `[vercel-ai-sdk]${labelTag} Falling back to text generation + JSON extraction for ${callId}`
   );
 
-  const textResult = await generateText({
+  const providerOptions = buildProviderOptions(prepared.transport, options.reasoningEffort);
+
+  // Mirrors `generateObjectUntyped` — the SDK's `providerOptions` expects a
+  // deeply-typed JSONObject shape but validates per-provider at runtime, so we
+  // relax the compile-time signature here.
+  const generateTextUntyped = generateText as unknown as (
+    opts: Record<string, unknown>,
+  ) => Promise<{ text?: string; usage?: { inputTokens?: number; outputTokens?: number } }>;
+
+  const textResult = await generateTextUntyped({
     model: prepared.model,
     system: boundedPrompts.systemPrompt,
     prompt: boundedPrompts.userMessage,
@@ -280,6 +361,7 @@ async function fallbackGenerateText<T>(
     ...(!omitTemperature && options.temperature !== undefined ? { temperature: options.temperature } : {}),
     timeout: options.timeoutMs ?? MAX_ORCHESTRATOR_TIMEOUT_MS,
     maxRetries: 0,
+    ...(providerOptions ? { providerOptions } : {}),
   });
 
   const rawText = textResult.text ?? '';
@@ -296,7 +378,7 @@ async function fallbackGenerateText<T>(
   const repair = buildStructureRepairPrompt(jsonStr, formatZodErrors(parsed.error));
 
   try {
-    const repairResult = await generateText({
+    const repairResult = await generateTextUntyped({
       model: prepared.model,
       system: repair.systemPrompt,
       prompt: repair.userMessage,
@@ -304,6 +386,7 @@ async function fallbackGenerateText<T>(
       ...(!omitTemperature && options.temperature !== undefined ? { temperature: options.temperature } : {}),
       timeout: Math.min(options.timeoutMs ?? MAX_ORCHESTRATOR_TIMEOUT_MS, 60_000),
       maxRetries: 0,
+      ...(providerOptions ? { providerOptions } : {}),
     });
 
     const repairedJson = extractJsonFromText(repairResult.text ?? '');
@@ -493,6 +576,7 @@ export class DirectAIRuntime implements IRuntime {
       };
     };
 
+    const providerOptions = buildProviderOptions(prepared.transport, options.reasoningEffort);
     const generateObjectOpts = {
       model: prepared.model,
       schema,
@@ -504,6 +588,7 @@ export class DirectAIRuntime implements IRuntime {
       timeout: options.timeoutMs ?? MAX_ORCHESTRATOR_TIMEOUT_MS,
       maxRetries: 0,
       experimental_repairText: buildRepairTextFunction(options, prepared.model, callId),
+      ...(providerOptions ? { providerOptions } : {}),
     };
 
     // Tier 1: generateObject with all options (native structured output)
