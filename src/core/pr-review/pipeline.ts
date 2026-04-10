@@ -304,10 +304,13 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   log('Loading reviewers...');
   const { reviewers } = loadReviewersForMode(repoPath, 'pr-review', config);
 
-  // Build the reasoning-override list once. Includes config.model (used by orchestrator
-  // and semantic verifier) plus every reviewer's model override, deduped by model id.
-  // OpenCodeCLIRuntime needs every model name upfront so it can seed opencode.json
-  // before spawning its server. Undefined when reasoningEffort isn't configured.
+  // Build the reasoning-override list once. Includes config.model plus every reviewer's
+  // model override, deduped by model id.
+  //   reasoningEffort (scalar) — passed to structured calls (orchestrator, semantic
+  //     verifier); those use DirectAIRuntime which reads options.reasoningEffort directly.
+  //   reasoningOverrides (list) — consumed only by OpenCodeCLIRuntime, which needs every
+  //     model name upfront so it can seed opencode.json before spawning its server.
+  // Undefined when reasoningEffort isn't configured.
   // Guard against non-string values that could appear in hand-edited config files.
   const reasoningEffort = typeof config.reasoningEffort === 'string' && config.reasoningEffort
     ? config.reasoningEffort
