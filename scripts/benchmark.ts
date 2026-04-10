@@ -62,10 +62,21 @@ if (!llmApiKey) {
 const GITHUB_SLUG_RE = /^[a-zA-Z0-9_.-]+$/;
 
 function parsePrUrl(url: string): { owner: string; repo: string; prNumber: number } {
-  const match = url.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
-  if (!match) {
-    console.error(`Error: Cannot parse GitHub PR URL: ${url}`);
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    console.error(`Error: Cannot parse URL: ${url}`);
     console.error('Expected format: https://github.com/{owner}/{repo}/pull/{number}');
+    process.exit(1);
+  }
+  if (parsed.protocol !== 'https:' || parsed.hostname !== 'github.com') {
+    console.error(`Error: URL must be https://github.com/... — got: ${url}`);
+    process.exit(1);
+  }
+  const match = parsed.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)$/);
+  if (!match) {
+    console.error(`Error: URL path does not match /owner/repo/pull/number — got: ${parsed.pathname}`);
     process.exit(1);
   }
   const [, owner, repo, prStr] = match;
@@ -98,13 +109,27 @@ async function fetchPrInfo(
     console.error(`Error: GitHub API returned ${res.status} for PR ${prNumber}: ${body}`);
     process.exit(1);
   }
-  const data = await res.json() as { base: { ref: string }; head: { sha: string } };
-  return { baseRef: data.base.ref, headSha: data.head.sha };
+  const data = await res.json();
+  if (typeof data?.base?.ref !== 'string' || typeof data?.head?.sha !== 'string') {
+    console.error(`Error: Unexpected GitHub API response shape for PR ${prNumber}`);
+    process.exit(1);
+  }
+  return { baseRef: data.base.ref as string, headSha: data.head.sha as string };
 }
 
-function gitExec(args: string[], opts?: { cwd?: string }): void {
-  // Use spawnSync so args are passed directly to git — no shell interpolation
-  const result = spawnSync('git', args, { stdio: 'inherit', ...(opts ?? {}) });
+function gitExec(args: string[], opts?: { cwd?: string; token?: string }): void {
+  // Use spawnSync so args are passed directly to git — no shell interpolation.
+  // When a token is provided, inject it via GIT_CONFIG_* env vars so it never
+  // appears in the command args or gets written into .git/config.
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  if (opts?.token) {
+    const encoded = Buffer.from(`x-access-token:${opts.token}`).toString('base64');
+    env['GIT_CONFIG_COUNT'] = '1';
+    env['GIT_CONFIG_KEY_0'] = 'http.https://github.com/.extraheader';
+    env['GIT_CONFIG_VALUE_0'] = `Authorization: Basic ${encoded}`;
+  }
+  const { cwd } = opts ?? {};
+  const result = spawnSync('git', args, { stdio: 'inherit', env, ...(cwd ? { cwd } : {}) });
   if (result.status !== 0) {
     throw new Error(`git ${args[0]} failed with exit code ${result.status}`);
   }
@@ -237,9 +262,9 @@ async function main(): Promise<void> {
   console.log(`  Temp dir: ${tmpDir}`);
 
   try {
-    // Clone and checkout PR branch — use spawnSync so owner/repo/token are never shell-interpolated
+    // Clone and checkout PR branch — token passed via GIT_CONFIG env vars, never in the URL or args
     console.log('\nCloning repository…');
-    gitExec(['clone', '--depth', '50', `https://${ghToken}@github.com/${owner}/${repo}`, tmpDir]);
+    gitExec(['clone', '--depth', '50', `https://github.com/${owner}/${repo}`, tmpDir], { token: ghToken! });
 
     console.log(`Fetching PR #${prNumber}…`);
     gitExec(['fetch', 'origin', `pull/${prNumber}/head:pr-${prNumber}`], { cwd: tmpDir });
