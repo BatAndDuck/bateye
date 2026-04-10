@@ -109,12 +109,17 @@ async function fetchPrInfo(
     console.error(`Error: GitHub API returned ${res.status} for PR ${prNumber}: ${body}`);
     process.exit(1);
   }
-  const data = await res.json();
-  if (typeof data?.base?.ref !== 'string' || typeof data?.head?.sha !== 'string') {
+  const data = await res.json() as unknown;
+  const d = data as Record<string, unknown>;
+  if (typeof (d?.['base'] as Record<string, unknown>)?.['ref'] !== 'string' ||
+      typeof (d?.['head'] as Record<string, unknown>)?.['sha'] !== 'string') {
     console.error(`Error: Unexpected GitHub API response shape for PR ${prNumber}`);
     process.exit(1);
   }
-  return { baseRef: data.base.ref as string, headSha: data.head.sha as string };
+  return {
+    baseRef: ((d['base'] as Record<string, unknown>)['ref']) as string,
+    headSha: ((d['head'] as Record<string, unknown>)['sha']) as string,
+  };
 }
 
 function gitExec(args: string[], opts?: { cwd?: string; token?: string }): void {
