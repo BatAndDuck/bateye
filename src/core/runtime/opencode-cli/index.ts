@@ -172,6 +172,24 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   }
 }
 
+/**
+ * Best-effort POST /session/:id/abort. OpenCode's abort endpoint cancels any in-flight
+ * model request for the given session so we don't keep burning tokens on a call we
+ * already gave up on (timeout, retry replacement, SIGINT). Always safe to call; failures
+ * are swallowed because the caller will typically proceed with DELETE /session/:id next.
+ */
+async function abortSession(url: string, sessionId: string, headers: Record<string, string>): Promise<void> {
+  try {
+    await fetchWithTimeout(
+      `${url}/session/${sessionId}/abort`,
+      { method: 'POST', headers },
+      5_000,
+    );
+  } catch {
+    // Best-effort; proceed with DELETE regardless.
+  }
+}
+
 type OpenCodeSession = {
   id: string;
 };
@@ -214,6 +232,15 @@ type OpenCodeMessageResponse = {
 let activeServerPromise: Promise<OpenCodeServerHandle> | null = null;
 let activeServerSignature: string | null = null;
 let shutdownHooksRegistered = false;
+
+/**
+ * Registry of live session IDs keyed by session ID. Populated on session creation and
+ * removed in the `finally` block of executePrompt. Used by the shutdown hook to abort
+ * any in-flight model work before closing the server, so SIGINT/SIGTERM does not leave
+ * the upstream provider burning credit on doomed calls.
+ */
+type LiveSession = { url: string; headers: Record<string, string> };
+const activeSessions = new Map<string, LiveSession>();
 
 /**
  * Attempts to extract cumulative token usage from an OpenCode message response.
@@ -652,6 +679,44 @@ async function startServer(env: NodeJS.ProcessEnv, readinessTimeoutMs = 30_000):
   // slow/thinking models that can take many minutes between SSE chunks.
   const CHUNK_TIMEOUT_MS = 3_600_000; // 1 hour
   const noTimeoutOpts = { options: { chunkTimeout: CHUNK_TIMEOUT_MS } };
+  // BatEye-owned OpenCode agents. These are injected into the temp config so that
+  // reviewer sessions run with bounded steps and a read-only permission profile.
+  // `bateye-review` is the default standard-mode agent (no subagents allowed).
+  // `bateye-review-deep` allows the `explore` subagent only, for escalated runs
+  // where direct file inspection is insufficient. Both are primary agents so they
+  // can be selected via the `agent` field on session messages.
+  const bashAllowlist = {
+    '*': 'deny',
+    'git show*': 'allow',
+    'git log*': 'allow',
+    'rg *': 'allow',
+  } as const;
+  const bateyeAgents = {
+    'bateye-review': {
+      mode: 'primary',
+      description: 'Read-only PR review with bounded investigation',
+      temperature: 0.1,
+      steps: 10,
+      permission: {
+        edit: 'deny',
+        webfetch: 'deny',
+        task: { '*': 'deny' },
+        bash: bashAllowlist,
+      },
+    },
+    'bateye-review-deep': {
+      mode: 'primary',
+      description: 'Deep PR review with explore-only delegation',
+      temperature: 0.1,
+      steps: 14,
+      permission: {
+        edit: 'deny',
+        webfetch: 'deny',
+        task: { '*': 'deny', explore: 'allow' },
+        bash: bashAllowlist,
+      },
+    },
+  };
   const opencodeConfig = {
     $schema: 'https://opencode.ai/config.json',
     provider: {
@@ -664,6 +729,7 @@ async function startServer(env: NodeJS.ProcessEnv, readinessTimeoutMs = 30_000):
       groq: noTimeoutOpts,
       cerebras: noTimeoutOpts,
     },
+    agent: bateyeAgents,
   };
   // Write both common filename variants so it's found regardless of OpenCode version.
   const configJson = JSON.stringify(opencodeConfig, null, 2);
@@ -734,6 +800,20 @@ async function closeActiveServer(): Promise<void> {
   }
 }
 
+async function abortAllActiveSessions(totalBudgetMs = 2_000): Promise<void> {
+  if (activeSessions.size === 0) {
+    return;
+  }
+  const snapshot = Array.from(activeSessions.entries());
+  activeSessions.clear();
+  // Fire all aborts in parallel and cap total wait so SIGINT handling stays responsive.
+  const aborts = snapshot.map(([id, session]) => abortSession(session.url, id, session.headers));
+  await Promise.race([
+    Promise.allSettled(aborts),
+    new Promise<void>(resolve => setTimeout(resolve, totalBudgetMs)),
+  ]);
+}
+
 function registerShutdownHooks(): void {
   if (shutdownHooksRegistered) {
     return;
@@ -742,7 +822,16 @@ function registerShutdownHooks(): void {
   shutdownHooksRegistered = true;
 
   const close = () => {
-    void closeActiveServer();
+    // Abort in-flight model work first so the upstream provider stops generating
+    // tokens we will discard, then shut down the server. Fire-and-forget on 'exit'
+    // since Node gives us no time there; beforeExit/SIGINT/SIGTERM all allow async.
+    void (async () => {
+      try {
+        await abortAllActiveSessions();
+      } finally {
+        await closeActiveServer();
+      }
+    })();
   };
 
   process.once('beforeExit', close);
@@ -852,6 +941,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
           body: JSON.stringify({ title: 'BatEye Review Session' }),
         }, 30_000);
         sessionID = session.id;
+        activeSessions.set(sessionID, { url: server.url, headers });
 
         // Thinking / reasoning models (e.g. deepseek-reasoner, *-thinking) do not support
         // tool_choice, which OpenCode uses internally to enforce json_schema structured output.
@@ -869,6 +959,9 @@ export class OpenCodeCLIRuntime implements IRuntime {
           system: options.systemPrompt + validationRetryNote,
           parts: [{ type: 'text', text: options.userMessage }],
         };
+        if (options.agent) {
+          messageBody.agent = options.agent;
+        }
         if (!isThinkingModel) {
           messageBody.format = {
             type: 'json_schema',
@@ -986,6 +1079,10 @@ export class OpenCodeCLIRuntime implements IRuntime {
         }
       } finally {
         if (sessionID) {
+          // Abort any in-flight model work before deleting the session. Without this, a
+          // validation failure / timeout / retry-replacement can leave the upstream
+          // provider still generating tokens we will discard.
+          await abortSession(server.url, sessionID, headers);
           try {
             await this.request<boolean>(`${server.url}/session/${sessionID}`, {
               method: 'DELETE',
@@ -994,6 +1091,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
           } catch {
             // Best-effort cleanup; stale sessions should not fail the review run.
           }
+          activeSessions.delete(sessionID);
         }
       }
     }
@@ -1010,6 +1108,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
           body: JSON.stringify({ title: 'BatEye Structure Repair' }),
         }, 30_000);
         repairSessionID = repairSession.id;
+        activeSessions.set(repairSessionID, { url: server.url, headers });
 
         logRuntimeDebug(`[opencode] Repair format=${skipStructuredOutput ? 'prompt-based' : 'json_schema'}`);
         const repairBody: Record<string, unknown> = {
@@ -1062,6 +1161,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
         logRuntimeDebug(`[opencode] ✗ AI repair call failed: ${(repairErr as Error).message.slice(0, 200)}`);
       } finally {
         if (repairSessionID) {
+          await abortSession(server.url, repairSessionID, headers);
           try {
             await this.request<boolean>(`${server.url}/session/${repairSessionID}`, {
               method: 'DELETE',
@@ -1070,6 +1170,7 @@ export class OpenCodeCLIRuntime implements IRuntime {
           } catch {
             // Best-effort cleanup
           }
+          activeSessions.delete(repairSessionID);
         }
       }
     }

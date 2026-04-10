@@ -6,12 +6,19 @@ import { RepoProfile } from '../prompts/audit';
 import { resolveConfig, resolveApiKey } from '../config/loader';
 import { loadReviewersForMode } from '../reviewers/loader';
 import { getPRReviewRuntime } from '../runtime/factory';
-import { prReviewerAnalysisSchema, PRReviewerAnalysis } from '../validation/schemas';
+import {
+  prReviewerAnalysisSchema,
+  PRReviewerAnalysis,
+  prBundleAnalysisSchema,
+  PRBundleAnalysis,
+} from '../validation/schemas';
 import {
   buildPRReviewSystemPrompt,
   buildPRReviewUserMessage,
+  buildPRBundleSystemPrompt,
   buildPRSummaryPrompt,
 } from '../prompts/pr-review';
+import { buildExecutionPlan, ExecutionGroup } from './bundle-planner';
 import { getGitDiff, getChangedFiles, getCommitSummaries, getRepoOwnerAndName, CommitSummary } from '../git/index';
 import { selectReviewers } from './orchestrator';
 import { writePRReviewResult, ensureDir } from '../output/writer';
@@ -350,27 +357,36 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
 
   const intentSummary = orchestratorResult.intentSummary;
 
-  let reviewerRunResults = await runWithConcurrency(
-    selectedReviewers,
-    MAX_CONCURRENT_PR_REVIEWERS,
-    reviewer => runPRReviewer(
-      reviewer,
-      structuredDiff,
-      currentDiffFiles,
-      currentFileContext,
-      commits,
-      repoPath,
-      config.model,
-      apiKey,
-      repoProfile,
-      config.transport,
-      config.apiBaseUrl,
-      runtime,
-      log,
-      promptLogDir,
-      intentSummary,
-    ),
+  const sharedCtx: BundleSharedContext = {
+    structuredDiff,
+    currentDiffFiles,
+    currentFileContext,
+    commits,
+    repoPath,
+    model: config.model,
+    apiKey,
+    repoProfile,
+    transport: config.transport,
+    apiBaseUrl: config.apiBaseUrl,
+    runtime,
+    log,
+    promptLogDir,
+    intentSummary,
+  };
+
+  const executionPlan = buildExecutionPlan(selectedReviewers, orchestratorResult.executionPlan);
+  log(
+    `Execution plan: ${executionPlan.length} group(s): ${executionPlan
+      .map(g => `${g.groupId}[${g.mode}](${g.reviewers.map(r => r.name).join('+')})`)
+      .join(', ')}`,
   );
+
+  const bundleResults = await runWithConcurrency(
+    executionPlan,
+    MAX_CONCURRENT_PR_REVIEWERS,
+    group => runPRBundle(group, sharedCtx),
+  );
+  let reviewerRunResults: PRReviewerRunResult[] = bundleResults.flat();
 
   // Retry failed/timed-out reviewers with reduced concurrency to avoid server saturation.
   for (let retryRound = 1; retryRound <= MAX_PR_REVIEWER_RETRIES; retryRound++) {
@@ -383,36 +399,42 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     }
     if (failedIndices.length === 0) break;
 
-    const failedReviewers = failedIndices.map(i => selectedReviewers[i]);
+    // Map each failed run result back to its source Reviewer by name. Bundle execution
+    // can split a group's reviewers across multiple PRReviewerRunResult entries, so we
+    // cannot index into `selectedReviewers` directly anymore.
+    const reviewerByName = new Map(selectedReviewers.map(r => [r.name, r]));
+    const failedReviewers = failedIndices
+      .map(i => reviewerByName.get(reviewerRunResults[i].reviewerName))
+      .filter((r): r is Reviewer => r !== undefined);
+
+    if (failedReviewers.length === 0) break;
+
     log(`Retrying ${failedReviewers.length} failed reviewer(s) (round ${retryRound}/${MAX_PR_REVIEWER_RETRIES}, concurrency ${MAX_PR_REVIEWER_RETRY_CONCURRENCY}): ${failedReviewers.map(r => r.name).join(', ')}`);
 
-    const retryResults = await runWithConcurrency(
-      failedReviewers,
+    // On retry, isolate every reviewer into its own single-reviewer group. This forces
+    // runPRBundle to short-circuit to runPRReviewer, which keeps retry semantics identical
+    // to the pre-bundle implementation.
+    const retryGroups: ExecutionGroup[] = failedReviewers.map(r => ({
+      groupId: `retry-${r.id}-r${retryRound}`,
+      mode: 'standard',
+      reason: `Retry round ${retryRound} for reviewer "${r.name}"`,
+      reviewers: [r],
+    }));
+
+    const retryBundles = await runWithConcurrency(
+      retryGroups,
       MAX_PR_REVIEWER_RETRY_CONCURRENCY,
-      reviewer => runPRReviewer(
-        reviewer,
-        structuredDiff,
-        currentDiffFiles,
-        currentFileContext,
-        commits,
-        repoPath,
-        config.model,
-        apiKey,
-        repoProfile,
-        config.transport,
-        config.apiBaseUrl,
-        runtime,
-        log,
-        promptLogDir,
-        intentSummary,
-      ),
+      group => runPRBundle(group, sharedCtx),
     );
+    const retryResults = retryBundles.flat();
 
     // Replace failed results with retry results (successful or not).
     // Mutable replacement: update the array in place.
     reviewerRunResults = [...reviewerRunResults];
     for (let j = 0; j < failedIndices.length; j++) {
-      reviewerRunResults[failedIndices[j]] = retryResults[j];
+      if (retryResults[j]) {
+        reviewerRunResults[failedIndices[j]] = retryResults[j];
+      }
     }
   }
 
@@ -782,6 +804,7 @@ async function runPRReviewer(
         temperature: 0,
         timeoutMs: MAX_PR_REVIEWER_TIMEOUT_MS,
         callLabel: `reviewer:${reviewer.name}`,
+        agent: 'bateye-review',
       },
       prReviewerAnalysisSchema,
     );
@@ -813,6 +836,225 @@ async function runPRReviewer(
       reviewerName: reviewer.name,
     });
     return { findings: [], reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError, issues };
+  }
+}
+
+/**
+ * Shared inputs that every reviewer in a PR review call needs. Passed to `runPRBundle`
+ * so it can either delegate to the per-reviewer path or build a bundle prompt without
+ * re-threading 15 positional parameters.
+ */
+interface BundleSharedContext {
+  structuredDiff: string;
+  currentDiffFiles: string[];
+  currentFileContext: string;
+  commits: CommitSummary[];
+  repoPath: string;
+  model: string;
+  apiKey: string;
+  repoProfile: RepoProfile;
+  transport: string;
+  apiBaseUrl: string | undefined;
+  runtime: IRuntime;
+  log: (msg: string) => void;
+  promptLogDir?: string;
+  intentSummary?: string;
+}
+
+/**
+ * Run a single execution group. Groups of length 1, or groups whose sole reviewer has a
+ * `tool` or `model` override, fall through to the existing per-reviewer path so tool
+ * injection and model routing behave exactly as they did before bundling.
+ *
+ * Multi-reviewer groups share one agentic OpenCode session driven by
+ * `buildPRBundleSystemPrompt`. Findings are attributed back to their source reviewer
+ * via the required `reviewerId` field on every bundle finding; any finding whose
+ * reviewerId does not match a reviewer in the group is logged and dropped (treated
+ * as a schema violation rather than a hard error so one bad attribution does not
+ * lose the rest of the bundle's findings).
+ *
+ * Token usage is split proportionally by findings-count when the model reports it;
+ * the split is flagged as `estimated: true` so downstream diagnostics do not present
+ * it as measured per-reviewer data.
+ */
+async function runPRBundle(
+  group: ExecutionGroup,
+  ctx: BundleSharedContext,
+): Promise<PRReviewerRunResult[]> {
+  // Single-reviewer groups and any group containing a tool reviewer fall back to the
+  // per-reviewer path. Tool output is injected per-reviewer into the user message and
+  // cannot safely be merged into a shared session without leaking tool context.
+  if (group.reviewers.length === 1 || group.reviewers.some(r => r.tool)) {
+    // The bundle-planner already isolates tool reviewers, so this path should only
+    // fire for length === 1. Defensive fallthrough for the unexpected case.
+    const results: PRReviewerRunResult[] = [];
+    for (const reviewer of group.reviewers) {
+      const result = await runPRReviewer(
+        reviewer,
+        ctx.structuredDiff,
+        ctx.currentDiffFiles,
+        ctx.currentFileContext,
+        ctx.commits,
+        ctx.repoPath,
+        ctx.model,
+        ctx.apiKey,
+        ctx.repoProfile,
+        ctx.transport,
+        ctx.apiBaseUrl,
+        ctx.runtime,
+        ctx.log,
+        ctx.promptLogDir,
+        ctx.intentSummary,
+      );
+      results.push(result);
+    }
+    return results;
+  }
+
+  const { log } = ctx;
+  const reviewerById = new Map(group.reviewers.map(r => [r.id, r]));
+  const reviewerNames = group.reviewers.map(r => r.name).join(', ');
+  const bundleLabel = `bundle:${group.groupId}`;
+  const agentName = group.mode === 'deep' ? 'bateye-review-deep' : 'bateye-review';
+
+  const systemPrompt = buildPRBundleSystemPrompt(
+    group.reviewers.map(r => ({ id: r.id, name: r.name, instructions: r.instructions })),
+    ctx.repoProfile,
+  );
+  const userMessage = buildPRReviewUserMessage(
+    ctx.structuredDiff,
+    ctx.currentDiffFiles,
+    ctx.currentFileContext,
+    undefined,
+    ctx.commits,
+    ctx.intentSummary,
+  );
+
+  if (ctx.promptLogDir) {
+    logPrompt(ctx.promptLogDir, `bundle-${group.groupId}`, systemPrompt, userMessage);
+  }
+
+  // Scale the timeout with bundle size because the prompt is larger and the model is
+  // producing more structured output. Cap at 3× to avoid unbounded stalls.
+  const scale = Math.min(group.reviewers.length, 3);
+  const timeoutMs = MAX_PR_REVIEWER_TIMEOUT_MS * scale;
+
+  try {
+    log(`  Running bundle: ${group.groupId} [${group.mode}] (${group.reviewers.length} reviewers: ${reviewerNames}, agent=${agentName})...`);
+    const runResult = await ctx.runtime.runAgenticReview<PRBundleAnalysis>(
+      {
+        systemPrompt,
+        userMessage,
+        model: ctx.model,
+        apiKey: ctx.apiKey,
+        repoPath: ctx.repoPath,
+        initialFiles: ctx.currentDiffFiles,
+        transport: ctx.transport,
+        apiBaseUrl: ctx.apiBaseUrl,
+        maxTokens: 8096,
+        temperature: 0,
+        timeoutMs,
+        callLabel: bundleLabel,
+        agent: agentName,
+      },
+      prBundleAnalysisSchema,
+    );
+
+    // Bucket findings by reviewerId. Findings whose reviewerId is not in the group are
+    // dropped (logged as a schema-violation warning) rather than silently reattributed.
+    const findingsByReviewer = new Map<string, PRFinding[]>();
+    for (const reviewer of group.reviewers) {
+      findingsByReviewer.set(reviewer.id, []);
+    }
+    let strayFindings = 0;
+    for (const f of runResult.data.findings) {
+      const source = reviewerById.get(f.reviewerId);
+      if (!source) {
+        strayFindings++;
+        continue;
+      }
+      const bucket = findingsByReviewer.get(source.id)!;
+      bucket.push({
+        ...f,
+        reviewerId: source.id,
+        reviewerName: source.name,
+      });
+    }
+    if (strayFindings > 0) {
+      log(`  ⚠ Bundle ${group.groupId}: dropped ${strayFindings} finding(s) with unknown reviewerId`);
+    }
+
+    // Map `perReviewer` entries by id so we can attach summaries/scores to the run
+    // results. Absent entries are fine — downstream code tolerates missing per-reviewer
+    // metadata, and `deduplicateFindings` + scoring operate on the flat finding list.
+    const perReviewerById = new Map(runResult.data.perReviewer.map(p => [p.reviewerId, p]));
+
+    // Proportional token split by findings count. When findings sum to zero we fall
+    // back to an even split. In either case we flag the result as `estimated` because
+    // the provider reported one combined total for the bundle call.
+    const totalFindings = runResult.data.findings.length;
+    const splitTokens = (reviewerId: string): TokenUsage | undefined => {
+      if (!runResult.tokensUsed) return undefined;
+      const { inputTokens, outputTokens } = runResult.tokensUsed;
+      if (group.reviewers.length <= 1) {
+        return { inputTokens, outputTokens, estimated: true };
+      }
+      const weight = totalFindings === 0
+        ? 1 / group.reviewers.length
+        : (findingsByReviewer.get(reviewerId)?.length ?? 0) / totalFindings
+            || (1 / group.reviewers.length) / 10; // tiny floor so zero-finding reviewers still attribute something
+      return {
+        inputTokens: Math.round(inputTokens * weight),
+        outputTokens: Math.round(outputTokens * weight),
+        estimated: true,
+      };
+    };
+
+    const durationSec = (runResult.durationMs / 1000).toFixed(1);
+    const tokenSuffix = runResult.tokensUsed
+      ? ` | ${formatTokenSummary(runResult.tokensUsed)}`
+      : '';
+    log(`  ✓ bundle ${group.groupId}: ${totalFindings} findings across ${group.reviewers.length} reviewer(s) (${durationSec}s${tokenSuffix})`);
+
+    return group.reviewers.map(reviewer => {
+      const findings = findingsByReviewer.get(reviewer.id) ?? [];
+      const perReviewer = perReviewerById.get(reviewer.id);
+      if (!perReviewer) {
+        log(`  ⚠ Bundle ${group.groupId}: reviewer "${reviewer.name}" missing from perReviewer array`);
+      }
+      return {
+        findings,
+        reviewerName: reviewer.name,
+        hasTool: false,
+        toolRan: false,
+        issues: [],
+        tokensUsed: splitTokens(reviewer.id),
+      };
+    });
+  } catch (err) {
+    const msg = formatErrorWithCauses(err);
+    const isTimeout = /timed out after/i.test(msg);
+    log(`  ✗ bundle ${group.groupId} failed: ${msg}`);
+    // Every reviewer in the bundle is marked failed so the retry round can reconstruct
+    // 1-reviewer groups for them on the next pass.
+    return group.reviewers.map(reviewer => ({
+      findings: [],
+      reviewerName: reviewer.name,
+      hasTool: !!reviewer.tool,
+      toolRan: false,
+      issues: [
+        {
+          severity: 'warning' as const,
+          code: isTimeout ? 'pr-reviewer-timeout' : 'pr-reviewer-failed',
+          message: isTimeout
+            ? `Bundle "${group.groupId}" (reviewer "${reviewer.name}", model=${ctx.model}) timed out: ${msg}`
+            : `Bundle "${group.groupId}" (reviewer "${reviewer.name}", model=${ctx.model}) failed: ${msg}`,
+          stage: 'run-reviewers' as const,
+          reviewerId: reviewer.id,
+          reviewerName: reviewer.name,
+        },
+      ],
+    }));
   }
 }
 
