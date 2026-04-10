@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .bateye/out/
+.bateye/benchmark/
 *.js.map
 *.d.ts.map
 .env
