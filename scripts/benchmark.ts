@@ -16,7 +16,7 @@
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import * as os from 'os';
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import { runPRReview } from '../src/core/pr-review/runner';
 import type { PRReviewResult, PRFinding } from '../src/types/index';
 
@@ -58,6 +58,9 @@ if (!llmApiKey) {
 // Helpers
 // ---------------------------------------------------------------------------
 
+// Only allow safe GitHub owner/repo characters to prevent shell injection
+const GITHUB_SLUG_RE = /^[a-zA-Z0-9_.-]+$/;
+
 function parsePrUrl(url: string): { owner: string; repo: string; prNumber: number } {
   const match = url.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
   if (!match) {
@@ -65,7 +68,16 @@ function parsePrUrl(url: string): { owner: string; repo: string; prNumber: numbe
     console.error('Expected format: https://github.com/{owner}/{repo}/pull/{number}');
     process.exit(1);
   }
-  return { owner: match[1], repo: match[2], prNumber: parseInt(match[3], 10) };
+  const [, owner, repo, prStr] = match;
+  if (!GITHUB_SLUG_RE.test(owner)) {
+    console.error(`Error: Invalid GitHub owner name: ${owner}`);
+    process.exit(1);
+  }
+  if (!GITHUB_SLUG_RE.test(repo)) {
+    console.error(`Error: Invalid GitHub repo name: ${repo}`);
+    process.exit(1);
+  }
+  return { owner, repo, prNumber: parseInt(prStr, 10) };
 }
 
 async function fetchPrInfo(
@@ -90,8 +102,12 @@ async function fetchPrInfo(
   return { baseRef: data.base.ref, headSha: data.head.sha };
 }
 
-function exec(cmd: string, opts?: { cwd?: string }): void {
-  execSync(cmd, { stdio: 'inherit', ...(opts ?? {}) });
+function gitExec(args: string[], opts?: { cwd?: string }): void {
+  // Use spawnSync so args are passed directly to git — no shell interpolation
+  const result = spawnSync('git', args, { stdio: 'inherit', ...(opts ?? {}) });
+  if (result.status !== 0) {
+    throw new Error(`git ${args[0]} failed with exit code ${result.status}`);
+  }
 }
 
 function sanitizeModel(m: string): string {
@@ -221,13 +237,13 @@ async function main(): Promise<void> {
   console.log(`  Temp dir: ${tmpDir}`);
 
   try {
-    // Clone and checkout PR branch
+    // Clone and checkout PR branch — use spawnSync so owner/repo/token are never shell-interpolated
     console.log('\nCloning repository…');
-    exec(`git clone --depth 50 https://${ghToken}@github.com/${owner}/${repo} "${tmpDir}"`);
+    gitExec(['clone', '--depth', '50', `https://${ghToken}@github.com/${owner}/${repo}`, tmpDir]);
 
     console.log(`Fetching PR #${prNumber}…`);
-    exec(`git fetch origin pull/${prNumber}/head:pr-${prNumber}`, { cwd: tmpDir });
-    exec(`git checkout pr-${prNumber}`, { cwd: tmpDir });
+    gitExec(['fetch', 'origin', `pull/${prNumber}/head:pr-${prNumber}`], { cwd: tmpDir });
+    gitExec(['checkout', `pr-${prNumber}`], { cwd: tmpDir });
 
     // Write config pointing to the specified model via Vercel AI Gateway
     await fs.mkdir(path.join(tmpDir, '.bateye'), { recursive: true });
@@ -272,6 +288,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error('\nBenchmark failed:', err instanceof Error ? err.message : err);
+  console.error('\nBenchmark failed:', err);
   process.exit(1);
 });
