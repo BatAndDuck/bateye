@@ -17,6 +17,7 @@ BatEye is configured via `.bateye/config.json` in your repo root. Run `bateye in
   "$schema": "./node_modules/bateye/dist/schemas/bateye-config.schema.json",
   "model": "anthropic/claude-sonnet-4-5",
   "transport": "auto",
+  "reasoningEffort": "high",
   "exclude": ["generated", "vendor", "migrations"],
   "disabledReviewers": {
     "audit": ["responsiveness", "accessibility"],
@@ -41,6 +42,7 @@ BatEye is configured via `.bateye/config.json` in your repo root. Run `bateye in
 | `model` | string | `vercel/deepseek/deepseek-v3.2-thinking` | Primary model in `provider/model-id` format |
 | `transport` | string | `"auto"` | HTTP transport/gateway override. `"auto"` uses the provider prefix from `model`. Use `"vercel"`, `"openrouter"`, etc. to route through a gateway |
 | `apiBaseUrl` | string | - | OpenAI-compatible base URL for custom gateways or proxies |
+| `reasoningEffort` | string | - | Reasoning/thinking effort for models that support it. Common values: `minimal`, `low`, `medium`, `high`, `xhigh`. See [Reasoning effort](#reasoning-effort) |
 | `exclude` | string[] | - | Additional paths to exclude from analysis |
 | `disabledReviewers` | object | - | Reviewers to skip per mode |
 | `prReview.semanticVerification.enabled` | boolean | `true` | LLM pass to filter false positives |
@@ -125,6 +127,39 @@ Disable if you want faster, cheaper reviews and can tolerate some false positive
   }
 }
 ```
+
+### Reasoning effort
+
+The `reasoningEffort` field controls how much thinking/reasoning a model performs before producing its response. It applies to orchestrator, reviewer, and semantic-verification calls in both `audit` and `pr-review` modes.
+
+```json
+{
+  "model": "openai/gpt-5",
+  "reasoningEffort": "high"
+}
+```
+
+Or set it from the CLI:
+
+```bash
+bateye conf --reasoningEffort high
+```
+
+**Allowed values** (accepted by most providers): `minimal`, `low`, `medium`, `high`, `xhigh`.
+
+**Provider mapping** — BatEye translates the generic string to the correct provider-specific shape:
+
+| Transport | Wire format |
+|---|---|
+| `openai` / `azure` / `vercel` | `openai.reasoningEffort` |
+| `openrouter` | `openrouter.reasoning.effort` |
+| `groq` | `groq.reasoningEffort` |
+| `anthropic` | `anthropic.thinking` (adaptive, Claude 4.6+) |
+| `google` / `gemini` | `google.thinkingConfig.thinkingBudget` (tokens: `minimal`→0, `low`→2048, `medium`→8192, `high`→24576, `xhigh`→32768) |
+
+Providers that don't support reasoning options receive the call unchanged — BatEye silently omits the option for unrecognised transports. Unknown effort strings for the `google`/`gemini` transport also result in the option being omitted rather than causing an error.
+
+Omitting `reasoningEffort` (the default) preserves the current behaviour.
 
 ### DeepSeek thinking models
 

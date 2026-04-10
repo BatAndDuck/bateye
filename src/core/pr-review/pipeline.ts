@@ -308,10 +308,14 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   // and semantic verifier) plus every reviewer's model override, deduped by model id.
   // OpenCodeCLIRuntime needs every model name upfront so it can seed opencode.json
   // before spawning its server. Undefined when reasoningEffort isn't configured.
-  const reasoningOverrides = config.reasoningEffort
+  // Guard against non-string values that could appear in hand-edited config files.
+  const reasoningEffort = typeof config.reasoningEffort === 'string' && config.reasoningEffort
+    ? config.reasoningEffort
+    : undefined;
+  const reasoningOverrides = reasoningEffort
     ? Array.from(new Map(
         [config.model, ...reviewers.map(r => r.model || config.model)]
-          .map(m => [m, { model: m, reasoningEffort: config.reasoningEffort! }]),
+          .map(m => [m, { model: m, reasoningEffort }]),
       ).values())
     : undefined;
 
@@ -336,7 +340,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       config.apiBaseUrl,
       promptLogDir,
       log,
-      config.reasoningEffort,
+      reasoningEffort,
       reasoningOverrides,
     );
   } finally {
@@ -382,7 +386,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       log,
       promptLogDir,
       intentSummary,
-      config.reasoningEffort,
+      reasoningEffort,
       reasoningOverrides,
     ),
   );
@@ -420,7 +424,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
         log,
         promptLogDir,
         intentSummary,
-        config.reasoningEffort,
+        reasoningEffort,
         reasoningOverrides,
       ),
     );
@@ -517,7 +521,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       apiBaseUrl: config.apiBaseUrl,
       log,
       promptLogDir,
-      reasoningEffort: config.reasoningEffort,
+      reasoningEffort: reasoningEffort,
       reasoningOverrides,
     });
     issues.push(...semantic.issues);

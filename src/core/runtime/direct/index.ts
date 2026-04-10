@@ -94,7 +94,7 @@ export function buildProviderOptions(
   transport: string,
   effort: string | undefined,
 ): ProviderOptionsMap | undefined {
-  if (!effort) {
+  if (!effort || typeof effort !== 'string') {
     return undefined;
   }
 
