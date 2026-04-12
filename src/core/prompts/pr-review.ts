@@ -38,6 +38,14 @@ Your response must look exactly like this (replace the example values):
       "reason": "The diff introduces async functions and promise chains without consistent error handling.",
       "confidence": 0.85
     }
+  ],
+  "executionPlan": [
+    {
+      "groupId": "correctness",
+      "mode": "standard",
+      "reason": "Both reviewers inspect the same runtime code paths and will share most file reads.",
+      "reviewerIds": ["code-quality", "error-handling"]
+    }
   ]
 }
 
@@ -59,6 +67,18 @@ Reviewers will receive this summary so they can skip findings about deliberate d
 - Exclude a reviewer only when the diff clearly has no overlap with the reviewer's domain (e.g., do not include a database reviewer for a pure UI change).
 - Never return an empty array unless the diff contains zero code changes.
 - **confidence** (0–1): rate your certainty that this reviewer is relevant. Use ≥ 0.9 when the match is obvious, 0.7–0.89 when probable, 0.5–0.69 when possible. Only include reviewers with confidence ≥ 0.5.
+
+## executionPlan (optional)
+
+You MAY additionally propose an \`executionPlan\` — a grouping of the selected reviewers into bundles that share investigation work. Reviewers whose evidence comes from the same files and code paths should be grouped together; BatEye will execute each bundle as a single agentic session instead of one per reviewer, which materially reduces cost.
+
+Rules for \`executionPlan\`:
+- Each group has a short \`groupId\` (e.g. "correctness", "security", "contract-qa", "ops"), a \`mode\` of "standard" or "deep", a one-sentence \`reason\`, and a \`reviewerIds\` array.
+- Only reference reviewer IDs you also listed in \`selectedReviewers\`.
+- Every selected reviewer should appear in exactly one group. Reviewers you cannot confidently merge should go in a group of their own.
+- Use \`mode: "deep"\` only when the group's concerns require exploring beyond direct file reads (e.g. tracing cross-module security invariants). Default is "standard".
+- Only group reviewers that will read the same files. Do NOT merge across unrelated domains (e.g. never merge "docs" with "security").
+- Omit the field entirely if you are unsure — BatEye will build a safe default plan deterministically.
 
 - Return ONLY the JSON`;
 }
@@ -143,20 +163,20 @@ ${reviewerInstructions}
 ${buildPRModeOverlay(reviewerId)}
 ## HOW TO DO THIS REVIEW - TWO PHASES
 
-### PHASE 1: INVESTIGATE FIRST (form no opinions yet)
+### PHASE 1: INVESTIGATE ON DEMAND (do not browse preemptively)
 0. **Read the "PR INTENT" section in the user message first.** It describes what the author deliberately changed and why. Any concern that matches something described there is NOT a finding - skip it immediately, before any other investigation.
-1. Open and read the changed files listed in the diff.
-2. Follow imports and references to understand context outside the diff.
-3. Use search tools to confirm whether a problem actually exists in the current codebase.
+1. Start from the seeded diff lines and the current-file contents already provided in the user message. These are your primary evidence.
+2. Read additional files only to validate a specific, concrete claim you are about to report. Do not browse preemptively.
+3. Prefer direct file reads over broad search. Use search only to check presence/absence of a named symbol.
 4. For each potential concern, find the EXACT line in the diff that causes the problem.
-5. Read the commit messages in this PR. If a commit message or code comment already explains the design decision behind a potential concern, that concern is intentional - do NOT report it.
-6. Check adjacent documentation (README.md, AGENTS.md, CLAUDE.md, docs/) to see if the behavior you are about to flag is already described there.
+5. Read commit messages and nearby docs (README.md, AGENTS.md, CLAUDE.md, docs/) only when the concern depends on them. If a commit message already explains the design decision behind a potential concern, that concern is intentional - do NOT report it.
+6. Subagents are unavailable in standard mode. In deep mode, delegate to the \`explore\` subagent only when direct inspection is demonstrably insufficient.
 
 ### PHASE 2: DECIDE WHAT TO REPORT (only after investigation)
-5. Ask yourself: "Did I read actual code in the diff that proves this problem exists at a specific line?"
-6. If "yes" → report it. If "maybe" or "not sure" → do NOT report it.
-7. Ask yourself: "Does this concern apply to THIS project type?" (see Repository Profile above). If not → do NOT report it.
-8. Zero findings is a VALID and GOOD outcome. Never pad with uncertain concerns.
+7. Ask yourself: "Did I read actual code in the diff that proves this problem exists at a specific line?"
+8. If "yes" → report it. If "maybe" or "not sure" → do NOT report it.
+9. Ask yourself: "Does this concern apply to THIS project type?" (see Repository Profile above). If not → do NOT report it.
+10. Prefer zero findings over speculative broad exploration. Zero findings is a VALID and GOOD outcome. Never pad with uncertain concerns.
 
 ## STRICT RULES - MUST FOLLOW
 
@@ -205,6 +225,107 @@ Return ONLY this JSON:
       "evidence": ["<repo-backed evidence supporting the issue>"],
       "verificationTrail": ["file:path/to/file.ts", "search:cache: 'npm'"],
       "searchedFor": ["cache: 'npm'"],
+      "recommendation": "<specific, actionable fix>",
+      "tags": []
+    }
+  ]
+}
+\`\`\``;
+}
+
+/**
+ * Build a system prompt for a bundle run: multiple reviewers executed in one
+ * agentic session. Each reviewer's instructions are included in a clearly
+ * labelled block; the model must emit findings tagged with the originating
+ * reviewerId so the pipeline can attribute them downstream.
+ *
+ * Reuses all of the strict evidence rules from buildPRReviewSystemPrompt
+ * (diff-line anchoring, codeQuote from added/current lines, verificationTrail,
+ * no speculative language, PR INTENT suppression, no doc-file findings).
+ */
+export function buildPRBundleSystemPrompt(
+  reviewers: Array<{ id: string; name: string; instructions: string }>,
+  repoProfile?: RepoProfile,
+): string {
+  const profileSection = repoProfile
+    ? `\n## Repository Profile\n${buildPRRepoProfileSummary(repoProfile)}\n`
+    : '';
+
+  const reviewerBlocks = reviewers
+    .map(r => `## Review: ${r.name}  (reviewerId: "${r.id}")\n\n${r.instructions}`)
+    .join('\n\n---\n\n');
+
+  const allowedIds = reviewers.map(r => `"${r.id}"`).join(', ');
+  const reviewerCount = reviewers.length;
+
+  return `You are performing ${reviewerCount} named code reviews in a single pass on the same pull request. Share investigation work across reviewers where possible, but keep each finding attributed to exactly one reviewer.
+${profileSection}
+${reviewerBlocks}
+
+## BUNDLE ATTRIBUTION RULES
+
+- Every finding you emit MUST include a "reviewerId" field matching one of: ${allowedIds}.
+- If the same issue surfaces for two reviewers, attribute it to the MOST SPECIFIC one — do not emit duplicate findings under different reviewerIds.
+- Return one entry in \`perReviewer\` for EVERY reviewer listed above, even if that reviewer has zero findings. Use score 100 and an empty summary when a reviewer found nothing.
+
+## HOW TO DO THIS REVIEW
+
+### PHASE 1: INVESTIGATE ON DEMAND (do not browse preemptively)
+0. **Read the "PR INTENT" section in the user message first.** Anything described there as deliberate is NOT a finding — skip it immediately.
+1. Start from the seeded diff lines and the current-file contents already provided in the user message. These are your primary evidence.
+2. Read additional files only to validate a specific, concrete claim you are about to report. Do not browse preemptively.
+3. Prefer direct file reads over broad search. Use search only to check presence/absence of a named symbol.
+4. For each potential concern, find the EXACT line in the diff that causes the problem.
+5. Read commit messages and nearby docs (README.md, AGENTS.md, CLAUDE.md, docs/) only when the concern depends on them.
+
+### PHASE 2: DECIDE WHAT TO REPORT
+6. Ask yourself: "Did I read actual code in the diff that proves this problem exists at a specific line?"
+7. If "yes" → report it under the matching reviewerId. If "maybe" or "not sure" → do NOT report it.
+8. Zero findings is a VALID and GOOD outcome. Never pad with uncertain concerns.
+
+## STRICT RULES - MUST FOLLOW
+
+1. You may ONLY report findings anchored to lines that appear in the diff below. Every line is labeled with [Line N] showing its exact line number.
+2. Every finding MUST include a "codeQuote" field containing the EXACT current code you are flagging. Do not quote deleted code. The codeQuote MUST come entirely from added/current diff lines.
+3. The "filePath" MUST be one of the files listed in the diff.
+4. The "startLine" and "endLine" MUST be line numbers from the [Line N] markers in the diff.
+5. DO NOT speculate about code you did not inspect.
+6. DO NOT use hedging language ("may", "likely", "could", "might", "appears to", "seems to"). State facts supported by inspected code.
+7. Only report issues you are confident about (confidence >= 0.7).
+8. SCOPE DISCIPLINE: each finding must match the scope of the reviewer it is attributed to. Do not report cross-domain findings under a reviewer whose scope does not cover them.
+9. Do NOT report findings in documentation files (.md, .txt, .rst), template files, or files that DESCRIBE anti-patterns rather than implement them.
+10. PR INTENT BLOCK: suppress anything already described as deliberate in the user message's PR INTENT section.
+11. Every finding MUST include a "verificationTrail" with 1-5 entries using exact prefixes:
+    - "file:<relative path>" for each file you inspected
+    - "search:<query>" for repo-wide searches you performed
+    - "note:<short note>" for any other verification step
+12. Include "searchedFor" when you investigated an absence/regression claim.
+13. Subagents are unavailable in standard mode. In deep mode, delegate to the \`explore\` subagent only when direct inspection is demonstrably insufficient.
+14. Prefer zero findings over speculative broad exploration.
+
+## Output Format
+
+Return ONLY this JSON:
+\`\`\`json
+{
+  "perReviewer": [
+    { "reviewerId": "<one of ${allowedIds}>", "score": <0-100>, "summary": "<brief summary of real findings>" }
+  ],
+  "findings": [
+    {
+      "id": "<REVIEWERID>_PR_<sequential number>",
+      "reviewerId": "<one of ${allowedIds}>",
+      "title": "<concise, specific finding title>",
+      "description": "<detailed description citing the exact code>",
+      "priority": "<critical|high|medium|low|info>",
+      "confidence": <0.7-1.0>,
+      "filePath": "<exact file path from the diff>",
+      "startLine": <exact line number from [Line N] marker>,
+      "endLine": <exact line number>,
+      "codeQuote": "<EXACT current code being flagged>",
+      "evidence": ["<repo-backed evidence supporting the issue>"],
+      "verificationTrail": ["file:path/to/file.ts", "search:symbol"],
+      "searchedFor": ["symbol"],
       "recommendation": "<specific, actionable fix>",
       "tags": []
     }

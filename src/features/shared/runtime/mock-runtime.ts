@@ -102,6 +102,8 @@ export class MockRuntime implements IRuntime {
       repoPath: options.repoPath,
       initialFiles: options.initialFiles || [],
       promptPreview: options.systemPrompt.slice(0, 80),
+      agent: options.agent,
+      callLabel: options.callLabel,
     });
 
     return {

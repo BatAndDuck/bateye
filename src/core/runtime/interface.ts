@@ -17,6 +17,13 @@ export interface RunOptions {
   callLabel?: string;
   /** Per-call timeout in milliseconds. Defaults to 120 000 when not set. */
   timeoutMs?: number;
+  /**
+   * Optional OpenCode agent identifier to select for this call (e.g. "bateye-review").
+   * Only consulted by runtimes that support agent definitions (OpenCode CLI). Ignored otherwise.
+   * When set, the runtime forwards it on the session message so OpenCode applies the agent's
+   * step cap and permission profile.
+   */
+  agent?: string;
   /** Generic reasoning/thinking intensity. Mapped per-provider at the runtime layer.
    *  Common values: "minimal" | "low" | "medium" | "high" | "xhigh". */
   reasoningEffort?: string;

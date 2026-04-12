@@ -1085,6 +1085,312 @@ Report only concrete findings anchored to the changed file.
   assert.ok(fallbackComment);
 });
 
+test('pr-review command bundles two same-category reviewers into a single agentic session and attributes findings per reviewer', () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-bundle-int-'));
+  initGitRepo(repoPath);
+
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
+    model: 'anthropic/mock-model',
+    exclude: [],
+  });
+
+  // Two reviewers with categories that map into the same bundle ('security' bundle slot).
+  writeText(path.join(repoPath, '.bateye', 'reviewers', 'secret-scan.md'), `---
+id: secret-scan
+name: Secret Scan Reviewer
+mode: pr-review
+category: security
+---
+Look for leaked secrets or credentials in the changed code.
+`);
+
+  writeText(path.join(repoPath, '.bateye', 'reviewers', 'dep-audit.md'), `---
+id: dep-audit
+name: Dependency Audit Reviewer
+mode: pr-review
+category: dependency
+---
+Look for risky dependency additions or version bumps in the changed code.
+`);
+
+  writeText(path.join(repoPath, 'src', 'service.ts'), `export function getToken() {
+  return 'placeholder';
+}
+`);
+  commitAll(repoPath, 'base');
+
+  runOk('git', ['checkout', '-b', 'feature/pr-review-bundle'], { cwd: repoPath });
+
+  writeText(path.join(repoPath, 'src', 'service.ts'), `export function getToken() {
+  const key = 'sk-live-leaked-demo-placeholder';
+  const tracker = require('telemetry-tracker-9000');
+  tracker.init(key);
+  return key;
+}
+`);
+  commitAll(repoPath, 'feature change');
+
+  const fixturePath = path.join(repoPath, 'mock-runtime.json');
+  const logPath = path.join(repoPath, 'mock-runtime-log.json');
+  writeJson(fixturePath, {
+    runs: [
+      {
+        // Orchestrator picks both reviewers and explicitly bundles them together.
+        data: {
+          intentSummary: 'The PR introduces a token helper and should be checked by secret-scan and dep-audit together.',
+          selectedReviewers: [
+            { reviewerId: 'secret-scan', reason: 'Changed code introduces a token-shaped literal.', confidence: 0.9 },
+            { reviewerId: 'dep-audit', reason: 'Token helper may signal a new dependency path.', confidence: 0.85 },
+          ],
+          executionPlan: [
+            {
+              groupId: 'security',
+              mode: 'standard',
+              reason: 'Both reviewers inspect the same sensitive code path.',
+              reviewerIds: ['secret-scan', 'dep-audit'],
+            },
+          ],
+        },
+      },
+      // Semantic verification response: both bundle findings supported.
+      {
+        data: {
+          verifications: [
+            {
+              findingId: 'SECRET_SCAN_PR_1',
+              supported: true,
+              classification: 'direct',
+              reason: 'The literal token is present on the changed line.',
+            },
+            {
+              findingId: 'DEP_AUDIT_PR_1',
+              supported: true,
+              classification: 'direct',
+              reason: 'The helper introduces a token handling path on the changed line.',
+            },
+          ],
+        },
+      },
+    ],
+    // Exactly ONE agentic run for the bundled group — this is the core assertion.
+    agenticRuns: [
+      {
+        data: {
+          perReviewer: [
+            { reviewerId: 'secret-scan', score: 40, summary: 'Leaked secret literal in the new helper.' },
+            { reviewerId: 'dep-audit', score: 70, summary: 'Token helper may indicate new dependency surface.' },
+          ],
+          findings: [
+            {
+              id: 'SECRET_SCAN_PR_1',
+              reviewerId: 'secret-scan',
+              title: 'Leaked secret literal in token helper',
+              description: 'The changed line assigns a hard-coded token-shaped literal that should be removed.',
+              priority: 'high',
+              confidence: 0.95,
+              filePath: 'src/service.ts',
+              startLine: 2,
+              endLine: 2,
+              codeQuote: "  const key = 'sk-live-leaked-demo-placeholder';",
+              evidence: ['src/service.ts line 2 introduces a literal credential on the changed line.'],
+              verificationTrail: ['file:src/service.ts'],
+              searchedFor: ['sk-live'],
+              recommendation: 'Load the token from an environment variable or secret manager.',
+              tags: ['security'],
+            },
+            {
+              id: 'DEP_AUDIT_PR_1',
+              reviewerId: 'dep-audit',
+              title: 'Unvetted telemetry tracker dependency introduced',
+              description: 'The changed block pulls in an unvetted external tracker package at runtime.',
+              priority: 'medium',
+              confidence: 0.85,
+              filePath: 'src/service.ts',
+              startLine: 3,
+              endLine: 3,
+              codeQuote: "  const tracker = require('telemetry-tracker-9000');",
+              evidence: ['src/service.ts line 3 introduces a new telemetry-tracker-9000 dependency.'],
+              verificationTrail: ['file:src/service.ts'],
+              recommendation: 'Add telemetry-tracker-9000 to the dependency audit allowlist or remove it.',
+              tags: ['dependency'],
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  const result = runPRReview(['--cwd', repoPath, '--base', 'main', '--dry-run'], {
+    BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+    BATEYE_RUNTIME: 'mock',
+    BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
+    BATEYE_MOCK_RUNTIME_LOG: logPath,
+  });
+  const combinedOutput = result.stdout + result.stderr;
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  // Exactly ONE agentic run — both reviewers shared one session.
+  const runtimeLog = JSON.parse(fs.readFileSync(logPath, 'utf-8'));
+  const agenticEntries = runtimeLog.filter(entry => entry.type === 'runAgenticReview');
+  assert.equal(agenticEntries.length, 1, 'expected one bundled agentic run for two same-category reviewers');
+
+  // The bundle call uses the bateye-review agent and is labelled as a bundle.
+  assert.equal(agenticEntries[0].agent, 'bateye-review');
+  assert.equal(agenticEntries[0].callLabel, 'bundle:security');
+
+  // Pipeline log should mention the execution plan with both reviewers.
+  assert.match(combinedOutput, /Execution plan/);
+  assert.match(combinedOutput, /security\[standard\]/);
+  assert.match(combinedOutput, /Secret Scan Reviewer\+Dependency Audit Reviewer|Dependency Audit Reviewer\+Secret Scan Reviewer/);
+
+  // Both findings land in the final report, each attributed to its originating reviewer.
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json'), 'utf-8'));
+  assert.equal(report.findings.length, 2, 'both bundle findings should survive verification');
+
+  const byReviewer = new Map(report.findings.map(f => [f.reviewerId, f]));
+  const secretFinding = byReviewer.get('secret-scan');
+  const depFinding = byReviewer.get('dep-audit');
+  assert.ok(secretFinding, 'secret-scan finding should be present');
+  assert.ok(depFinding, 'dep-audit finding should be present');
+  assert.equal(secretFinding.reviewerName, 'Secret Scan Reviewer');
+  assert.equal(depFinding.reviewerName, 'Dependency Audit Reviewer');
+});
+
+test('pr-review command drops bundle findings whose reviewerId is not in the group', () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-bundle-stray-'));
+  initGitRepo(repoPath);
+
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
+    model: 'anthropic/mock-model',
+    exclude: [],
+  });
+
+  writeText(path.join(repoPath, '.bateye', 'reviewers', 'secret-scan.md'), `---
+id: secret-scan
+name: Secret Scan Reviewer
+mode: pr-review
+category: security
+---
+Look for leaked secrets in the changed code.
+`);
+
+  writeText(path.join(repoPath, '.bateye', 'reviewers', 'dep-audit.md'), `---
+id: dep-audit
+name: Dependency Audit Reviewer
+mode: pr-review
+category: dependency
+---
+Look for risky dependency additions.
+`);
+
+  writeText(path.join(repoPath, 'src', 'service.ts'), `export const value = 0;\n`);
+  commitAll(repoPath, 'base');
+
+  runOk('git', ['checkout', '-b', 'feature/pr-review-bundle-stray'], { cwd: repoPath });
+  writeText(path.join(repoPath, 'src', 'service.ts'), `export const value = 1;\n`);
+  commitAll(repoPath, 'feature change');
+
+  const fixturePath = path.join(repoPath, 'mock-runtime.json');
+  const logPath = path.join(repoPath, 'mock-runtime-log.json');
+  writeJson(fixturePath, {
+    runs: [
+      {
+        data: {
+          intentSummary: 'The PR bumps a constant.',
+          selectedReviewers: [
+            { reviewerId: 'secret-scan', reason: 'placeholder', confidence: 0.85 },
+            { reviewerId: 'dep-audit', reason: 'placeholder', confidence: 0.85 },
+          ],
+          executionPlan: [
+            {
+              groupId: 'security',
+              mode: 'standard',
+              reason: 'Share sensitive paths.',
+              reviewerIds: ['secret-scan', 'dep-audit'],
+            },
+          ],
+        },
+      },
+      {
+        data: {
+          verifications: [
+            {
+              findingId: 'SECRET_SCAN_PR_1',
+              supported: true,
+              classification: 'direct',
+              reason: 'Anchored to the changed line.',
+            },
+          ],
+        },
+      },
+    ],
+    agenticRuns: [
+      {
+        data: {
+          perReviewer: [
+            { reviewerId: 'secret-scan', score: 80, summary: 'one finding' },
+            { reviewerId: 'dep-audit', score: 100, summary: '' },
+          ],
+          findings: [
+            {
+              id: 'SECRET_SCAN_PR_1',
+              reviewerId: 'secret-scan',
+              title: 'Changed constant exposed',
+              description: 'The constant is changed on the diff line.',
+              priority: 'low',
+              confidence: 0.85,
+              filePath: 'src/service.ts',
+              startLine: 1,
+              endLine: 1,
+              codeQuote: 'export const value = 1;',
+              evidence: ['src/service.ts line 1 changes the exported value.'],
+              verificationTrail: ['file:src/service.ts'],
+              recommendation: 'Verify the intended change.',
+              tags: [],
+            },
+            {
+              // Stray finding: reviewerId not in the bundled group.
+              id: 'STRAY_PR_1',
+              reviewerId: 'ghost-reviewer',
+              title: 'Attributed to unknown reviewer',
+              description: 'This finding should be dropped as a schema violation.',
+              priority: 'low',
+              confidence: 0.85,
+              filePath: 'src/service.ts',
+              startLine: 1,
+              endLine: 1,
+              codeQuote: 'export const value = 1;',
+              evidence: ['src/service.ts line 1.'],
+              verificationTrail: ['file:src/service.ts'],
+              recommendation: 'Drop this finding.',
+              tags: [],
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  const result = runPRReview(['--cwd', repoPath, '--base', 'main', '--dry-run'], {
+    BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+    BATEYE_RUNTIME: 'mock',
+    BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
+    BATEYE_MOCK_RUNTIME_LOG: logPath,
+  });
+  const combinedOutput = result.stdout + result.stderr;
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  // The stray finding must be reported as dropped.
+  assert.match(combinedOutput, /dropped 1 finding\(s\) with unknown reviewerId/);
+
+  // Only the valid finding survives.
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json'), 'utf-8'));
+  assert.equal(report.findings.length, 1);
+  assert.equal(report.findings[0].reviewerId, 'secret-scan');
+});
+
 test('pr-review command fails clearly when non-agentic direct runtime is requested', () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-direct-runtime-'));
   initGitRepo(repoPath);

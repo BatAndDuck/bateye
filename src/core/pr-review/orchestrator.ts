@@ -104,9 +104,23 @@ export async function selectReviewers(
       // Apply configured or hard cap; custom reviewers bypass the built-in cap
       const trimmed = trimByConfidence(validSelection, availableReviewers, effectiveLimit);
 
+      // Filter the orchestrator's execution plan to the reviewer IDs that actually exist
+      // and survived the confidence trim. The deterministic bundle planner downstream
+      // will further split groups that violate safety rules (model overrides, tool
+      // reviewers, category mismatches).
+      const trimmedIds = new Set(trimmed.map(s => s.reviewerId));
+      const rawPlan = result.data.executionPlan;
+      const filteredPlan = rawPlan
+        ?.map(group => ({
+          ...group,
+          reviewerIds: group.reviewerIds.filter(id => trimmedIds.has(id)),
+        }))
+        .filter(group => group.reviewerIds.length > 0);
+
       return {
         intentSummary: result.data.intentSummary,
         selectedReviewers: trimmed,
+        executionPlan: filteredPlan && filteredPlan.length > 0 ? filteredPlan : undefined,
         issues: [],
         tokensUsed: result.tokensUsed,
       };

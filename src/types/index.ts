@@ -237,6 +237,17 @@ export type RepoIndex = {
   totalFiles: number;
 };
 
+export type ExecutionPlanGroup = {
+  groupId: string;
+  /**
+   * Execution mode to run the group with. 'standard' uses the bounded read-only agent;
+   * 'deep' permits the `explore` subagent for claims that direct inspection can't verify.
+   */
+  mode: 'standard' | 'deep';
+  reason: string;
+  reviewerIds: string[];
+};
+
 export type OrchestratorResult = {
   selectedReviewers: {
     reviewerId: string;
@@ -249,6 +260,13 @@ export type OrchestratorResult = {
    * Passed to every reviewer so they can avoid flagging intentional decisions.
    */
   intentSummary: string;
+  /**
+   * Optional orchestrator-proposed grouping of reviewers into bundles that can share a
+   * single agentic session. BatEye validates this deterministically (splitting on model
+   * overrides, tool reviewers, or category mismatches) before execution. When absent or
+   * invalid, the pipeline builds bundles deterministically from reviewer metadata.
+   */
+  executionPlan?: ExecutionPlanGroup[];
 };
 
 export type PRContext = {
