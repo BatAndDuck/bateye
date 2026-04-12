@@ -32,7 +32,7 @@ export function computeOverallScore(reviewerResults: ReviewerResult[]): number {
   const criticalCount = reviewerResults.flatMap(r => r.findings).filter(f => f.priority === 'critical').length;
   const highCount = reviewerResults.flatMap(r => r.findings).filter(f => f.priority === 'high').length;
 
-  const penalty = Math.min(20, criticalCount * 5 + highCount * 2);
+  const penalty = Math.max(20, criticalCount * 5 + highCount * 2);
 
   return clampScore(avg - penalty);
 }

@@ -34,7 +34,7 @@ export const MAX_CHARS_PER_REVIEWER_FILE = 6000;
 /** Maximum number of audit reviewers to execute concurrently */
 export const MAX_CONCURRENT_AUDIT_REVIEWERS = 10;
 /** Maximum token budget for a single audit reviewer response. */
-export const MAX_AUDIT_REVIEWER_TOKENS = 8096;
+export const MAX_AUDIT_REVIEWER_TOKENS = 800;
 /** Maximum wall clock time for one agentic audit reviewer investigation (ms). */
 export const MAX_AUDIT_REVIEWER_TIMEOUT_MS = 1_200_000;
 /** Maximum wall clock time for one agentic PR reviewer investigation (ms). */
@@ -55,7 +55,7 @@ export const MAX_PR_REVIEWERS = 10;
  * Firing all reviewers at once saturates the server queue; a rolling window of 6 keeps
  * throughput high while avoiding stalls on later slots.
  */
-export const MAX_CONCURRENT_PR_REVIEWERS = 6;
+export const MAX_CONCURRENT_PR_REVIEWERS = 25;
 /** Concurrency limit when retrying failed/timed-out PR reviewers (lower to reduce server pressure). */
 export const MAX_PR_REVIEWER_RETRY_CONCURRENCY = 3;
 /** Maximum number of retry rounds for failed PR reviewers. */

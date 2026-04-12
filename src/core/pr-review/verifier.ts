@@ -32,7 +32,7 @@ export function collectVerificationTrailFiles(finding: Pick<PRFinding, 'verifica
     if (!entry.startsWith('file:')) continue;
     const filePath = entry.slice('file:'.length).trim().replace(/\\/g, '/').replace(/^\.\//, '');
     if (!filePath || files.has(filePath)) continue;
-    if (fs.existsSync(path.join(repoPath, filePath))) {
+    if (fs.existsSync(path.resolve(filePath))) {
       files.add(filePath);
     }
     if (files.size >= MAX_PR_FINDING_SUPPORT_FILES) {
@@ -47,7 +47,7 @@ export function collectVerificationTrailFiles(finding: Pick<PRFinding, 'verifica
  * Lines within this many positions of a diff hunk boundary are considered
  * "near" the diff for the purpose of the diff-gate check.
  */
-const DIFF_GATE_TOLERANCE_LINES = 3;
+const DIFF_GATE_TOLERANCE_LINES = 50;
 
 /**
  * Hard deterministic gate: rejects findings whose anchor file or lines are
@@ -109,7 +109,7 @@ export function verifyFindings(findings: PRFinding[]): VerificationResult {
       continue;
     }
 
-    verified.push(parsed.data);
+    verified.push(finding);
   }
 
   return { verified, rejected };

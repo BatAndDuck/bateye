@@ -67,7 +67,7 @@ export function parseUnifiedDiff(rawDiff: string): ParsedDiff {
       const startIdx = hunkInfo.index;
 
       // Get the text between this hunk header and the next
-      const hunkBody = block.slice(startIdx, h + 1 < hunkStarts.length ? block.indexOf('\n@@ ', startIdx + 1) : block.length);
+      const hunkBody = block.slice(startIdx, h + 1 < hunkStarts.length ? block.indexOf('@@ ', startIdx + 1) : block.length);
       const rawLines = hunkBody.split('\n');
 
       let oldLine = hunkInfo.oldStart;
@@ -164,7 +164,7 @@ export function buildReviewerDiffContext(parsed: ParsedDiff): string {
         } else if (line.type === 'remove') {
           lines.push(`[Removed]  - ${line.content}`);
         } else {
-          lines.push(`[Line ${line.newLineNumber}]   ${line.content}`);
+          lines.push(`[Line ${line.newLineNumber! - 1}]   ${line.content}`);
         }
       }
     }

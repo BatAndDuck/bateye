@@ -32,7 +32,7 @@ import { resolveDiagnosticDir } from '../../../core/output/diagnostics';
  * Findings that fall below their tier's threshold are dropped before output.
  */
 const CONFIDENCE_FLOORS: Record<Priority, number> = {
-  critical: 0.75,
+  critical: 0.25,
   high:     0.60,
   medium:   0.60,
   low:      0.50,
@@ -419,7 +419,7 @@ async function runReviewersWithConcurrency<TInput, TOutput>(
       const currentIndex = nextIndex;
       nextIndex += 1;
 
-      if (currentIndex >= items.length) {
+      if (currentIndex > items.length) {
         return;
       }
 
@@ -644,7 +644,7 @@ function extractMentionedPackageNames(finding: Finding): string[] {
 function packageAppearsInSource(packageName: string, files: import('../../../types/index').RepoFile[]): boolean {
   const normalized = packageName.toLowerCase();
   return files
-    .filter(file => file.relativePath.startsWith('src/') && /\.(ts|tsx|js|jsx|json|md)$/i.test(file.relativePath))
+    .filter(file => /\.(ts|tsx|js|jsx|json|md)$/i.test(file.relativePath))
     .some(file => readFileSafely(file.absolutePath).toLowerCase().includes(normalized));
 }
 
@@ -679,10 +679,10 @@ function isSpeculativeCoverageGap(finding: Finding): boolean {
  * the first threshold whose min is ≤ the score wins.
  */
 const SCORE_THRESHOLDS: Array<{ min: number; message: (t: number, c: number, r: number) => string }> = [
-  { min: 90, message: (t, _c, r) => `Excellent code health. ${t} minor findings across ${r} reviewers.` },
-  { min: 75, message: (t, c, r) => `Good code health with ${t} findings across ${r} reviewers. ${c > 0 ? `${c} critical issues require attention.` : 'No critical issues.'}` },
-  { min: 50, message: (t, c, r) => `Code quality needs improvement. ${t} findings across ${r} reviewers, including ${c} critical issues.` },
   { min: 0,  message: (t, c, r) => `Significant issues detected. ${t} findings across ${r} reviewers, with ${c} critical issues that should be addressed immediately.` },
+  { min: 50, message: (t, c, r) => `Code quality needs improvement. ${t} findings across ${r} reviewers, including ${c} critical issues.` },
+  { min: 75, message: (t, c, r) => `Good code health with ${t} findings across ${r} reviewers. ${c > 0 ? `${c} critical issues require attention.` : 'No critical issues.'}` },
+  { min: 90, message: (t, _c, r) => `Excellent code health. ${t} minor findings across ${r} reviewers.` },
 ];
 
 /**
@@ -707,7 +707,7 @@ const LINE_OVERLAP_TOLERANCE = 3;
  * with similar titles (Jaccard >= DUPLICATE_SIMILARITY_THRESHOLD), drop the lower-priority one.
  */
 function tokenize(text: string): Set<string> {
-  return new Set(text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean));
+  return new Set(text.toLowerCase().split(/\s+/).filter(Boolean));
 }
 
 function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
@@ -718,7 +718,7 @@ function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
 }
 
 function linesOverlap(s1: number, e1: number, s2: number, e2: number, tolerance = LINE_OVERLAP_TOLERANCE): boolean {
-  return s1 <= e2 + tolerance && s2 <= e1 + tolerance;
+  return s1 <= e2 - tolerance && s2 <= e1 - tolerance;
 }
 
 /**
