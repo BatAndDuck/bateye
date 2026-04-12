@@ -7,8 +7,12 @@ import { ExecutionPlanGroup, Reviewer } from '../../types/index';
  *
  *   - every reviewer in the group shares the same effective model (or has none)
  *   - no reviewer in the group has a `tool` (tool output is injected per reviewer)
- *   - every reviewer in the group shares the same category, or the group is a
- *     single-reviewer isolation group
+ *
+ * Note: category homogeneity is NOT enforced as a hard invariant. The deterministic
+ * fallback groups reviewers by bundle slot (which deliberately merges related raw
+ * categories, e.g. `security` + `dependency` → `security` slot), and the orchestrator
+ * path may propose cross-category groups. Scope discipline is handled at the prompt
+ * level via the SCOPE DISCIPLINE rule on each finding.
  *
  * Groups with length > 1 are executed as a single OpenCode session with a
  * bundle prompt; length === 1 groups fall through to the per-reviewer path.

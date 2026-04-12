@@ -27,7 +27,7 @@ Run `bateye reviewers` to see the full list with descriptions.
 
 For `bateye audit`, BatEye runs all applicable reviewers by default.
 
-For `bateye pr-review`, an orchestrator AI selects the most relevant reviewers based on the diff content, then runs them as parallel investigators.
+For `bateye pr-review`, an orchestrator AI selects the most relevant reviewers based on the diff content. Reviewers that share the same investigation scope (same model, no external tool) are grouped into **execution bundles** and run together in a single bounded OpenCode session to reduce cost. Reviewers with an external `tool` or a custom `model` override always run in their own isolated session. Every finding is attributed back to its originating reviewer via a `reviewerId` field, so per-reviewer reporting and attribution are preserved regardless of how the session was grouped.
 
 ### Run specific reviewers
 

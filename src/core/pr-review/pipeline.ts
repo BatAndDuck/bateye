@@ -421,12 +421,14 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     }
     if (failedIndices.length === 0) break;
 
-    // Map each failed run result back to its source Reviewer by name. Bundle execution
+    // Map each failed run result back to its source Reviewer by id. Bundle execution
     // can split a group's reviewers across multiple PRReviewerRunResult entries, so we
-    // cannot index into `selectedReviewers` directly anymore.
-    const reviewerByName = new Map(selectedReviewers.map(r => [r.name, r]));
+    // cannot index into `selectedReviewers` directly anymore. Use reviewerId (stable
+    // unique key) rather than reviewerName to avoid mismatches when two reviewers share
+    // the same display name.
+    const reviewerById = new Map(selectedReviewers.map(r => [r.id, r]));
     const failedReviewers = failedIndices
-      .map(i => reviewerByName.get(reviewerRunResults[i].reviewerName))
+      .map(i => reviewerById.get(reviewerRunResults[i].reviewerId))
       .filter((r): r is Reviewer => r !== undefined);
 
     if (failedReviewers.length === 0) break;
@@ -737,6 +739,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
 
 interface PRReviewerRunResult {
   findings: PRFinding[];
+  reviewerId: string;
   reviewerName: string;
   hasTool: boolean;
   toolRan: boolean;
@@ -790,7 +793,7 @@ async function runPRReviewer(
         reviewerId: reviewer.id,
         reviewerName: reviewer.name,
       });
-      return { findings: [], reviewerName: reviewer.name, hasTool: true, toolRan: false, toolError: toolResult.error, issues };
+      return { findings: [], reviewerId: reviewer.id, reviewerName: reviewer.name, hasTool: true, toolRan: false, toolError: toolResult.error, issues };
     } else {
       toolError = toolResult.error;
       toolRan = false;
@@ -848,7 +851,7 @@ async function runPRReviewer(
       ? ` | ${formatTokenSummary(runResult.tokensUsed)}`
       : '';
     log(`  ✓ ${reviewer.name}: ${findings.length} findings (${durationSec}s${tokenSuffix})`);
-    return { findings, reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError, issues, tokensUsed: runResult.tokensUsed };
+    return { findings, reviewerId: reviewer.id, reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError, issues, tokensUsed: runResult.tokensUsed };
   } catch (err) {
     const msg = formatErrorWithCauses(err);
     const isTimeout = /timed out after/i.test(msg);
@@ -863,7 +866,7 @@ async function runPRReviewer(
       reviewerId: reviewer.id,
       reviewerName: reviewer.name,
     });
-    return { findings: [], reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError, issues };
+    return { findings: [], reviewerId: reviewer.id, reviewerName: reviewer.name, hasTool: !!reviewer.tool, toolRan, toolError, issues };
   }
 }
 
@@ -1058,6 +1061,7 @@ async function runPRBundle(
       }
       return {
         findings,
+        reviewerId: reviewer.id,
         reviewerName: reviewer.name,
         hasTool: false,
         toolRan: false,
@@ -1073,6 +1077,7 @@ async function runPRBundle(
     // 1-reviewer groups for them on the next pass.
     return group.reviewers.map(reviewer => ({
       findings: [],
+      reviewerId: reviewer.id,
       reviewerName: reviewer.name,
       hasTool: !!reviewer.tool,
       toolRan: false,
