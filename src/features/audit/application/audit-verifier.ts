@@ -137,6 +137,8 @@ export interface AuditVerifierOptions {
   apiBaseUrl?: string;
   runtime: IRuntime;
   log?: (msg: string) => void;
+  reasoningEffort?: string;
+  reasoningOverrides?: Array<{ model: string; reasoningEffort: string }>;
 }
 
 export interface AuditVerifierResult {
@@ -155,7 +157,7 @@ export async function verifyAuditFindings(
   findings: Finding[],
   options: AuditVerifierOptions,
 ): Promise<AuditVerifierResult> {
-  const { repoPath, model, apiKey, transport, apiBaseUrl, runtime, log } = options;
+  const { repoPath, model, apiKey, transport, apiBaseUrl, runtime, log, reasoningEffort, reasoningOverrides } = options;
 
   if (findings.length === 0) {
     return { kept: [], rejected: [] };
@@ -203,6 +205,8 @@ export async function verifyAuditFindings(
           maxTokens: AUDIT_VERIFIER_MAX_TOKENS,
           temperature: 0,
           timeoutMs: AUDIT_VERIFIER_TIMEOUT_MS,
+          reasoningEffort,
+          reasoningOverrides,
         },
         verificationBatchSchema,
       );

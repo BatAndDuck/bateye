@@ -87,6 +87,8 @@ export interface SelectAuditReviewersOptions {
   apiKey: string;
   transport?: string;
   apiBaseUrl?: string;
+  reasoningEffort?: string;
+  reasoningOverrides?: Array<{ model: string; reasoningEffort: string }>;
 }
 
 export interface AuditReviewerSelectionResult extends OrchestratorResult {
@@ -125,6 +127,8 @@ export async function selectAuditReviewers(options: SelectAuditReviewersOptions)
         maxTokens: ORCHESTRATOR_MAX_TOKENS,
         temperature: ORCHESTRATOR_TEMPERATURE,
         callLabel: 'audit-orchestrator',
+        reasoningEffort: options.reasoningEffort,
+        reasoningOverrides: options.reasoningOverrides,
       },
       orchestratorResultSchema,
     );

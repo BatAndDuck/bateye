@@ -8,7 +8,7 @@ import {
   saveRepoApiKey,
 } from '../application/credential-store';
 
-const ALLOWED_FIELDS: (keyof Config)[] = ['model', 'transport', 'apiBaseUrl', 'exclude'];
+const ALLOWED_FIELDS: (keyof Config)[] = ['model', 'transport', 'apiBaseUrl', 'exclude', 'reasoningEffort'];
 
 export async function runConfigShow(repoPath: string): Promise<void> {
   console.log(chalk.cyan('\n🦇 BatEye Config\n'));
@@ -21,6 +21,7 @@ export async function runConfigShow(repoPath: string): Promise<void> {
     ['storedApiKey', storedApiKey ? maskApiKey(storedApiKey) : '(not stored)'],
     ['transport', config.transport],
     ['apiBaseUrl', config.apiBaseUrl || '(default)'],
+    ['reasoningEffort', config.reasoningEffort || '(not set)'],
     ['exclude', JSON.stringify(config.exclude)],
   ];
 
@@ -48,13 +49,15 @@ export async function runConfigSet(repoPath: string, field: string, value: strin
 type RunConfOptions = {
   apiKey?: string;
   model?: string;
+  reasoningEffort?: string;
 };
 
 export async function runConf(repoPath: string, options: RunConfOptions): Promise<void> {
   const model = options.model?.trim();
   const apiKey = options.apiKey?.trim();
+  const reasoningEffort = options.reasoningEffort?.trim();
 
-  if (!model && !apiKey) {
+  if (!model && !apiKey && !reasoningEffort) {
     await runConfigShow(repoPath);
     return;
   }
@@ -62,6 +65,11 @@ export async function runConf(repoPath: string, options: RunConfOptions): Promis
   if (model) {
     setConfigField(repoPath, 'model', model);
     console.log(chalk.green(`  ✓ Set model = ${JSON.stringify(model)}`));
+  }
+
+  if (reasoningEffort) {
+    setConfigField(repoPath, 'reasoningEffort', reasoningEffort);
+    console.log(chalk.green(`  ✓ Set reasoningEffort = ${JSON.stringify(reasoningEffort)}`));
   }
 
   if (apiKey) {

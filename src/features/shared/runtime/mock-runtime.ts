@@ -68,7 +68,13 @@ export class MockRuntime implements IRuntime {
     }
 
     writeFixtures(fixtures);
-    appendLog({ type: 'run', model: options.model, promptPreview: options.systemPrompt.slice(0, 80) });
+    appendLog({
+      type: 'run',
+      model: options.model,
+      reasoningEffort: options.reasoningEffort,
+      reasoningOverrides: options.reasoningOverrides,
+      promptPreview: options.systemPrompt.slice(0, 80),
+    });
 
     return {
       data: schema.parse(next.data),
@@ -91,6 +97,8 @@ export class MockRuntime implements IRuntime {
     appendLog({
       type: 'runAgenticReview',
       model: options.model,
+      reasoningEffort: options.reasoningEffort,
+      reasoningOverrides: options.reasoningOverrides,
       repoPath: options.repoPath,
       initialFiles: options.initialFiles || [],
       promptPreview: options.systemPrompt.slice(0, 80),

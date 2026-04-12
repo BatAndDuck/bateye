@@ -84,6 +84,11 @@
         }
       },
       "additionalProperties": false
+    },
+    "reasoningEffort": {
+      "type": "string",
+      "description": "Reasoning/thinking effort for models that support it. Common values: minimal, low, medium, high. Some providers also accept xhigh or none. Ignored by models that don't support reasoning.",
+      "examples": ["low", "medium", "high"]
     }
   },
   "additionalProperties": false

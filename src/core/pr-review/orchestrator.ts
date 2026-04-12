@@ -50,6 +50,8 @@ export async function selectReviewers(
   apiBaseUrl?: string,
   promptLogDir?: string,
   onLog?: (msg: string) => void,
+  reasoningEffort?: string,
+  reasoningOverrides?: Array<{ model: string; reasoningEffort: string }>,
 ): Promise<ReviewerSelectionResult> {
   const runtime = await getStructuredRuntime();
 
@@ -80,7 +82,19 @@ export async function selectReviewers(
     }
     try {
       const result = await runtime.run<OrchestratorResult>(
-        { systemPrompt, userMessage, model, apiKey, transport, apiBaseUrl, maxTokens: 4096, temperature: 0, callLabel: 'orchestrator' },
+        {
+          systemPrompt,
+          userMessage,
+          model,
+          apiKey,
+          transport,
+          apiBaseUrl,
+          maxTokens: 4096,
+          temperature: 0,
+          callLabel: 'orchestrator',
+          reasoningEffort,
+          reasoningOverrides,
+        },
         orchestratorResultSchema,
       );
 

@@ -24,6 +24,13 @@ export interface RunOptions {
    * step cap and permission profile.
    */
   agent?: string;
+  /** Generic reasoning/thinking intensity. Mapped per-provider at the runtime layer.
+   *  Common values: "minimal" | "low" | "medium" | "high" | "xhigh". */
+  reasoningEffort?: string;
+  /** Full list of {model, effort} pairs that OpenCodeCLIRuntime injects into its
+   *  synthesized opencode.json before spawning its server. All callers within one
+   *  pipeline must pass the same list so the cached server can be reused. */
+  reasoningOverrides?: Array<{ model: string; reasoningEffort: string }>;
 }
 
 export interface AgenticPRReviewOptions extends RunOptions {
