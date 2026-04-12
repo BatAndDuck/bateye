@@ -30,6 +30,8 @@ export interface SemanticVerifierOptions {
   apiBaseUrl?: string;
   log?: (message: string) => void;
   promptLogDir?: string;
+  reasoningEffort?: string;
+  reasoningOverrides?: Array<{ model: string; reasoningEffort: string }>;
 }
 
 /** Number of findings to verify per AI call. Batching reduces total call count substantially. */
@@ -150,6 +152,8 @@ async function verifyBatch(
           cwd: options.repoPath,
           callLabel: `semantic-verifier-b${batchIndex}`,
           timeoutMs: SEMANTIC_VERIFIER_TIMEOUT_MS,
+          reasoningEffort: options.reasoningEffort,
+          reasoningOverrides: options.reasoningOverrides,
         },
         prFindingBatchVerificationSchema,
       );

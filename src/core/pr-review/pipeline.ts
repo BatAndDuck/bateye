@@ -304,6 +304,24 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   log('Loading reviewers...');
   const { reviewers } = loadReviewersForMode(repoPath, 'pr-review', config);
 
+  // Build the reasoning-override list once. Includes config.model plus every reviewer's
+  // model override, deduped by model id.
+  //   reasoningEffort (scalar) — passed to structured calls (orchestrator, semantic
+  //     verifier); those use DirectAIRuntime which reads options.reasoningEffort directly.
+  //   reasoningOverrides (list) — consumed only by OpenCodeCLIRuntime, which needs every
+  //     model name upfront so it can seed opencode.json before spawning its server.
+  // Undefined when reasoningEffort isn't configured.
+  // Guard against non-string values that could appear in hand-edited config files.
+  const reasoningEffort = typeof config.reasoningEffort === 'string' && config.reasoningEffort
+    ? config.reasoningEffort
+    : undefined;
+  const reasoningOverrides = reasoningEffort
+    ? Array.from(new Map(
+        [config.model, ...reviewers.map(r => r.model || config.model)]
+          .map(m => [m, { model: m, reasoningEffort }]),
+      ).values())
+    : undefined;
+
   const promptLogDir = path.join(repoPath, OUTPUT_DIR, 'prompts');
 
   // Each orchestrator attempt has MAX_ORCHESTRATOR_TIMEOUT_MS; up to 3 attempts total.
@@ -325,6 +343,8 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       config.apiBaseUrl,
       promptLogDir,
       log,
+      reasoningEffort,
+      reasoningOverrides,
     );
   } finally {
     clearInterval(heartbeat);
@@ -369,6 +389,8 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       log,
       promptLogDir,
       intentSummary,
+      reasoningEffort,
+      reasoningOverrides,
     ),
   );
 
@@ -405,6 +427,8 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
         log,
         promptLogDir,
         intentSummary,
+        reasoningEffort,
+        reasoningOverrides,
       ),
     );
 
@@ -500,6 +524,8 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       apiBaseUrl: config.apiBaseUrl,
       log,
       promptLogDir,
+      reasoningEffort: reasoningEffort,
+      reasoningOverrides,
     });
     issues.push(...semantic.issues);
     semanticVerified = semantic.verified;
@@ -715,6 +741,8 @@ async function runPRReviewer(
   log: (msg: string) => void,
   promptLogDir?: string,
   intentSummary?: string,
+  reasoningEffort?: string,
+  reasoningOverrides?: Array<{ model: string; reasoningEffort: string }>,
 ): Promise<PRReviewerRunResult> {
   const issues: ReviewIssue[] = [];
   let toolContext: string | undefined;
@@ -782,6 +810,8 @@ async function runPRReviewer(
         temperature: 0,
         timeoutMs: MAX_PR_REVIEWER_TIMEOUT_MS,
         callLabel: `reviewer:${reviewer.name}`,
+        reasoningEffort,
+        reasoningOverrides,
       },
       prReviewerAnalysisSchema,
     );

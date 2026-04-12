@@ -155,6 +155,10 @@ export type Config = {
     audit?: string[];
     prReview?: string[];
   };
+  /** Optional reasoning/thinking intensity for models that support it.
+   *  Common values: "minimal" | "low" | "medium" | "high" | "xhigh".
+   *  Mapped per-provider at the runtime layer. Ignored by providers that don't support it. */
+  reasoningEffort?: string;
 };
 
 /** Controls which review mode(s) a reviewer participates in. Defaults to 'both'. */

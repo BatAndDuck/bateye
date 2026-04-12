@@ -567,7 +567,32 @@ export function serializeOpenCodeResponse(response: OpenCodeMessageResponse): st
     .trim();
 }
 
-function buildEnvSignature(env: NodeJS.ProcessEnv): string {
+/** Per-(provider, modelId) reasoning-effort override injected into the
+ *  synthesized opencode.json before the server starts. */
+export interface OpenCodeReasoningOverride {
+  provider: string;
+  modelId: string;
+  effort: string;
+}
+
+/** Stable-order key used for signing reasoning overrides in the server cache key. */
+function serializeReasoningOverrides(overrides: OpenCodeReasoningOverride[]): string {
+  return JSON.stringify(
+    [...overrides]
+      .map(o => ({
+        provider: o.provider.toLowerCase(),
+        modelId: stripThinkingSuffix(o.modelId),
+        effort: o.effort,
+      }))
+      .sort((a, b) =>
+        a.provider.localeCompare(b.provider)
+        || a.modelId.localeCompare(b.modelId)
+        || a.effort.localeCompare(b.effort),
+      ),
+  );
+}
+
+function buildEnvSignature(env: NodeJS.ProcessEnv, reasoningOverridesKey = '[]'): string {
   return JSON.stringify({
     AI_GATEWAY_API_KEY: env.AI_GATEWAY_API_KEY || '',
     ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY || '',
@@ -576,7 +601,56 @@ function buildEnvSignature(env: NodeJS.ProcessEnv): string {
     OPENAI_API_KEY: env.OPENAI_API_KEY || '',
     OPENAI_BASE_URL: env.OPENAI_BASE_URL || '',
     XDG_DATA_HOME: env.XDG_DATA_HOME || '',
+    reasoningOverrides: reasoningOverridesKey,
   });
+}
+
+/** Chunk timeout applied to every provider in the synthesized opencode.json.
+ *  1 hour — effectively disables chunk timeouts for slow thinking models. */
+const OPEN_CODE_CHUNK_TIMEOUT_MS = 3_600_000;
+
+type OpenCodeProviderBlock = {
+  options?: { chunkTimeout?: number };
+  models?: Record<string, { options?: { reasoningEffort?: string } }>;
+};
+
+/**
+ * Builds the synthesized opencode.json config written to the temporary
+ * XDG_CONFIG_HOME before starting an OpenCode server process.
+ *
+ * Starts with a baseline `chunkTimeout` override applied to every provider
+ * BatEye may route through, then layers per-model `reasoningEffort` options
+ * for any overrides supplied by the caller. Uses `stripThinkingSuffix` on
+ * modelIds so the keys match what OpenCode actually registers at runtime.
+ */
+export function buildOpencodeServerConfig(
+  reasoningOverrides: OpenCodeReasoningOverride[] = [],
+): { $schema: string; provider: Record<string, OpenCodeProviderBlock> } {
+  const baseProviders = ['anthropic', 'openai', 'google', 'vercel', 'openrouter', 'deepseek', 'groq', 'cerebras'];
+  const provider: Record<string, OpenCodeProviderBlock> = {};
+  for (const name of baseProviders) {
+    provider[name] = { options: { chunkTimeout: OPEN_CODE_CHUNK_TIMEOUT_MS } };
+  }
+
+  for (const override of reasoningOverrides) {
+    if (!override.provider || !override.modelId || !override.effort) {
+      continue;
+    }
+    const providerKey = override.provider.toLowerCase();
+    const modelKey = stripThinkingSuffix(override.modelId);
+
+    const block: OpenCodeProviderBlock = provider[providerKey] ?? {
+      options: { chunkTimeout: OPEN_CODE_CHUNK_TIMEOUT_MS },
+    };
+    block.models ??= {};
+    block.models[modelKey] = { options: { reasoningEffort: override.effort } };
+    provider[providerKey] = block;
+  }
+
+  return {
+    $schema: 'https://opencode.ai/config.json',
+    provider,
+  };
 }
 
 async function findAvailablePort(): Promise<number> {
@@ -633,7 +707,11 @@ async function waitForServerReady(
   throw new Error(`OpenCode server did not become ready within ${timeoutMs}ms.`);
 }
 
-async function startServer(env: NodeJS.ProcessEnv, readinessTimeoutMs = 30_000): Promise<OpenCodeServerHandle> {
+async function startServer(
+  env: NodeJS.ProcessEnv,
+  reasoningOverrides: OpenCodeReasoningOverride[] = [],
+  readinessTimeoutMs = 30_000,
+): Promise<OpenCodeServerHandle> {
   const port = await findAvailablePort();
   const invocation = resolveOpenCodeInvocation();
   const logPath = path.join(os.tmpdir(), `bateye-opencode-${process.pid}-${Date.now()}-${port}.log`);
@@ -643,28 +721,25 @@ async function startServer(env: NodeJS.ProcessEnv, readinessTimeoutMs = 30_000):
   // SSE chunk arrives within the window.  Reviewer prompts (full diff + file context)
   // cause slow models like DeepSeek to exceed this idle threshold, so we disable both
   // timeout and chunkTimeout for every provider BatEye may use.
+  //
+  // Per-model `reasoningEffort` options from the BatEye config are also injected here
+  // under `provider.<name>.models.<modelId>.options.reasoningEffort` so OpenCode picks
+  // them up when it spawns the provider adapter — the HTTP /session/:id/message endpoint
+  // does not expose reasoningEffort per-call, so this file-based path is the only one.
+  //
   // We write into an isolated XDG_CONFIG_HOME so we don't touch the user's own config.
   const cfgDir = path.join(os.tmpdir(), `bateye-opencode-cfg-${process.pid}-${Date.now()}`);
   const opencodeConfigDir = path.join(cfgDir, 'opencode');
   fs.mkdirSync(opencodeConfigDir, { recursive: true });
-  // OpenCode accepts chunkTimeout as a number (milliseconds), not a boolean.
-  // Use a very large value (1 hour) to effectively disable chunk timeouts for
-  // slow/thinking models that can take many minutes between SSE chunks.
-  const CHUNK_TIMEOUT_MS = 3_600_000; // 1 hour
-  const noTimeoutOpts = { options: { chunkTimeout: CHUNK_TIMEOUT_MS } };
-  const opencodeConfig = {
-    $schema: 'https://opencode.ai/config.json',
-    provider: {
-      anthropic: noTimeoutOpts,
-      openai: noTimeoutOpts,
-      google: noTimeoutOpts,
-      vercel: noTimeoutOpts,
-      openrouter: noTimeoutOpts,
-      deepseek: noTimeoutOpts,
-      groq: noTimeoutOpts,
-      cerebras: noTimeoutOpts,
-    },
-  };
+  const opencodeConfig = buildOpencodeServerConfig(reasoningOverrides);
+  if (reasoningOverrides.length > 0) {
+    logRuntimeDebug(
+      `[opencode] Injected reasoningEffort for ${reasoningOverrides.length} model(s): `
+      + reasoningOverrides
+        .map(o => `${o.provider}/${stripThinkingSuffix(o.modelId)}=${o.effort}`)
+        .join(', '),
+    );
+  }
   // Write both common filename variants so it's found regardless of OpenCode version.
   const configJson = JSON.stringify(opencodeConfig, null, 2);
   fs.writeFileSync(path.join(opencodeConfigDir, 'opencode.json'), configJson);
@@ -706,7 +781,7 @@ async function startServer(env: NodeJS.ProcessEnv, readinessTimeoutMs = 30_000):
   return {
     url,
     child,
-    envSignature: buildEnvSignature(env),
+    envSignature: buildEnvSignature(env, serializeReasoningOverrides(reasoningOverrides)),
     dbPath,
     logPath,
     close: () => {
@@ -751,10 +826,14 @@ function registerShutdownHooks(): void {
   process.once('SIGTERM', close);
 }
 
-async function getServer(options: Pick<RunOptions, 'apiKey' | 'apiBaseUrl' | 'model' | 'transport'>): Promise<OpenCodeServerHandle> {
+async function getServer(
+  options: Pick<RunOptions, 'apiKey' | 'apiBaseUrl' | 'model' | 'transport'>,
+  reasoningOverrides: OpenCodeReasoningOverride[] = [],
+): Promise<OpenCodeServerHandle> {
   registerShutdownHooks();
   const env = buildOpenCodeEnvironment(process.env, options);
-  const envSignature = buildEnvSignature(env);
+  const reasoningKey = serializeReasoningOverrides(reasoningOverrides);
+  const envSignature = buildEnvSignature(env, reasoningKey);
 
   if (activeServerPromise && activeServerSignature === envSignature) {
     return activeServerPromise;
@@ -765,8 +844,43 @@ async function getServer(options: Pick<RunOptions, 'apiKey' | 'apiBaseUrl' | 'mo
   }
 
   activeServerSignature = envSignature;
-  activeServerPromise = startServer(env);
+  activeServerPromise = startServer(env, reasoningOverrides);
   return activeServerPromise;
+}
+
+/**
+ * Converts the user-facing `RunOptions.reasoningOverrides` list (which stores
+ * `{model: "provider/model-id", reasoningEffort: "..."}` entries) into the
+ * internal `{provider, modelId, effort}` shape required by `buildOpencodeServerConfig`.
+ * Each entry is normalized through `resolveOpenCodeModelTarget` so the provider
+ * and modelId match exactly what the runtime will send in the HTTP message body.
+ */
+function resolveReasoningOverrides(
+  overrides: RunOptions['reasoningOverrides'],
+  apiBaseUrl: string | undefined,
+): OpenCodeReasoningOverride[] {
+  if (!overrides || overrides.length === 0) {
+    return [];
+  }
+  const seen = new Set<string>();
+  const resolved: OpenCodeReasoningOverride[] = [];
+  for (const entry of overrides) {
+    if (!entry?.model || !entry.reasoningEffort) {
+      continue;
+    }
+    const target = resolveOpenCodeModelTarget(entry.model, undefined, apiBaseUrl);
+    const key = `${target.transport}|${stripThinkingSuffix(target.modelId)}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    resolved.push({
+      provider: target.transport,
+      modelId: target.modelId,
+      effort: entry.reasoningEffort,
+    });
+  }
+  return resolved;
 }
 
 export class OpenCodeCLIRuntime implements IRuntime {
@@ -808,7 +922,13 @@ export class OpenCodeCLIRuntime implements IRuntime {
     timeoutMs: number,
   ): Promise<RunResult<T>> {
     const start = Date.now();
-    const server = await getServer(options);
+    // Build the reasoning-override list for this call. Callers (pipeline/audit) are
+    // expected to pass the same list for every call in a session so the cached
+    // server can be reused; differing lists will trigger a server respawn.
+    const reasoningList: RunOptions['reasoningOverrides'] = options.reasoningOverrides
+      ?? (options.reasoningEffort ? [{ model: options.model, reasoningEffort: options.reasoningEffort }] : undefined);
+    const resolvedOverrides = resolveReasoningOverrides(reasoningList, options.apiBaseUrl);
+    const server = await getServer(options, resolvedOverrides);
     const target = resolveOpenCodeModelTarget(options.model, options.transport, options.apiBaseUrl);
 
     // Auto-strip the -thinking suffix (see stripThinkingSuffix for rationale).

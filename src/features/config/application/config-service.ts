@@ -12,6 +12,7 @@ export type ResolvedConfig = {
   exclude: string[];
   prReview?: Config['prReview'];
   disabledReviewers?: Config['disabledReviewers'];
+  reasoningEffort?: string;
 };
 
 const VERCEL_OIDC_ENV = 'VERCEL_OIDC_TOKEN';
@@ -56,6 +57,7 @@ export function resolveConfig(
     exclude: config.exclude || [],
     prReview: config.prReview,
     disabledReviewers: config.disabledReviewers,
+    reasoningEffort: config.reasoningEffort,
   };
 }
 
@@ -100,12 +102,13 @@ const ALLOWED_CONFIG_KEYS: ReadonlySet<keyof Config> = new Set([
   'exclude',
   'prReview',
   'disabledReviewers',
+  'reasoningEffort',
 ]);
 
 /**
  * Sets a single field in the repository's BatEye config file.
  * @param repoPath - Path to the repository root
- * @param field - Configuration field name. Allowed values: '$schema', 'model', 'transport', 'apiBaseUrl', 'exclude', 'prReview', 'disabledReviewers'
+ * @param field - Configuration field name. Allowed values: '$schema', 'model', 'transport', 'apiBaseUrl', 'exclude', 'prReview', 'disabledReviewers', 'reasoningEffort'
  * @param value - New value to assign to the field
  * @throws Error if field is not one of the allowed config keys
  */

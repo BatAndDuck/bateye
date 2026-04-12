@@ -88,6 +88,21 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     log(`Diagnostics enabled. Writing audit traces to ${diagnosticDir}`);
   }
 
+  // Build the reasoning-override list once. Includes config.model (used by orchestrator
+  // and verifier) plus every candidate reviewer's model override, deduped by model id.
+  // OpenCodeCLIRuntime needs every model name upfront so it can seed opencode.json before
+  // spawning its server. Undefined when reasoningEffort isn't configured.
+  // Guard against non-string values that could appear in hand-edited config files.
+  const reasoningEffort = typeof config.reasoningEffort === 'string' && config.reasoningEffort
+    ? config.reasoningEffort
+    : undefined;
+  const reasoningOverrides = reasoningEffort
+    ? Array.from(new Map(
+        [config.model, ...allReviewers.map(r => r.model || config.model)]
+          .map(m => [m, { model: m, reasoningEffort }]),
+      ).values())
+    : undefined;
+
   // Phase 2: Index repository
   log('Indexing repository...');
   const index = await buildRepoIndex(repoPath, config);
@@ -110,6 +125,8 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       apiKey,
       transport: config.transport,
       apiBaseUrl: config.apiBaseUrl,
+      reasoningEffort,
+      reasoningOverrides,
     });
     orchestratorTokens = orchestratorResult.tokensUsed;
     repoProfile = orchestratorResult.repoProfile;
@@ -129,7 +146,7 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
   // Phase 4: Run reviewers
   const runtime = await dependencies.getRuntime();
   const { successfulResults, failedCount } = await executeReviewers(
-    activeReviewers, index, config, apiKey, runtime, repoProfile, issues, log,
+    activeReviewers, index, config, apiKey, runtime, repoProfile, issues, log, reasoningOverrides, reasoningEffort,
   );
 
   if (successfulResults.length === 0) {
@@ -176,6 +193,8 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       apiBaseUrl: config.apiBaseUrl,
       runtime: verifierRuntime,
       log,
+      reasoningEffort,
+      reasoningOverrides,
     });
     verifiedFindings = verifierResult.kept;
     semanticRejectedCount = verifierResult.rejected.length;
@@ -257,6 +276,8 @@ async function executeReviewers(
   repoProfile: RepoProfile | undefined,
   issues: ReviewIssue[],
   log: (msg: string) => void,
+  reasoningOverrides?: Array<{ model: string; reasoningEffort: string }>,
+  reasoningEffort?: string,
 ): Promise<{ successfulResults: ReviewerResult[]; failedCount: number }> {
   log(`Running ${activeReviewers.length} reviewer(s) with concurrency ${Math.min(MAX_CONCURRENT_AUDIT_REVIEWERS, activeReviewers.length)}...`);
   const reviewerResults = await runReviewersWithConcurrency(
@@ -264,7 +285,7 @@ async function executeReviewers(
     MAX_CONCURRENT_AUDIT_REVIEWERS,
     async reviewer => {
       try {
-        const result = await runSingleReviewer(reviewer, index, config, apiKey, runtime, repoProfile, log);
+        const result = await runSingleReviewer(reviewer, index, config, apiKey, runtime, repoProfile, log, reasoningOverrides, reasoningEffort);
         if (result.execution.toolError) {
           issues.push({
             severity: reviewer.tool?.optional === false ? 'error' : 'warning',
@@ -418,6 +439,8 @@ async function runSingleReviewer(
   runtime: IRuntime,
   repoProfile: RepoProfile | undefined,
   log: (msg: string) => void,
+  reasoningOverrides?: Array<{ model: string; reasoningEffort: string }>,
+  reasoningEffort?: string,
 ): Promise<ReviewerResult> {
   const start = Date.now();
   const scopedFiles = scopeFilesForReviewer(index);
@@ -478,6 +501,8 @@ async function runSingleReviewer(
         apiBaseUrl: config.apiBaseUrl,
         maxTokens: MAX_AUDIT_REVIEWER_TOKENS,
         timeoutMs: MAX_AUDIT_REVIEWER_TIMEOUT_MS,
+        reasoningEffort,
+        reasoningOverrides,
       },
       reviewerAnalysisSchema,
     );

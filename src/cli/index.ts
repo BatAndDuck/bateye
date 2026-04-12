@@ -101,10 +101,12 @@ export function createCLI(): Command {
     .description('Quickly set the active model and repository API key')
     .option('--apikey <key>', 'Store the API key for the current repository')
     .option('--model <model>', 'Set the active model, e.g. openai/gpt-5.4-nano')
+    .option('--reasoningEffort <effort>', 'Set reasoning/thinking effort (e.g. low, medium, high, xhigh)')
     .action(async (opts, cmd) => {
       await runConf(getRepoPath(cmd), {
         apiKey: opts.apikey,
         model: opts.model,
+        reasoningEffort: opts.reasoningEffort,
       });
     });
 
