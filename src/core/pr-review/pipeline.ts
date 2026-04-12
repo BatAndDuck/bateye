@@ -403,11 +403,34 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
       .join(', ')}`,
   );
 
-  const bundleResults = await runWithConcurrency(
-    executionPlan,
-    MAX_CONCURRENT_PR_REVIEWERS,
-    group => runPRBundle(group, sharedCtx),
-  );
+  // Track in-flight groups for the heartbeat. Entries are added when a group starts
+  // and removed when it finishes, so the heartbeat always shows the live state.
+  const inFlight = new Map<string, { label: string; startMs: number }>();
+  const groupHeartbeat = setInterval(() => {
+    if (inFlight.size === 0) return;
+    const parts = [...inFlight.values()].map(g => {
+      const elapsedSec = Math.round((Date.now() - g.startMs) / 1000);
+      return `${g.label} (${elapsedSec}s)`;
+    });
+    log(`  - Still waiting on ${inFlight.size} group(s): ${parts.join(', ')}`);
+  }, 30_000);
+
+  let bundleResults: PRReviewerRunResult[][];
+  try {
+    bundleResults = await runWithConcurrency(
+      executionPlan,
+      MAX_CONCURRENT_PR_REVIEWERS,
+      group => {
+        const label = group.reviewers.length === 1
+          ? group.reviewers[0].name
+          : `bundle:${group.groupId}`;
+        inFlight.set(group.groupId, { label, startMs: Date.now() });
+        return runPRBundle(group, sharedCtx).finally(() => inFlight.delete(group.groupId));
+      },
+    );
+  } finally {
+    clearInterval(groupHeartbeat);
+  }
   let reviewerRunResults: PRReviewerRunResult[] = bundleResults.flat();
 
   // Retry failed/timed-out reviewers with reduced concurrency to avoid server saturation.
@@ -818,7 +841,7 @@ async function runPRReviewer(
   }
 
   try {
-    log(`  Running reviewer: ${reviewer.name} (model=${reviewer.model || model}, changedFiles=${currentDiffFiles.length}, seededFiles=${initialFiles.length})...`);
+    log(`  Running reviewer: ${reviewer.name} (model=${reviewer.model || model}, changedFiles=${currentDiffFiles.length}, seededFiles=${initialFiles.length}, timeout=${Math.round(MAX_PR_REVIEWER_TIMEOUT_MS / 1000)}s)...`);
     const runResult = await runtime.runAgenticReview<PRReviewerAnalysis>(
       {
         systemPrompt,
@@ -975,7 +998,7 @@ async function runPRBundle(
   const timeoutMs = MAX_PR_REVIEWER_TIMEOUT_MS * scale;
 
   try {
-    log(`  Running bundle: ${group.groupId} [${group.mode}] (${group.reviewers.length} reviewers: ${reviewerNames}, agent=${agentName})...`);
+    log(`  Running bundle: ${group.groupId} [${group.mode}] (${group.reviewers.length} reviewers: ${reviewerNames}, agent=${agentName}, timeout=${Math.round(timeoutMs / 1000)}s)...`);
     const runResult = await ctx.runtime.runAgenticReview<PRBundleAnalysis>(
       {
         systemPrompt,

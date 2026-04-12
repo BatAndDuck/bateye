@@ -1091,11 +1091,25 @@ export class OpenCodeCLIRuntime implements IRuntime {
           };
         }
 
-        const response = await this.request<OpenCodeMessageResponse>(`${server.url}/session/${sessionID}/message`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(messageBody),
-        }, timeoutMs);
+        // Heartbeat during the (potentially very long) model call so CI logs don't
+        // appear frozen. Fires every 30s, reporting elapsed time and the call label.
+        const callStart = Date.now();
+        const callHeartbeat = setInterval(() => {
+          const elapsedSec = Math.round((Date.now() - callStart) / 1000);
+          const timeoutSec = Math.round(timeoutMs / 1000);
+          logRuntimeDebug(`[opencode]${labelTag} Still waiting for model response... (${elapsedSec}s / ${timeoutSec}s timeout)`);
+        }, 30_000);
+
+        let response: OpenCodeMessageResponse;
+        try {
+          response = await this.request<OpenCodeMessageResponse>(`${server.url}/session/${sessionID}/message`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(messageBody),
+          }, timeoutMs);
+        } finally {
+          clearInterval(callHeartbeat);
+        }
 
         const providerError = response?.info?.error?.data?.message || response?.info?.error?.message;
         if (providerError) {
