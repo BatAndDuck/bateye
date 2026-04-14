@@ -399,7 +399,6 @@ export function buildPRSummaryPrompt(
   verificationStats?: {
     rawFindings: number;
     deterministicRejected: number;
-    semanticRejected: number;
     finalFindings: number;
   },
   toolSummaries?: ToolSummaryEntry[]
@@ -413,7 +412,7 @@ export function buildPRSummaryPrompt(
   };
 
   const verificationSection = verificationStats
-    ? `\n### Verification\n\n| Stage | Count |\n|-------|-------|\n| Raw findings | ${verificationStats.rawFindings} |\n| Rejected (deterministic) | ${verificationStats.deterministicRejected} |\n| Rejected (semantic) | ${verificationStats.semanticRejected} |\n| Final findings | ${verificationStats.finalFindings} |\n`
+    ? `\n### Verification\n\n| Stage | Count |\n|-------|-------|\n| Raw findings | ${verificationStats.rawFindings} |\n| Rejected (deterministic) | ${verificationStats.deterministicRejected} |\n| Final findings | ${verificationStats.finalFindings} |\n`
     : '';
 
   const issueSection = issues.length > 0

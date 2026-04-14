@@ -3,7 +3,7 @@
  *
  * Sets `reasoningEffort: "high"` in `.bateye/config.json` for an OpenAI-style
  * model and runs `pr-review --dry-run` against the mock runtime. Asserts that
- * every structured run() call (orchestrator + semantic verifier) and every
+ * every structured run() call (the orchestrator) and every
  * runAgenticReview() call (reviewer agents) carry `reasoningEffort: "high"` in
  * the mock runtime log, proving the option threads through the full pipeline.
  */
@@ -58,7 +58,7 @@ Report only concrete security problems after investigating the current repositor
 `);
   commitAll(repoPath, 'trimmed token');
 
-  // Mock runtime fixtures: one orchestrator run + one semantic-verifier run + one reviewer agentic run
+  // Mock runtime fixtures: one orchestrator run + one reviewer agentic run
   const fixturePath = path.join(repoPath, 'mock-runtime.json');
   const logPath = path.join(repoPath, 'mock-runtime-log.json');
 
@@ -70,19 +70,6 @@ Report only concrete security problems after investigating the current repositor
           intentSummary: 'The PR trims the token before checking its length.',
           selectedReviewers: [
             { reviewerId: 'security', reason: 'Auth change needs security review.', confidence: 0.95 },
-          ],
-        },
-      },
-      // Semantic verifier (structured run) — one finding, verified
-      {
-        data: {
-          verifications: [
-            {
-              findingId: 'SECURITY_1',
-              supported: true,
-              classification: 'direct',
-              reason: 'The finding is anchored to the changed line.',
-            },
           ],
         },
       },
@@ -130,8 +117,7 @@ Report only concrete security problems after investigating the current repositor
   const structuredRuns = runtimeLog.filter(e => e.type === 'run');
   const agenticRuns = runtimeLog.filter(e => e.type === 'runAgenticReview');
 
-  // Expect exactly 2 structured runs: orchestrator + semantic verifier
-  assert.equal(structuredRuns.length, 2, 'Expected orchestrator + semantic verifier structured runs');
+  assert.equal(structuredRuns.length, 1, 'Expected 1 structured orchestrator run');
   // Expect exactly 1 agentic run: the security reviewer
   assert.equal(agenticRuns.length, 1, 'Expected 1 agentic reviewer run');
 

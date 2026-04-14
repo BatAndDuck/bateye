@@ -70,9 +70,7 @@ test('loadConfig merges config.local.json over config.json', () => {
     model: 'anthropic/shared-model',
     exclude: ['dist'],
     prReview: {
-      semanticVerification: {
-        enabled: true,
-      },
+      maxReviewers: 5,
     },
   });
   writeLocalConfig(tmpDir, {
@@ -88,9 +86,7 @@ test('loadConfig merges config.local.json over config.json', () => {
   assert.equal(config.model, 'openai/local-model');
   assert.deepEqual(config.exclude, ['dist']);
   assert.deepEqual(config.prReview, {
-    semanticVerification: {
-      enabled: true,
-    },
+    maxReviewers: 5,
     autoApprove: {
       enabled: false,
     },

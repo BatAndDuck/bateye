@@ -31,7 +31,6 @@ import {
 import { GitHubReviewPlatform, getGitHubEnvContext } from '../github/platform';
 import { parseUnifiedDiff, buildReviewerDiffContext, getFilesInDiff } from './diff-parser';
 import { verifyFindings, verifyFindingsAgainstDiff } from './verifier';
-import { verifyFindingsSemantically } from './semantic-verifier';
 import { deduplicateFindings } from './deduplicator';
 import { buildConversation, filterAlreadyPosted, PRConversation } from './conversation';
 import { IRuntime, TokenUsage } from '../runtime/interface';
@@ -497,8 +496,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   }
 
   // Diff-gate: hard-reject any finding whose anchor file/lines are not in the PR diff.
-  // This runs deterministically (no LLM) and prevents non-diff findings from reaching
-  // the expensive semantic verifier.
+  // This runs deterministically (no LLM) and blocks clearly out-of-scope findings.
   log('Running diff-gate verification...');
   const diffGate = verifyFindingsAgainstDiff(deterministic.verified, parsedDiff);
   log(`Diff-gate: accepted ${diffGate.verified.length}, rejected ${diffGate.rejected.length}`);
@@ -512,54 +510,12 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   log('Deduplicating verified findings...');
   const deduped = deduplicateFindings(diffGate.verified);
   log(`After dedup: ${deduped.length} findings (removed ${diffGate.verified.length - deduped.length} duplicates)`);
-  logPRFindingList(log, deduped, 'Pre-semantic findings detail');
+  logPRFindingList(log, deduped, 'Verified findings detail');
 
-  let semanticVerified: PRFinding[] = [];
-  let semanticRejectedCount = 0;
-  let semanticTokens: TokenUsage | undefined;
-
-  const semanticEnabled = config.prReview?.semanticVerification?.enabled !== false;
-
-  if (deduped.length > 0 && semanticEnabled) {
-    log(`Running semantic verification on ${deduped.length} finding(s)...`);
-    const semantic = await verifyFindingsSemantically(deduped, {
-      repoPath,
-      parsedDiff,
-      runtime,
-      model: config.model,
-      apiKey,
-      transport: config.transport,
-      apiBaseUrl: config.apiBaseUrl,
-      log,
-      promptLogDir,
-      reasoningEffort: reasoningEffort,
-      reasoningOverrides,
-    });
-    issues.push(...semantic.issues);
-    semanticVerified = semantic.verified;
-    semanticRejectedCount = semantic.rejected.length;
-    semanticTokens = semantic.tokensUsed;
-    log(`Semantic verification: accepted ${semantic.verified.length}, rejected ${semantic.rejected.length}`);
-    if (semantic.tokensUsed) {
-      log(`[token-diag] Semantic verification (${config.model}): ${formatTokenSummary(semantic.tokensUsed)}`);
-    }
-
-    if (semantic.rejected.length > 0) {
-      for (const rejected of semantic.rejected) {
-        log(`  ✗ Rejected (semantic): "${rejected.finding.title}" - ${rejected.reason}`);
-      }
-    }
-  } else if (!semanticEnabled) {
-    log('Skipping semantic verification - disabled via config (prReview.semanticVerification.enabled: false).');
-    semanticVerified = deduped;
-  } else {
-    log('Skipping semantic verification - no findings remain after deterministic/schema validation and deduplication.');
-  }
-
-  let finalFindings = semanticVerified;
+  let finalFindings = deduped;
   if (conversation) {
     log('Filtering already-posted findings...');
-    finalFindings = filterAlreadyPosted(semanticVerified, conversation);
+    finalFindings = filterAlreadyPosted(deduped, conversation);
     log(`After filter: ${finalFindings.length} new findings to post`);
   }
 
@@ -568,7 +524,6 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     confidenceRejected: allFindings.length - confidenceKept.length,
     deterministicRejected: deterministic.rejected.length,
     diffGateRejected: diffGate.rejected.length,
-    semanticRejected: semanticRejectedCount,
     finalFindings: finalFindings.length,
   };
 
@@ -583,10 +538,6 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     grandTotal = addTokens(grandTotal, reviewerTokenTotal);
     hasGrandTotalData = true;
   }
-  if (semanticTokens) {
-    grandTotal = addTokens(grandTotal, semanticTokens);
-    hasGrandTotalData = true;
-  }
   if (hasGrandTotalData) {
     const reviewerTokensAreEstimated = hasTokenData && reviewerTokenTotal.estimated;
     const reviewerSuffix = reviewerTokensAreEstimated
@@ -595,7 +546,6 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     log(`[token-diag] ═══ GRAND TOTAL: ${formatTokenSummary(grandTotal)}${reviewerTokensAreEstimated ? ' (⚠ UNDERESTIMATED - see reviewers line)' : ''} ═══`);
     log(`[token-diag]   orchestrator: ${orchestratorResult.tokensUsed ? formatTokenSummary(orchestratorResult.tokensUsed) : 'n/a'}`);
     log(`[token-diag]   reviewers (${selectedReviewers.length}x): ${hasTokenData ? formatTokenSummary(reviewerTokenTotal) + reviewerSuffix : 'n/a'}`);
-    log(`[token-diag]   semantic verification: ${semanticTokens ? formatTokenSummary(semanticTokens) : 'skipped (no findings)'}`);
     if (reviewerTokensAreEstimated) {
       log('[token-diag] ⚠ Reviewer token counts are estimated for one or more agentic calls.');
       log('[token-diag]   The Codebite-backed runtime did not report complete per-step usage for every turn.');
@@ -621,7 +571,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     summary: '',
     findings: finalFindings,
     issues,
-    rejectedFindings: verificationStats.deterministicRejected + verificationStats.diffGateRejected + verificationStats.semanticRejected,
+    rejectedFindings: verificationStats.deterministicRejected + verificationStats.diffGateRejected,
     verificationStats,
     tokenUsage: hasGrandTotalData ? grandTotal : undefined,
     generatedAt: new Date().toISOString(),

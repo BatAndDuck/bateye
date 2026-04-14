@@ -19,12 +19,7 @@ Example:
 ```json
 {
   "model": "openai/gpt-5.4-mini",
-  "exclude": ["dist"],
-  "prReview": {
-    "semanticVerification": {
-      "enabled": true
-    }
-  }
+  "exclude": ["dist"]
 }
 ```
 
@@ -42,12 +37,7 @@ Effective config:
 ```json
 {
   "model": "openai/gpt-5.4",
-  "exclude": ["dist", "generated"],
-  "prReview": {
-    "semanticVerification": {
-      "enabled": true
-    }
-  }
+  "exclude": ["dist", "generated"]
 }
 ```
 
@@ -89,9 +79,6 @@ If you want BatEye to read credentials from a gitignored file instead of environ
     "prReview": ["inline-docs"]
   },
   "prReview": {
-    "semanticVerification": {
-      "enabled": true
-    },
     "autoApprove": {
       "enabled": false,
       "maxSeverity": "low"
@@ -112,7 +99,6 @@ If you want BatEye to read credentials from a gitignored file instead of environ
 | `reasoningEffort` | string | - | Reasoning/thinking effort for models that support it. Common values: `minimal`, `low`, `medium`, `high`, `xhigh`. See [Reasoning effort](#reasoning-effort) |
 | `exclude` | string[] | - | Additional paths to exclude from analysis |
 | `disabledReviewers` | object | - | Reviewers to skip per mode |
-| `prReview.semanticVerification.enabled` | boolean | `true` | LLM pass to filter false positives |
 | `prReview.autoApprove.enabled` | boolean | `false` | Auto-approve PRs with no high-severity findings |
 | `prReview.autoApprove.maxSeverity` | `"info"` \| `"low"` \| `"medium"` | `"low"` | Highest severity allowed for auto-approve |
 
@@ -170,22 +156,6 @@ export VERCEL_OIDC_TOKEN=your-vercel-oidc-token
   "disabledReviewers": {
     "audit": ["responsiveness", "accessibility", "i18n"],
     "prReview": ["inline-docs"]
-  }
-}
-```
-
-### Semantic verification
-
-The semantic verification pass cross-checks each finding against the actual diff and file content to filter false positives. It costs extra tokens (typically 1–3 min) but significantly reduces noise.
-
-Disable if you want faster, cheaper reviews and can tolerate some false positives:
-
-```json
-{
-  "prReview": {
-    "semanticVerification": {
-      "enabled": false
-    }
   }
 }
 ```

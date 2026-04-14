@@ -225,7 +225,6 @@ function formatMarkdown(result: PRReviewResult, mdModel: string, mdPrUrl: string
     lines.push(`| Confidence rejected | ${s.confidenceRejected} |`);
     lines.push(`| Deterministic rejected | ${s.deterministicRejected} |`);
     lines.push(`| Diff-gate rejected | ${s.diffGateRejected} |`);
-    lines.push(`| Semantic rejected | ${s.semanticRejected} |`);
     lines.push(`| **Final findings** | **${s.finalFindings}** |`);
     lines.push('');
   }

@@ -17,7 +17,7 @@ function runPRReview(args, env) {
   });
 }
 
-test('pr-review command runs agentic reviewers, semantically verifies findings, and writes the final report', () => {
+test('pr-review command runs agentic reviewers and writes the final report after deterministic verification', () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-int-'));
   initGitRepo(repoPath);
 
@@ -86,24 +86,6 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
           selectedReviewers: [
             { reviewerId: 'pr-tool', reason: 'Changed TypeScript logic needs a security scan.' , confidence: 0.9 },
             { reviewerId: 'pr-follow-up', reason: 'The updated function should get a code quality pass.' , confidence: 0.9 },
-          ],
-        },
-      },
-      {
-        data: {
-          verifications: [
-            {
-              findingId: 'PR_TOOL_PR_1',
-              supported: true,
-              classification: 'direct',
-              reason: 'The finding is supported by the current file content and anchored to changed code.',
-            },
-            {
-              findingId: 'PR_FOLLOW_UP_PR_2',
-              supported: false,
-              classification: 'unrelated',
-              reason: 'The anchor file is not part of the PR diff, so the finding is not related to the reviewed changes.',
-            },
           ],
         },
       },
@@ -201,7 +183,6 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
     confidenceRejected: 0,
     deterministicRejected: 0,
     diffGateRejected: 1,
-    semanticRejected: 0,
     finalFindings: 1,
   });
   assert.match(report.summary, /Verification/);
@@ -222,8 +203,7 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
   assert.deepEqual(toolLog.files, ['src/service.ts']);
 
   const runtimeLog = JSON.parse(fs.readFileSync(logPath, 'utf-8'));
-  // Two non-agentic runs: the orchestrator and semantic verification.
-  assert.equal(runtimeLog.filter(entry => entry.type === 'run').length, 2);
+  assert.equal(runtimeLog.filter(entry => entry.type === 'run').length, 1);
   assert.equal(runtimeLog.filter(entry => entry.type === 'runAgenticReview').length, 2);
   assert.equal(runtimeLog.find(entry => entry.type === 'runAgenticReview').repoPath, repoPath);
 });
@@ -460,7 +440,7 @@ Investigate code quality issues only.
   assert.match(report.summary, /Review completed with warnings/);
 });
 
-test('pr-review command rejects false positives when current code preserves the behavior elsewhere in the file', () => {
+test('pr-review command keeps reviewer findings when current code preserves the behavior elsewhere in the file', () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-inline-fp-'));
   initGitRepo(repoPath);
 
@@ -508,18 +488,6 @@ export function buildRepoIndex(config) {
           ],
         },
       },
-      {
-        data: {
-          verifications: [
-            {
-              findingId: 'BUG_HUNTER_LOCAL_1',
-              supported: false,
-              classification: 'unclear',
-              reason: 'The current file still applies config.exclude inline, so the claimed regression does not exist.',
-            },
-          ],
-        },
-      },
     ],
     agenticRuns: [
       {
@@ -558,18 +526,17 @@ export function buildRepoIndex(config) {
   assert.equal(result.status, 0, result.stderr || result.stdout);
 
   const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json'), 'utf-8'));
-  assert.equal(report.findings.length, 0);
+  assert.equal(report.findings.length, 1);
   assert.deepEqual(report.verificationStats, {
     rawFindings: 1,
     confidenceRejected: 0,
     deterministicRejected: 0,
     diffGateRejected: 0,
-    semanticRejected: 1,
-    finalFindings: 0,
+    finalFindings: 1,
   });
 });
 
-test('pr-review command rejects workflow absence claims when the current workflow already contains the gate', () => {
+test('pr-review command keeps workflow findings after deterministic verification', () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-workflow-fp-'));
   initGitRepo(repoPath);
 
@@ -630,18 +597,6 @@ jobs:
           ],
         },
       },
-      {
-        data: {
-          verifications: [
-            {
-              findingId: 'CI_CD_LOCAL_1',
-              supported: false,
-              classification: 'unclear',
-              reason: 'The current workflow still configures npm cache in actions/setup-node.',
-            },
-          ],
-        },
-      },
     ],
     agenticRuns: [
       {
@@ -680,11 +635,11 @@ jobs:
   assert.equal(result.status, 0, result.stderr || result.stdout);
 
   const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json'), 'utf-8'));
-  assert.equal(report.findings.length, 0);
-  assert.equal(report.verificationStats.semanticRejected, 1);
+  assert.equal(report.findings.length, 1);
+  assert.equal(report.verificationStats.finalFindings, 1);
 });
 
-test('pr-review command rejects findings anchored only to removed code', () => {
+test('pr-review command keeps findings anchored to changed files even if the quote references removed code', () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-removed-code-'));
   initGitRepo(repoPath);
 
@@ -728,18 +683,6 @@ Report only concrete issues that still exist after investigating the current fil
           ],
         },
       },
-      {
-        data: {
-          verifications: [
-            {
-              findingId: 'REMOVED_CODE_REVIEWER_1',
-              supported: false,
-              classification: 'unrelated',
-              reason: 'The quoted code only exists in removed lines, so the finding does not describe a current PR defect.',
-            },
-          ],
-        },
-      },
     ],
     agenticRuns: [
       {
@@ -778,14 +721,13 @@ Report only concrete issues that still exist after investigating the current fil
   assert.equal(result.status, 0, result.stderr || result.stdout);
 
   const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json'), 'utf-8'));
-  assert.equal(report.findings.length, 0);
+  assert.equal(report.findings.length, 1);
   assert.deepEqual(report.verificationStats, {
     rawFindings: 1,
     confidenceRejected: 0,
     deterministicRejected: 0,
     diffGateRejected: 0,
-    semanticRejected: 1,
-    finalFindings: 0,
+    finalFindings: 1,
   });
 });
 
@@ -838,18 +780,6 @@ Report only concrete code quality findings after investigating the current repos
           intentSummary: 'The PR updates one TypeScript function and should be reviewed by the GitHub reviewer only.',
           selectedReviewers: [
             { reviewerId: 'github-reviewer', reason: 'Updated TypeScript code should be reviewed.' , confidence: 0.9 },
-          ],
-        },
-      },
-      {
-        data: {
-          verifications: [
-            {
-              findingId: 'GITHUB_REVIEWER_1',
-              supported: true,
-              classification: 'direct',
-              reason: 'The low-severity issue is supported by the current file content.',
-            },
           ],
         },
       },
@@ -944,7 +874,6 @@ Report only concrete code quality findings after investigating the current repos
     confidenceRejected: 0,
     deterministicRejected: 0,
     diffGateRejected: 0,
-    semanticRejected: 0,
     finalFindings: 0,
   });
 
@@ -999,18 +928,6 @@ Report only concrete findings anchored to the changed file.
           intentSummary: 'The PR updates one TypeScript function and should be reviewed by the inline GitHub reviewer only.',
           selectedReviewers: [
             { reviewerId: 'github-inline-reviewer', reason: 'Changed TypeScript code should be reviewed.' , confidence: 0.9 },
-          ],
-        },
-      },
-      {
-        data: {
-          verifications: [
-            {
-              findingId: 'GITHUB_INLINE_REVIEWER_1',
-              supported: true,
-              classification: 'direct',
-              reason: 'The finding is supported by the changed code and current file state.',
-            },
           ],
         },
       },

@@ -115,7 +115,6 @@ function printPRReviewSummary(result: PRReviewResult): void {
   if (result.verificationStats) {
     console.log(chalk.gray('  Raw findings:'), result.verificationStats.rawFindings);
     console.log(chalk.gray('  Rejected (deterministic):'), result.verificationStats.deterministicRejected);
-    console.log(chalk.gray('  Rejected (semantic):'), result.verificationStats.semanticRejected);
     console.log(chalk.gray('  Final findings:'), result.verificationStats.finalFindings);
   } else {
     console.log(chalk.gray('  Total findings:'), result.findings.length);

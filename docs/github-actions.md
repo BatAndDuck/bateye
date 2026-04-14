@@ -171,5 +171,4 @@ The review itself:
 1. Parses the unified diff into structured per-line format
 2. Runs each reviewer (up to 10 concurrently) through the Codebite-backed agentic runtime
 3. Deduplicates findings across reviewers
-4. Runs a semantic verification pass to filter false positives
-5. Posts inline comments and a summary to the PR
+4. Posts inline comments and a summary to the PR

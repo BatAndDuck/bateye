@@ -90,7 +90,6 @@ export type AuditResult = {
     rawFindings: number;
     confidenceRejected: number;
     deterministicRejected: number;
-    semanticRejected: number;
     finalFindings: number;
   };
 };
@@ -115,7 +114,6 @@ export type PRReviewResult = {
     confidenceRejected: number;
     deterministicRejected: number;
     diffGateRejected: number;
-    semanticRejected: number;
     finalFindings: number;
   };
   tokenUsage?: TokenUsageSummary;
@@ -134,12 +132,6 @@ export type PRReviewConfig = {
    * the highest confidence scores are kept. Defaults to no limit (up to the
    * absolute hard cap MAX_PR_REVIEWERS). */
   maxReviewers?: number;
-  /** Controls the LLM-based semantic verification pass that confirms findings are real.
-   * Disabling it skips the pass entirely - faster and cheaper, but may let false-positives through.
-   * Defaults to enabled. */
-  semanticVerification?: {
-    enabled: boolean;
-  };
 };
 
 /** Repository-level configuration loaded from `.bateye/config.json` plus optional `.bateye/config.local.json` overrides. */

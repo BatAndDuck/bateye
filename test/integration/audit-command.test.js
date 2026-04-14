@@ -453,7 +453,7 @@ test('audit command fails clearly when non-agentic direct runtime is requested',
   assert.match(result.stdout + result.stderr, /Agentic audit cannot use BATEYE_RUNTIME=direct/);
 });
 
-test('audit command diagnostic mode writes verifier prompt captures', () => {
+test('audit command diagnostic mode still completes without the removed verifier pass', () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-audit-diagnostic-int-'));
   fs.mkdirSync(path.join(repoPath, '.git'));
   fs.mkdirSync(path.join(repoPath, 'src'), { recursive: true });
@@ -466,15 +466,7 @@ test('audit command diagnostic mode writes verifier prompt captures', () => {
 
   const fixturePath = path.join(repoPath, 'mock-runtime.json');
   writeJson(fixturePath, {
-    runs: [
-      {
-        data: {
-          verifications: [
-            { findingId: 'SECURITY_API-001', classification: 'concrete', reason: 'Confirmed by current code.' },
-          ],
-        },
-      },
-    ],
+    runs: [],
     agenticRuns: [
       {
         data: {
@@ -512,9 +504,5 @@ test('audit command diagnostic mode writes verifier prompt captures', () => {
 
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /Diagnostics enabled\. Writing audit traces to/);
-
-  const diagnosticsDir = path.join(repoPath, '.bateye', 'out', 'diagnostics');
-  const files = fs.readdirSync(diagnosticsDir);
-  assert.ok(files.some(file => file.includes('audit-verifier-batch1-system')));
-  assert.ok(files.some(file => file.includes('audit-verifier-batch1-user')));
+  assert.ok(fs.existsSync(path.join(repoPath, '.bateye', 'out', 'audit.json')));
 });
