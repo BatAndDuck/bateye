@@ -2,7 +2,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
 import { saveConfig } from '../../core/config/loader';
-import { CONFIG_DIR, REVIEWERS_DIR, CONFIG_FILE, DEFAULT_MODEL, DEFAULT_API_KEY_ENV } from '../../core/config/defaults';
+import {
+  CONFIG_DIR,
+  REVIEWERS_DIR,
+  CONFIG_FILE,
+  CONFIG_LOCAL_FILE,
+  DEFAULT_MODEL,
+  DEFAULT_API_KEY_ENV,
+} from '../../core/config/defaults';
 
 export async function runInit(repoPath: string): Promise<void> {
   console.log(chalk.cyan('\n🦇 BatEye Init\n'));
@@ -33,13 +40,22 @@ export async function runInit(repoPath: string): Promise<void> {
   }
 
   const gitignorePath = path.join(repoPath, '.gitignore');
-  const outEntry = '.bateye/out/';
-  if (fs.existsSync(gitignorePath)) {
-    const content = fs.readFileSync(gitignorePath, 'utf-8');
-    if (!content.includes(outEntry)) {
-      fs.appendFileSync(gitignorePath, `\n# BatEye output\n${outEntry}\n`);
-      console.log(chalk.green('  updated'), '.gitignore');
+  const ignoreEntries = ['.bateye/out/', CONFIG_LOCAL_FILE];
+  const gitignoreExists = fs.existsSync(gitignorePath);
+  const gitignoreContent = gitignoreExists ? fs.readFileSync(gitignorePath, 'utf-8') : '';
+  const gitignoreLines = gitignoreContent.split(/\r?\n/);
+  const missingEntries = ignoreEntries.filter(entry => !gitignoreLines.includes(entry));
+  if (missingEntries.length > 0) {
+    let nextContent = gitignoreContent;
+    if (nextContent.length > 0 && !nextContent.endsWith('\n')) {
+      nextContent += '\n';
     }
+    if (nextContent.length > 0) {
+      nextContent += '\n';
+    }
+    nextContent += `# BatEye\n${missingEntries.join('\n')}\n`;
+    fs.writeFileSync(gitignorePath, nextContent, 'utf-8');
+    console.log(chalk.green(gitignoreExists ? '  updated' : '  created'), '.gitignore');
   }
 
   console.log(chalk.cyan('\nNext steps:'));

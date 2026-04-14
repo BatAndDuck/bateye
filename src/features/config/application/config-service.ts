@@ -1,14 +1,21 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Config } from '../../../types/index';
-import { CONFIG_FILE, DEFAULT_MODEL, DEFAULT_API_KEY_ENV } from '../../../core/config/defaults';
+import {
+  CONFIG_FILE,
+  CONFIG_LOCAL_FILE,
+  DEFAULT_MODEL,
+  DEFAULT_API_KEY_ENV,
+} from '../../../core/config/defaults';
 import { resolveStoredApiKey } from './credential-store';
 
 export type ResolvedConfig = {
   $schema?: string;
   model: string;
+  apiKey?: string;
   transport: string;
   apiBaseUrl?: string;
+  githubToken?: string;
   exclude: string[];
   prReview?: Config['prReview'];
   disabledReviewers?: Config['disabledReviewers'];
@@ -17,14 +24,32 @@ export type ResolvedConfig = {
 
 const VERCEL_OIDC_ENV = 'VERCEL_OIDC_TOKEN';
 const VERCEL_GATEWAY_ENV_NAMES = [DEFAULT_API_KEY_ENV, 'AI_GATEWAY_API_KEY', VERCEL_OIDC_ENV] as const;
+const CONFIG_FILES = [CONFIG_FILE, CONFIG_LOCAL_FILE] as const;
 
-export function loadConfig(repoPath: string): Config {
-  if (!repoPath || typeof repoPath !== 'string') {
-    throw new Error('repoPath is required');
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function optionalString(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function mergeConfig(base: Config, override: Config): Config {
+  const merged: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    const current = merged[key];
+    merged[key] = isPlainObject(current) && isPlainObject(value)
+      ? mergeConfig(current as Config, value as Config)
+      : value;
   }
-  const configPath = path.join(repoPath, CONFIG_FILE);
+  return merged as Config;
+}
+
+function readConfigFile(repoPath: string, configFile: string): Config | undefined {
+  const configPath = path.join(repoPath, configFile);
   if (!fs.existsSync(configPath)) {
-    return {};
+    return undefined;
   }
 
   try {
@@ -33,6 +58,17 @@ export function loadConfig(repoPath: string): Config {
   } catch (err) {
     throw new Error(`Failed to parse ${configPath}: ${(err as Error).message}`, { cause: err });
   }
+}
+
+export function loadConfig(repoPath: string): Config {
+  if (!repoPath || typeof repoPath !== 'string') {
+    throw new Error('repoPath is required');
+  }
+
+  return CONFIG_FILES.reduce<Config>((config, configFile) => {
+    const fileConfig = readConfigFile(repoPath, configFile);
+    return fileConfig ? mergeConfig(config, fileConfig) : config;
+  }, {});
 }
 
 export function saveConfig(repoPath: string, config: Config): void {
@@ -52,8 +88,10 @@ export function resolveConfig(
   return {
     $schema: config.$schema,
     model,
+    apiKey: optionalString(config.apiKey),
     transport: config.transport || 'auto',
     apiBaseUrl: config.apiBaseUrl,
+    githubToken: optionalString(config.githubToken),
     exclude: config.exclude || [],
     prReview: config.prReview,
     disabledReviewers: config.disabledReviewers,
@@ -70,28 +108,41 @@ export function resolveAuthEnvName(config: Pick<ResolvedConfig, 'model' | 'trans
 }
 
 /** Resolve the API credential required for the selected runtime transport and model. */
-export function resolveApiKey(config: Pick<ResolvedConfig, 'model' | 'transport'> = {
+export function resolveApiKey(config: Pick<ResolvedConfig, 'model' | 'transport' | 'apiKey'> = {
   model: DEFAULT_MODEL,
   transport: 'auto',
 }, repoPath = process.cwd()): string {
+  const configApiKey = optionalString(config.apiKey);
+
   if (usesVercelGateway(config)) {
     // Accept any of the three Vercel credential sources (same priority as the runtime).
-    const key = process.env[DEFAULT_API_KEY_ENV]
+    const key = configApiKey
+      || process.env[DEFAULT_API_KEY_ENV]
       || process.env['AI_GATEWAY_API_KEY']
       || process.env[VERCEL_OIDC_ENV]
       || resolveStoredApiKey(repoPath);
     if (!key) {
-      throw new Error(`API key not found. Set one of: ${VERCEL_GATEWAY_ENV_NAMES.join(', ')}.`);
+      throw new Error(`API key not found. Set one of: ${VERCEL_GATEWAY_ENV_NAMES.join(', ')}, or put apiKey in .bateye/config.local.json.`);
     }
     return key;
   }
 
   const envName = resolveAuthEnvName(config);
-  const key = process.env[envName] || resolveStoredApiKey(repoPath);
+  const key = configApiKey || process.env[envName] || resolveStoredApiKey(repoPath);
   if (!key) {
-    throw new Error(`API key not found. Set ${envName} or configure it with \`bateye conf --apikey ...\`.`);
+    throw new Error(`API key not found. Set ${envName}, put apiKey in .bateye/config.local.json, or configure it with \`bateye conf --apikey ...\`.`);
   }
   return key;
+}
+
+export function resolveGitHubToken(
+  config?: Pick<ResolvedConfig, 'githubToken'>,
+  explicitToken?: string,
+): string | undefined {
+  return optionalString(explicitToken)
+    || optionalString(config?.githubToken)
+    || optionalString(process.env.GITHUB_TOKEN)
+    || undefined;
 }
 
 const ALLOWED_CONFIG_KEYS: ReadonlySet<keyof Config> = new Set([
@@ -129,7 +180,10 @@ export function setConfigField(repoPath: string, field: keyof Config, value: str
     throw new Error(`Config field "${field}" does not accept an array value.`);
   }
 
-  const config = loadConfig(repoPath);
+  // Validate all active config files first so the command does not silently
+  // succeed while a malformed local override still breaks normal execution.
+  loadConfig(repoPath);
+  const config = readConfigFile(repoPath, CONFIG_FILE) ?? {};
   Object.assign(config, { [field]: value });
   saveConfig(repoPath, config);
 }

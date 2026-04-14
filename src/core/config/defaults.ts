@@ -15,12 +15,13 @@ export const BUILT_IN_EXCLUDES = [
 
 export const CONFIG_DIR = '.bateye';
 export const CONFIG_FILE = '.bateye/config.json';
+export const CONFIG_LOCAL_FILE = '.bateye/config.local.json';
 export const REVIEWERS_DIR = '.bateye/reviewers';
 export const OUTPUT_DIR = '.bateye/out';
 export const AUDIT_OUTPUT_FILE = '.bateye/out/audit.json';
 export const PR_REVIEW_OUTPUT_FILE = '.bateye/out/pr-review.json';
 
-export const DEFAULT_MODEL = 'vercel/deepseek/deepseek-v3.2-thinking';
+export const DEFAULT_MODEL = 'vercel/openai/gpt-5.4-nano';
 export const DEFAULT_API_KEY_ENV = 'BATEYE_LLM_MODEL_API_KEY';
 
 export const MAX_FILE_SIZE_BYTES = 500 * 1024; // 500 KB
@@ -41,7 +42,7 @@ export const MAX_AUDIT_REVIEWER_TIMEOUT_MS = 1_200_000;
 export const MAX_PR_REVIEWER_TIMEOUT_MS = 1_200_000;
 /**
  * Maximum wall clock time for a single DirectAI orchestrator call (ms).
- * Slow models (e.g. deepseek-v3.2 via Vercel) can take 8-10 min per response.
+ * Slow gateway-routed models can take 8-10 min per response.
  * The orchestrator retries up to 3× at the application layer, so total worst-case
  * is 3 × this value.  Set to 10 min to accommodate genuine model latency without
  * the 3× amplification caused by the OpenAI SDK's built-in maxRetries.
@@ -51,9 +52,8 @@ export const MAX_ORCHESTRATOR_TIMEOUT_MS = 600_000;
 export const MAX_PR_REVIEWERS = 10;
 /**
  * Maximum number of PR reviewers to run concurrently.
- * Thinking models (deepseek-reasoner etc.) are slow and share a single OpenCode server process.
- * Firing all reviewers at once saturates the server queue; a rolling window of 6 keeps
- * throughput high while avoiding stalls on later slots.
+ * Agentic reviewer runs are expensive and can saturate provider or local runtime limits.
+ * A rolling window of 6 keeps throughput high without launching the full reviewer set at once.
  */
 export const MAX_CONCURRENT_PR_REVIEWERS = 6;
 /** Concurrency limit when retrying failed/timed-out PR reviewers (lower to reduce server pressure). */

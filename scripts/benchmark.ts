@@ -19,6 +19,11 @@ import * as os from 'os';
 import { spawnSync } from 'child_process';
 import { runPRReview } from '../src/core/pr-review/runner';
 import type { PRReviewResult, PRFinding } from '../src/types/index';
+import {
+  resolveApiKey,
+  resolveConfig,
+  resolveGitHubToken,
+} from '../src/features/config/application/config-service';
 
 // ---------------------------------------------------------------------------
 // Arg parsing
@@ -28,30 +33,6 @@ function getArg(flag: string): string | undefined {
   const args = process.argv.slice(2);
   const idx = args.indexOf(flag);
   return idx !== -1 ? args[idx + 1] : undefined;
-}
-
-const model = getArg('--model');
-const prUrl = getArg('--pr');
-
-if (!model || !prUrl) {
-  console.error('Usage: npx ts-node scripts/benchmark.ts --model <model> --pr <pr-url>');
-  process.exit(1);
-}
-
-// ---------------------------------------------------------------------------
-// Env validation
-// ---------------------------------------------------------------------------
-
-const ghToken = process.env.GH_BATEYE_BENCHMARK_TOKEN;
-const llmApiKey = process.env.BATEYE_LLM_MODEL_API_KEY;
-
-if (!ghToken) {
-  console.error('Error: GH_BATEYE_BENCHMARK_TOKEN environment variable is required.');
-  process.exit(1);
-}
-if (!llmApiKey) {
-  console.error('Error: BATEYE_LLM_MODEL_API_KEY environment variable is required.');
-  process.exit(1);
 }
 
 // ---------------------------------------------------------------------------
@@ -142,6 +123,31 @@ function gitExec(args: string[], opts?: { cwd?: string; token?: string }): void 
 
 function sanitizeModel(m: string): string {
   return m.replace(/[/\\:*?"<>|]/g, '_');
+}
+
+export function resolveBenchmarkGitHubToken(repoPath: string): string {
+  const explicitToken = process.env.GH_BATEYE_BENCHMARK_TOKEN?.trim();
+  const config = resolveConfig(repoPath);
+  const token = explicitToken || resolveGitHubToken(config);
+
+  if (!token) {
+    throw new Error(
+      'GitHub token not found. Set GH_BATEYE_BENCHMARK_TOKEN, GITHUB_TOKEN, or githubToken in .bateye/config.local.json.'
+    );
+  }
+
+  return token;
+}
+
+export function resolveBenchmarkLlmApiKey(repoPath: string, targetModel: string): string {
+  return resolveApiKey(
+    {
+      model: targetModel,
+      transport: 'vercel',
+      apiKey: resolveConfig(repoPath).apiKey,
+    },
+    repoPath,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -254,13 +260,23 @@ function formatMarkdown(result: PRReviewResult, mdModel: string, mdPrUrl: string
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  const { owner, repo, prNumber } = parsePrUrl(prUrl!);
+  const model = getArg('--model');
+  const prUrl = getArg('--pr');
+
+  if (!model || !prUrl) {
+    throw new Error('Usage: npx ts-node scripts/benchmark.ts --model <model> --pr <pr-url>');
+  }
+
+  const repoPath = process.cwd();
+  const ghToken = resolveBenchmarkGitHubToken(repoPath);
+  const llmApiKey = resolveBenchmarkLlmApiKey(repoPath, model);
+  const { owner, repo, prNumber } = parsePrUrl(prUrl);
 
   console.log(`\nBenchmark: ${model}`);
   console.log(`PR: ${prUrl}\n`);
 
   console.log('Fetching PR info from GitHub…');
-  const { baseRef } = await fetchPrInfo(owner, repo, prNumber, ghToken!);
+  const { baseRef } = await fetchPrInfo(owner, repo, prNumber, ghToken);
   console.log(`  Base branch: ${baseRef}`);
 
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codeowl-benchmark-'));
@@ -269,7 +285,7 @@ async function main(): Promise<void> {
   try {
     // Clone and checkout PR branch — token passed via GIT_CONFIG env vars, never in the URL or args
     console.log('\nCloning repository…');
-    gitExec(['clone', '--depth', '50', `https://github.com/${owner}/${repo}`, tmpDir], { token: ghToken! });
+    gitExec(['clone', '--depth', '50', `https://github.com/${owner}/${repo}`, tmpDir], { token: ghToken });
 
     console.log(`Fetching PR #${prNumber}…`);
     gitExec(['fetch', 'origin', `pull/${prNumber}/head:pr-${prNumber}`], { cwd: tmpDir });
@@ -283,7 +299,7 @@ async function main(): Promise<void> {
     );
 
     // Ensure API key is set in the process environment
-    process.env.BATEYE_LLM_MODEL_API_KEY = llmApiKey!;
+    process.env.BATEYE_LLM_MODEL_API_KEY = llmApiKey;
 
     // Run PR review
     console.log('\nRunning PR review…');
@@ -296,13 +312,13 @@ async function main(): Promise<void> {
     });
 
     // Format and save output
-    const sanitized = sanitizeModel(model!);
+    const sanitized = sanitizeModel(model);
     const date = new Date().toISOString().split('T')[0];
     const benchmarkDir = path.join(process.cwd(), '.bateye', 'benchmark');
     await fs.mkdir(benchmarkDir, { recursive: true });
     const outputFile = path.join(benchmarkDir, `${sanitized}_${date}_benchmark.md`);
 
-    const markdown = formatMarkdown(result, model!, prUrl!);
+    const markdown = formatMarkdown(result, model, prUrl);
     await fs.writeFile(outputFile, markdown, 'utf8');
 
     console.log(`\n✓ Benchmark complete.`);
@@ -317,7 +333,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error('\nBenchmark failed:', err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error('\nBenchmark failed:', err);
+    process.exit(1);
+  });
+}

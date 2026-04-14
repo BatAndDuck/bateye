@@ -142,12 +142,16 @@ export type PRReviewConfig = {
   };
 };
 
-/** Repository-level configuration loaded from `.bateye/config.json`. */
+/** Repository-level configuration loaded from `.bateye/config.json` plus optional `.bateye/config.local.json` overrides. */
 export type Config = {
   $schema?: string;
   model?: string;
+  /** Local-only plaintext API key override. Prefer storing this in `.bateye/config.local.json`. */
+  apiKey?: string;
   transport?: string;
   apiBaseUrl?: string;
+  /** Local-only plaintext GitHub token override for `pr-review --github`. Prefer `.bateye/config.local.json`. */
+  githubToken?: string;
   exclude?: string[];
   prReview?: PRReviewConfig;
   /** Per-mode reviewer IDs to disable. */

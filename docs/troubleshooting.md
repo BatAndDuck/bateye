@@ -85,7 +85,7 @@ bateye reviewers   # lists what BatEye can see
 
 3. **Use a faster model:**
    ```bash
-   bateye config set model groq/llama-3.3-70b-versatile
+   bateye config set model google/gemini-2.0-flash
    ```
 
 4. **Check the output for partial results** - `.bateye/out/audit.json` may have partial data even if the CLI didn't exit cleanly.
@@ -117,9 +117,9 @@ The workflow reads `BATEYE_LLM_MODEL_API_KEY` - not provider-specific names like
 
 ---
 
-## OpenCode runtime unavailable
+## Codebite runtime unavailable
 
-**Symptom:** `Cannot find OpenCode runtime` or similar
+**Symptom:** `Codebite runtime is not available` or similar
 
 **Fix:**
 ```bash
@@ -127,7 +127,7 @@ npm install -g bateye   # reinstall
 bateye doctor
 ```
 
-BatEye bundles the OpenCode runtime - no separate `npm install -g opencode-ai` needed. A global `opencode` install is only used as a fallback.
+BatEye bundles the Codebite runtime through its normal dependencies. There is no separate global agent CLI to install.
 
 ---
 

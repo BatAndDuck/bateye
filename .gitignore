@@ -2,6 +2,9 @@ node_modules/
 dist/
 .bateye/out/
 .bateye/benchmark/
+.bateye/config.local.json
+.codebite.local.json
+.codebite/
 *.js.map
 *.d.ts.map
 .env

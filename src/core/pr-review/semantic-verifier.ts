@@ -228,9 +228,8 @@ export async function verifyFindingsSemantically(
 
   options.log?.(`  Semantic verification: ${findingsWithContext.length} finding(s) in ${batches.length} batch(es) using ${options.model}`);
 
-  // Run batches sequentially so the OpenCode server processes one at a time.
-  // Parallel batches compete for the single-threaded server and risk hitting the
-  // per-request timeout when a cold-start DB migration is still in progress.
+  // Run batches sequentially to avoid compounding latency on long verification calls.
+  // Parallel batches increase provider pressure without materially improving total wall time.
   const batchResults: Awaited<ReturnType<typeof verifyBatch>>[] = [];
   for (let i = 0; i < batches.length; i++) {
     batchResults.push(await verifyBatch(batches[i], options, i));

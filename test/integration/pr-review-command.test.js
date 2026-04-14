@@ -803,6 +803,9 @@ test('pr-review command in github mode filters already-posted findings and updat
       },
     },
   });
+  writeJson(path.join(repoPath, '.bateye', 'config.local.json'), {
+    githubToken: 'github-test-token-from-config',
+  });
 
   writeText(path.join(repoPath, '.bateye', 'reviewers', 'github-reviewer.md'), `---
 id: github-reviewer
@@ -923,7 +926,6 @@ Report only concrete code quality findings after investigating the current repos
       BATEYE_RUNTIME: 'mock',
       BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
       BATEYE_OCTOKIT_FIXTURES: octokitFixturePath,
-      GITHUB_TOKEN: 'github-test-token',
       GITHUB_REPOSITORY: 'BatEyeOrg/BatEye',
       PR_NUMBER: '7',
       COMMENT_ID: '99',

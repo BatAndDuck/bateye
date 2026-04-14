@@ -4,8 +4,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { resolveVercelGatewayCredential } = require('../../dist/core/runtime/direct/index');
-const { resolveOpenCodeModelTarget } = require('../../dist/core/runtime/provider-routing');
+const {
+  prepareModel,
+  resolveVercelGatewayCredential,
+} = require('../../dist/core/runtime/direct/index');
 const { createStructuredRuntime, resetRuntime } = require('../../dist/core/runtime/factory');
 
 test('resolveVercelGatewayCredential prefers configured key over .env OIDC token', () => {
@@ -37,23 +39,41 @@ test('resolveVercelGatewayCredential returns undefined when no configured key or
   }
 });
 
-test('resolveOpenCodeModelTarget routes explicit apiBaseUrl through the OpenAI-compatible provider', () => {
-  assert.deepEqual(
-    resolveOpenCodeModelTarget('anthropic/claude-sonnet-4-5', 'auto', 'https://litellm.example/v1'),
-    {
-      transport: 'openai',
-      modelId: 'anthropic/claude-sonnet-4-5',
-    }
+test('prepareModel rejects unsupported provider prefixes', () => {
+  assert.throws(
+    () => prepareModel({
+      model: 'openrouter/anthropic/claude-sonnet-4-5',
+      apiKey: 'test-key',
+      systemPrompt: 'Return JSON.',
+      userMessage: 'Say ok.',
+    }),
+    /Model prefix "openrouter" is not supported/,
   );
 });
 
-test('resolveOpenCodeModelTarget routes azure custom endpoints through the OpenAI-compatible provider', () => {
-  assert.deepEqual(
-    resolveOpenCodeModelTarget('azure/gpt-5.4-nano', 'azure', 'https://foundry.example/openai'),
-    {
+test('prepareModel rejects non-vercel transport overrides that change the provider', () => {
+  assert.throws(
+    () => prepareModel({
+      model: 'anthropic/claude-sonnet-4-5',
       transport: 'openai',
-      modelId: 'gpt-5.4-nano',
-    }
+      apiKey: 'test-key',
+      systemPrompt: 'Return JSON.',
+      userMessage: 'Say ok.',
+    }),
+    /Only the Vercel transport can override the model provider prefix/,
+  );
+});
+
+test('prepareModel rejects Vercel transport when the model omits the routed provider prefix', () => {
+  assert.throws(
+    () => prepareModel({
+      model: 'gpt-5.4-nano',
+      transport: 'vercel',
+      apiKey: 'test-key',
+      systemPrompt: 'Return JSON.',
+      userMessage: 'Say ok.',
+    }),
+    /Vercel transport requires a model in provider\/model format/,
   );
 });
 

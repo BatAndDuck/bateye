@@ -1,6 +1,6 @@
 # Documentation
 
-The main [README](../README.md) is the fast path. This folder is where the knobs, switches, and "yes, you can do that too" details live.
+The main [README](../README.md) is the fast path. This folder is where the knobs, switches, and current Codebite-backed review-runtime details live.
 
 ## Start Here
 

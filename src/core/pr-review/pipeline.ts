@@ -3,7 +3,7 @@ import * as path from 'path';
 import { PRFinding, PRReviewResult, ReviewIssue, Reviewer, Priority } from '../../types/index';
 import { buildRepoProfile } from '../../features/audit/application/audit-orchestrator';
 import { RepoProfile } from '../prompts/audit';
-import { resolveConfig, resolveApiKey } from '../config/loader';
+import { resolveConfig, resolveApiKey, resolveGitHubToken } from '../config/loader';
 import { loadReviewersForMode } from '../reviewers/loader';
 import { getPRReviewRuntime } from '../runtime/factory';
 import { prReviewerAnalysisSchema, PRReviewerAnalysis } from '../validation/schemas';
@@ -40,6 +40,7 @@ import { addTokens, formatTokenSummary } from '../runtime/token-utils';
 import { runReviewerTool } from '../tools/runner';
 import { formatToolContext } from '../tools/format';
 import { logPrompt } from '../output/prompt-logger';
+import { validateCodebiteAgenticModels } from '../runtime/codebite/index';
 
 export interface PRReviewPipelineOptions {
   repoPath: string;
@@ -261,7 +262,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   let conversation: PRConversation | null = null;
 
   if (options.github && !options.dryRun) {
-    const token = options.githubToken || process.env.GITHUB_TOKEN;
+    const token = resolveGitHubToken(config, options.githubToken);
     if (token) {
       const ghCtx = await resolveGitHubContext(options, repoPath);
       if (ghCtx) {
@@ -297,19 +298,26 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   // Used to contextualise reviewer prompts (e.g. CLI tool vs web service).
   const repoProfile = buildPRRepoProfile(repoPath, changedFiles);
 
-  // Validate that the agentic runtime is available before calling the orchestrator.
-  // This surfaces errors like "cannot use BATEYE_RUNTIME=direct" immediately.
-  const runtime = await getPRReviewRuntime();
-
   log('Loading reviewers...');
   const { reviewers } = loadReviewersForMode(repoPath, 'pr-review', config);
 
+  if (process.env.BATEYE_RUNTIME !== 'mock') {
+    validateCodebiteAgenticModels(
+      [config.model, ...reviewers.map(r => r.model || config.model)].map(model => ({
+        model,
+        transport: config.transport,
+        apiBaseUrl: config.apiBaseUrl,
+      })),
+    );
+  }
+
+  // Validate that the agentic runtime is available before calling the orchestrator.
+  // This surfaces runtime/config errors immediately.
+  const runtime = await getPRReviewRuntime();
+
   // Build the reasoning-override list once. Includes config.model plus every reviewer's
-  // model override, deduped by model id.
-  //   reasoningEffort (scalar) — passed to structured calls (orchestrator, semantic
-  //     verifier); those use DirectAIRuntime which reads options.reasoningEffort directly.
-  //   reasoningOverrides (list) — consumed only by OpenCodeCLIRuntime, which needs every
-  //     model name upfront so it can seed opencode.json before spawning its server.
+  // model override, deduped by model id. The list is preserved for runtime diagnostics
+  // and compatibility with the existing pipeline threading.
   // Undefined when reasoningEffort isn't configured.
   // Guard against non-string values that could appear in hand-edited config files.
   const reasoningEffort = typeof config.reasoningEffort === 'string' && config.reasoningEffort
@@ -589,9 +597,8 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     log(`[token-diag]   reviewers (${selectedReviewers.length}x): ${hasTokenData ? formatTokenSummary(reviewerTokenTotal) + reviewerSuffix : 'n/a'}`);
     log(`[token-diag]   semantic verification: ${semanticTokens ? formatTokenSummary(semanticTokens) : 'skipped (no findings)'}`);
     if (reviewerTokensAreEstimated) {
-      log(`[token-diag] ⚠ Reviewer token counts reflect the initial prompt size only. OpenCode does not`);
-      log(`[token-diag]   expose cumulative session usage - each tool call re-sends the full conversation`);
-      log(`[token-diag]   history, so true input tokens per reviewer ≈ initial_tokens × number_of_turns.`);
+      log('[token-diag] ⚠ Reviewer token counts are estimated for one or more agentic calls.');
+      log('[token-diag]   The Codebite-backed runtime did not report complete per-step usage for every turn.');
     }
   }
 

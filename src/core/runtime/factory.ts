@@ -1,13 +1,12 @@
 import { IRuntime } from './interface';
 import { DirectAIRuntime } from './direct/index';
-import { OpenCodeCLIRuntime } from './opencode-cli/index';
+import { CodebiteAgentRuntime } from './codebite/index';
 import { MockRuntime } from '../../features/shared/runtime/mock-runtime';
 
-export type RuntimePreference = 'direct' | 'opencode-cli' | 'mock' | 'auto';
+export type RuntimePreference = 'direct' | 'codebite' | 'mock' | 'auto';
 
-const OPEN_CODE_RUNTIME_HINT =
-  'Install BatEye with its dependencies (`npm install bateye`, `npm i -g bateye`, or `npm ci`) '
-  + 'or make `opencode` available on PATH.';
+const CODEBITE_RUNTIME_HINT =
+  'Install BatEye with its dependencies (`npm install bateye`, `npm i -g bateye`, or `npm ci`).';
 
 let runtimeInstance: IRuntime | null = null;
 let prReviewRuntimeInstance: IRuntime | null = null;
@@ -23,10 +22,10 @@ export async function createRuntime(preference: RuntimePreference = 'auto'): Pro
     return new MockRuntime();
   }
 
-  if (effectivePreference === 'opencode-cli') {
-    const cli = new OpenCodeCLIRuntime();
-    if (await cli.isAvailable()) return cli;
-    throw new Error(`OpenCode CLI is not available. ${OPEN_CODE_RUNTIME_HINT}`);
+  if (effectivePreference === 'codebite') {
+    const runtime = new CodebiteAgentRuntime();
+    if (await runtime.isAvailable()) return runtime;
+    throw new Error(`Codebite runtime is not available. ${CODEBITE_RUNTIME_HINT}`);
   }
 
   if (effectivePreference === 'direct') {
@@ -67,18 +66,18 @@ async function createAgenticRuntime(modeLabel: string): Promise<IRuntime> {
   if (process.env.BATEYE_RUNTIME === 'direct') {
     throw new Error(
       `Agentic ${modeLabel} cannot use BATEYE_RUNTIME=direct. `
-      + 'Use the OpenCode CLI runtime or BATEYE_RUNTIME=mock.'
+      + 'Use the Codebite runtime or BATEYE_RUNTIME=mock.'
     );
   }
 
-  const cli = new OpenCodeCLIRuntime();
-  if (await cli.isAvailable()) {
-    return cli;
+  const runtime = new CodebiteAgentRuntime();
+  if (await runtime.isAvailable()) {
+    return runtime;
   }
 
   throw new Error(
-    `Agentic ${modeLabel} requires the OpenCode CLI runtime or BATEYE_RUNTIME=mock. `
-    + OPEN_CODE_RUNTIME_HINT
+    `Agentic ${modeLabel} requires the Codebite runtime or BATEYE_RUNTIME=mock. `
+    + CODEBITE_RUNTIME_HINT
   );
 }
 

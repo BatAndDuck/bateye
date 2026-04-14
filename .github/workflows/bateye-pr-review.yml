@@ -67,16 +67,13 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Install OpenCode CLI
-        run: npm install --global opencode-ai
-
-      - name: Verify OpenCode CLI
-        run: opencode --version
-
       # Build and link from source so we test the exact code in this PR,
       # not the last published npm version.
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify Codebite runtime
+        run: node node_modules/codebite/bin/codebite.mjs --help > /dev/null
 
       - name: Run lint
         run: npm run lint
@@ -96,7 +93,7 @@ jobs:
             mkdir -p .bateye
             cat > .bateye/config.json << 'EOF'
           {
-            "model": "anthropic/claude-sonnet-4-5"
+            "model": "vercel/openai/gpt-5.4-nano"
           }
           EOF
           fi

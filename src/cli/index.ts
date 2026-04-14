@@ -71,7 +71,7 @@ export function createCLI(): Command {
   // ── models ────────────────────────────────────────────────────────────
   program
     .command('models [provider]')
-    .description('List available AI models (optionally filter by provider, e.g. groq, anthropic, openai)')
+    .description('List available AI models (optionally filter by provider, e.g. openai, anthropic, google, mistral, vercel)')
     .option('-a, --all', 'List models from all supported providers (slow)')
     .action(async (provider, opts, cmd) => {
       await runModels(getRepoPath(cmd), provider, opts.all);

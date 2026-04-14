@@ -26,6 +26,7 @@ import { selectAuditReviewers } from './audit-orchestrator';
 import { verifyAuditFindings } from './audit-verifier';
 import { BATEYE_VERSION } from '../../../version';
 import { resolveDiagnosticDir } from '../../../core/output/diagnostics';
+import { validateCodebiteAgenticModels } from '../../../core/runtime/codebite/index';
 
 /**
  * Minimum confidence required to keep a finding, by severity.
@@ -90,8 +91,8 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
 
   // Build the reasoning-override list once. Includes config.model (used by orchestrator
   // and verifier) plus every candidate reviewer's model override, deduped by model id.
-  // OpenCodeCLIRuntime needs every model name upfront so it can seed opencode.json before
-  // spawning its server. Undefined when reasoningEffort isn't configured.
+  // The list is preserved for runtime diagnostics and compatibility with the existing
+  // pipeline threading. Undefined when reasoningEffort isn't configured.
   // Guard against non-string values that could appear in hand-edited config files.
   const reasoningEffort = typeof config.reasoningEffort === 'string' && config.reasoningEffort
     ? config.reasoningEffort
@@ -102,6 +103,16 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
           .map(m => [m, { model: m, reasoningEffort }]),
       ).values())
     : undefined;
+
+  if (process.env.BATEYE_RUNTIME !== 'mock') {
+    validateCodebiteAgenticModels(
+      [config.model, ...allReviewers.map(r => r.model || config.model)].map(model => ({
+        model,
+        transport: config.transport,
+        apiBaseUrl: config.apiBaseUrl,
+      })),
+    );
+  }
 
   // Phase 2: Index repository
   log('Indexing repository...');

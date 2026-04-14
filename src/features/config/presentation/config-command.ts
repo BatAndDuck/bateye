@@ -14,11 +14,15 @@ export async function runConfigShow(repoPath: string): Promise<void> {
   console.log(chalk.cyan('\n🦇 BatEye Config\n'));
   const config = resolveConfig(repoPath);
   const storedApiKey = resolveStoredApiKey(repoPath);
+  const configuredApiKey = config.apiKey ? maskApiKey(config.apiKey) : '(not set)';
+  const configuredGitHubToken = config.githubToken ? maskApiKey(config.githubToken) : '(not set)';
 
   const rows: [string, string][] = [
     ['model', config.model],
     ['apiKeyEnv', resolveAuthEnvName(config)],
+    ['configuredApiKey', configuredApiKey],
     ['storedApiKey', storedApiKey ? maskApiKey(storedApiKey) : '(not stored)'],
+    ['configuredGitHubToken', configuredGitHubToken],
     ['transport', config.transport],
     ['apiBaseUrl', config.apiBaseUrl || '(default)'],
     ['reasoningEffort', config.reasoningEffort || '(not set)'],

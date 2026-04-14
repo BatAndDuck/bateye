@@ -8,7 +8,7 @@ BatEye is useful when you want to:
 - audit a repo before a release
 - review a diff locally before opening a PR
 - run AI review in GitHub Actions
-- use your own provider or a local model instead of a SaaS-only tool
+- use your own supported provider instead of a SaaS-only tool
 
 ## Install
 
@@ -25,7 +25,7 @@ cd your-project
 bateye init
 
 # Pick a model and key
-bateye conf --model openai/gpt-5.4-nano --apikey <your-key>
+bateye conf --model vercel/openai/gpt-5.4-nano --apikey <your-key>
 
 # Run a full repo audit
 bateye audit
@@ -34,11 +34,11 @@ bateye audit
 bateye pr-review
 ```
 
-Prefer environment variables or local models?
+Prefer environment variables?
 - `BATEYE_LLM_MODEL_API_KEY=<your-key>` works too.
-- `bateye conf --model ollama/llama3.2` uses local Ollama and skips the API key drama.
+- `AI_GATEWAY_API_KEY=<your-key>` or `VERCEL_OIDC_TOKEN=<token>` also work for Vercel-routed models.
 
-BatEye writes results to `.bateye/out/`.
+BatEye writes results to `.bateye/out/`. Use `.bateye/config.local.json` for local-only overrides you do not want to commit, including optional `apiKey` and `githubToken` fields.
 
 ## Two jobs, one bat
 
@@ -68,12 +68,13 @@ Drop Markdown reviewer prompts into `.bateye/reviewers/` to add new reviewers or
 
 ## Bring your own model
 
-BatEye works with OpenAI, Anthropic, OpenRouter, Google, Groq, Azure, LiteLLM, Ollama, LM Studio, Vercel AI Gateway, and more.
+BatEye's structured and Codebite-backed review flows currently support only OpenAI, Anthropic, Google, Mistral, and Vercel AI Gateway through the Vercel AI SDK.
 
 ```bash
+bateye conf --model vercel/openai/gpt-5.4-nano --apikey <key>
 bateye conf --model anthropic/claude-sonnet-4-5 --apikey <key>
-bateye conf --model openrouter/meta-llama/llama-3.3-70b-instruct --apikey <key>
-bateye conf --model ollama/llama3.2
+bateye conf --model google/gemini-2.5-pro --apikey <key>
+bateye conf --model mistral/mistral-large-latest --apikey <key>
 ```
 
 Provider setup details live here: [Providers](./docs/providers.md)

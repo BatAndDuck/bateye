@@ -7,8 +7,8 @@ export interface RunOptions {
   model: string;       // e.g. "anthropic/claude-sonnet-4-5"
   apiKey: string;
   cwd?: string;
-  transport?: string;  // e.g. "vercel" when routing anthropic/openai models through a gateway
-  apiBaseUrl?: string; // Override for OpenAI-compatible gateways
+  transport?: string;  // e.g. "vercel" when routing provider/model IDs through the AI Gateway
+  apiBaseUrl?: string; // Provider-specific endpoint override for supported AI SDK providers
   maxTokens?: number;
   /** Approximate maximum combined prompt size in characters before runtime truncation. */
   maxInputChars?: number;
@@ -20,9 +20,8 @@ export interface RunOptions {
   /** Generic reasoning/thinking intensity. Mapped per-provider at the runtime layer.
    *  Common values: "minimal" | "low" | "medium" | "high" | "xhigh". */
   reasoningEffort?: string;
-  /** Full list of {model, effort} pairs that OpenCodeCLIRuntime injects into its
-   *  synthesized opencode.json before spawning its server. All callers within one
-   *  pipeline must pass the same list so the cached server can be reused. */
+  /** Optional model-specific reasoning metadata propagated through runtime calls.
+   *  Preserved for pipeline compatibility and runtime diagnostics. */
   reasoningOverrides?: Array<{ model: string; reasoningEffort: string }>;
 }
 
@@ -58,7 +57,7 @@ export interface RunResult<T> {
 
 /**
  * Abstract runtime for executing structured LLM calls.
- * Implementations include DirectAIRuntime (Vercel AI SDK) and CLI-based runtimes.
+ * Implementations include DirectAIRuntime (Vercel AI SDK) and agentic runtimes.
  */
 export interface IRuntime {
   run<T>(options: RunOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>>;
@@ -78,6 +77,7 @@ export function parseProviderAndModel(modelString: string): { provider: string; 
     if (modelString.startsWith('claude')) return { provider: 'anthropic', modelId: modelString };
     if (modelString.startsWith('gpt') || modelString.startsWith('o1') || modelString.startsWith('o3')) return { provider: 'openai', modelId: modelString };
     if (modelString.startsWith('gemini')) return { provider: 'google', modelId: modelString };
+    if (/^(mistral|ministral|codestral|magistral|pixtral)/.test(modelString)) return { provider: 'mistral', modelId: modelString };
     return { provider: 'openai', modelId: modelString };
   }
   return {

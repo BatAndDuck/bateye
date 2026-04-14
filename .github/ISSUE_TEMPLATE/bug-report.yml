@@ -35,8 +35,8 @@ body:
     id: model
     attributes:
       label: Provider or model
-      description: Example: openai/gpt-5.4-nano, ollama/llama3.2
-      placeholder: openai/gpt-5.4-nano
+      description: Example: vercel/openai/gpt-5.4-nano, anthropic/claude-sonnet-4-5
+      placeholder: vercel/openai/gpt-5.4-nano
   - type: textarea
     id: expected
     attributes:
