@@ -24,6 +24,9 @@ function loadRuntimeWithMocks(overrides = {}) {
     (async () => ({ text: '{"ok":true}', usage: { inputTokens: 10, outputTokens: 20 } }));
 
   const mockAI = {
+    createGateway() {
+      return modelId => ({ provider: 'vercel', modelId });
+    },
     async generateObject(opts) {
       calls.generateObjectCalls.push(opts);
       return generateObjectImpl(opts);
@@ -38,12 +41,9 @@ function loadRuntimeWithMocks(overrides = {}) {
 
   const mockProviders = {
     '@ai-sdk/anthropic': { createAnthropic: () => fakeModel },
-    '@ai-sdk/azure': { createAzure: () => fakeModel },
     '@ai-sdk/google': { createGoogleGenerativeAI: () => fakeModel },
+    '@ai-sdk/mistral': { createMistral: () => fakeModel },
     '@ai-sdk/openai': { createOpenAI: () => fakeModel },
-    '@ai-sdk/openai-compatible': {
-      createOpenAICompatible: () => ({ chatModel: fakeModel }),
-    },
   };
 
   Module._load = function (request, parent, isMain) {
@@ -740,11 +740,11 @@ test('result metadata is correct when text fallback is used', async () => {
   try {
     const runtime = new fixture.runtimeModule.DirectAIRuntime();
     const result = await runtime.run(
-      baseRunOptions({ model: 'deepseek/deepseek-v3.2-thinking' }),
+      baseRunOptions({ model: 'vercel/openai/gpt-5.4-nano' }),
       z.object({ ok: z.boolean() }),
     );
 
-    assert.equal(result.model, 'deepseek/deepseek-v3.2-thinking');
+    assert.equal(result.model, 'vercel/openai/gpt-5.4-nano');
     assert.equal(result.runtime, 'sdk');
     assert.equal(typeof result.durationMs, 'number');
     assert.ok(result.durationMs >= 0);

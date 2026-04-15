@@ -1,8 +1,15 @@
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
 import { createAzure } from '@ai-sdk/azure';
+import { createCohere } from '@ai-sdk/cohere';
+import { createDeepSeek } from '@ai-sdk/deepseek';
+import { createFireworks } from '@ai-sdk/fireworks';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createGroq } from '@ai-sdk/groq';
+import { createMistral } from '@ai-sdk/mistral';
 import { createOpenAI } from '@ai-sdk/openai';
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { createTogetherAI } from '@ai-sdk/togetherai';
+import { createXai } from '@ai-sdk/xai';
 import { generateObject, generateText, type LanguageModel } from 'ai';
 import { z } from 'zod';
 import { MAX_ORCHESTRATOR_TIMEOUT_MS } from '../../config/defaults';
@@ -11,6 +18,7 @@ import { formatErrorWithCauses } from '../error-format';
 import {
   AgenticRepositoryReviewOptions,
   IRuntime,
+  parseProviderAndModel,
   RunOptions,
   RunResult,
   TokenUsage,
@@ -18,15 +26,26 @@ import {
   resolveModelTarget,
 } from '../interface';
 import {
-  fetchOpenAICompatibleModels,
+  COHERE_API_BASE_URL,
+  DEEPSEEK_API_BASE_URL,
+  FIREWORKS_API_BASE_URL,
+  GROQ_API_BASE_URL,
+  LITELLM_API_BASE_URL,
+  MISTRAL_API_BASE_URL,
   OPENAI_API_BASE_URL,
-  resolveOpenAICompatibleBaseUrl,
-  resolveOpenAICompatibleModelId,
   resolveVercelGatewayCredential,
+  TOGETHERAI_API_BASE_URL,
   VERCEL_AI_GATEWAY_BASE_URL,
+  XAI_API_BASE_URL,
 } from '../provider-routing';
 import { buildStructureRepairPrompt, extractJsonFromText, formatZodErrors, tryParseAndValidate } from '../structure-repair';
-import { OpenCodeCLIRuntime } from '../opencode-cli/index';
+import {
+  fetchCodebiteProviderModels,
+  formatSupportedCodebiteProviders,
+  normalizeCodebiteProvider,
+  type CodebiteProvider,
+} from '../codebite/models';
+import { createBateyeGateway } from '../vercel-gateway';
 
 type PreparedModel = {
   model: LanguageModel;
@@ -106,10 +125,6 @@ export function buildProviderOptions(
       // Vercel AI Gateway is OpenAI-compatible; the OpenAI provider-options
       // shape passes through to the gateway for reasoning-capable models.
       return { openai: { reasoningEffort: effort } };
-    case 'openrouter':
-      return { openrouter: { reasoning: { effort } } };
-    case 'groq':
-      return { groq: { reasoningEffort: effort } };
     case 'anthropic':
       // Claude 4.6+ adaptive thinking. Older Claude versions will reject the
       // call — per user decision, we fail loudly rather than silently fall back.
@@ -122,6 +137,73 @@ export function buildProviderOptions(
       }
       return { google: { thinkingConfig: { thinkingBudget: budget } } };
     }
+    case 'mistral': {
+      const reasoningEffort = effortToMistralReasoning(effort);
+      return reasoningEffort ? { mistral: { reasoningEffort } } : undefined;
+    }
+    case 'groq': {
+      const reasoningEffort = effortToGroqReasoning(effort);
+      return reasoningEffort ? { groq: { reasoningEffort } } : undefined;
+    }
+    case 'xai': {
+      const reasoningEffort = effortToXaiReasoning(effort);
+      return reasoningEffort ? { xai: { reasoningEffort } } : undefined;
+    }
+    case 'bedrock': {
+      const reasoningConfig = effortToBedrockReasoning(effort);
+      return reasoningConfig ? { bedrock: { reasoningConfig } } : undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
+function effortToGroqReasoning(effort: string): 'none' | 'low' | 'medium' | 'high' | 'default' | undefined {
+  switch (effort.toLowerCase()) {
+    case 'minimal':
+    case 'none':
+      return 'none';
+    case 'low':
+      return 'low';
+    case 'medium':
+      return 'medium';
+    case 'high':
+    case 'xhigh':
+      return 'high';
+    default:
+      return undefined;
+  }
+}
+
+function effortToXaiReasoning(effort: string): 'low' | 'medium' | 'high' | undefined {
+  switch (effort.toLowerCase()) {
+    case 'low':
+    case 'minimal':
+    case 'none':
+      return 'low';
+    case 'medium':
+      return 'medium';
+    case 'high':
+    case 'xhigh':
+      return 'high';
+    default:
+      return undefined;
+  }
+}
+
+function effortToBedrockReasoning(effort: string): { type: 'enabled' | 'adaptive'; maxReasoningEffort?: 'low' | 'medium' | 'high' | 'max' } | undefined {
+  switch (effort.toLowerCase()) {
+    case 'minimal':
+    case 'none':
+      return { type: 'enabled', maxReasoningEffort: 'low' };
+    case 'low':
+      return { type: 'adaptive', maxReasoningEffort: 'low' };
+    case 'medium':
+      return { type: 'adaptive', maxReasoningEffort: 'medium' };
+    case 'high':
+      return { type: 'adaptive', maxReasoningEffort: 'high' };
+    case 'xhigh':
+      return { type: 'adaptive', maxReasoningEffort: 'max' };
     default:
       return undefined;
   }
@@ -184,14 +266,9 @@ function boundPrompts(options: RunOptions): BoundedPrompts {
   };
 }
 
-function usesNativeOpenAIProvider(explicitApiBaseUrl?: string): boolean {
-  const normalized = normalizeBaseUrl(explicitApiBaseUrl);
-  return !normalized || normalized === OPENAI_API_BASE_URL;
-}
-
-function normalizeRuntimeError(err: unknown, baseURL?: string): Error {
+function normalizeRuntimeError(err: unknown, transport: string): Error {
   const message = formatErrorWithCauses(err);
-  if (baseURL === VERCEL_AI_GATEWAY_BASE_URL && /Error verifying OIDC token/i.test(message)) {
+  if (normalizeTransport(transport) === 'vercel' && /Error verifying OIDC token/i.test(message)) {
     return new Error(
       'Vercel AI Gateway rejected the configured bearer token for inference. '
       + 'Use an AI Gateway API key created in Vercel AI Gateway, or provide VERCEL_OIDC_TOKEN. '
@@ -210,6 +287,61 @@ function normalizeRuntimeError(err: unknown, baseURL?: string): Error {
   }
 
   return err instanceof Error ? err : new Error(message);
+}
+
+function resolveDirectProvider(options: RunOptions): {
+  provider: CodebiteProvider;
+  modelId: string;
+} {
+  const parsed = parseProviderAndModel(options.model);
+  const parsedProvider = normalizeCodebiteProvider(parsed.provider);
+  const target = resolveModelTarget(options.model, options.transport);
+  const requestedTransport = normalizeTransport(options.transport);
+  const normalizedTransport = normalizeTransport(target.transport);
+  const provider = normalizeCodebiteProvider(normalizedTransport);
+
+  if (options.model.includes('/') && !parsedProvider) {
+    throw new Error(
+      `Model prefix "${parsed.provider}" is not supported. `
+      + `Supported providers: ${formatSupportedCodebiteProviders()}.`
+    );
+  }
+
+  if (!provider) {
+    throw new Error(
+      `Transport "${normalizedTransport}" is not supported. `
+      + `Supported providers: ${formatSupportedCodebiteProviders()}.`
+    );
+  }
+
+  if (requestedTransport !== 'auto' && provider !== 'vercel' && parsedProvider && provider !== parsedProvider) {
+    throw new Error(
+      `Transport "${normalizedTransport}" cannot route model "${options.model}". `
+      + 'Only the Vercel transport can override the model provider prefix.'
+    );
+  }
+
+  if (provider === 'vercel' && !target.modelId.includes('/')) {
+    throw new Error(
+      'Vercel transport requires a model in provider/model format, '
+      + 'for example "openai/gpt-5.4-nano" or "vercel/openai/gpt-5.4-nano".'
+    );
+  }
+
+  if (provider === 'vercel') {
+    const gatewayTarget = parseProviderAndModel(target.modelId);
+    const gatewayProvider = normalizeCodebiteProvider(gatewayTarget.provider);
+    if (!gatewayProvider || gatewayProvider === 'vercel') {
+      throw new Error(
+        `Vercel transport only supports routed models from ${formatSupportedCodebiteProviders().replace(', vercel', '')}.`
+      );
+    }
+  }
+
+  return {
+    provider,
+    modelId: target.modelId,
+  };
 }
 
 /**
@@ -406,13 +538,11 @@ async function fallbackGenerateText<T>(
   throw parsed.error;
 }
 
-function prepareModel(options: RunOptions): PreparedModel {
-  const target = resolveModelTarget(options.model, options.transport);
-  const normalizedTransport = normalizeTransport(target.transport);
-  const explicitApiBaseUrl = options.apiBaseUrl?.trim();
-  const baseURL = resolveOpenAICompatibleBaseUrl(normalizedTransport, options.apiBaseUrl);
+export function prepareModel(options: RunOptions): PreparedModel {
+  const { provider, modelId } = resolveDirectProvider(options);
+  const explicitApiBaseUrl = normalizeBaseUrl(options.apiBaseUrl);
 
-  switch (normalizedTransport) {
+  switch (provider) {
     case 'vercel': {
       const apiKey = resolveVercelGatewayCredential(options.apiKey, options.cwd);
       if (!apiKey) {
@@ -421,112 +551,177 @@ function prepareModel(options: RunOptions): PreparedModel {
         );
       }
 
-      const provider = createOpenAICompatible({
-        name: normalizedTransport,
+      const gateway = createBateyeGateway({
         apiKey,
-        baseURL: baseURL || VERCEL_AI_GATEWAY_BASE_URL,
-        includeUsage: true,
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+        timeoutMs: options.timeoutMs,
       });
 
       return {
-        model: provider.chatModel(target.modelId),
-        transport: normalizedTransport,
-        modelId: target.modelId,
-        baseURL: baseURL || VERCEL_AI_GATEWAY_BASE_URL,
+        model: gateway(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl || VERCEL_AI_GATEWAY_BASE_URL,
       };
     }
-    case 'openai':
-      if (usesNativeOpenAIProvider(explicitApiBaseUrl)) {
-        const provider = createOpenAI({
-          apiKey: options.apiKey,
-          ...(explicitApiBaseUrl ? { baseURL: normalizeBaseUrl(explicitApiBaseUrl) } : {}),
-        });
-
-        return {
-          model: provider(target.modelId),
-          transport: normalizedTransport,
-          modelId: target.modelId,
-          baseURL: normalizeBaseUrl(explicitApiBaseUrl) || OPENAI_API_BASE_URL,
-        };
-      }
-      break;
-    case 'anthropic':
-      if (!explicitApiBaseUrl) {
-        const provider = createAnthropic({ apiKey: options.apiKey });
-        return {
-          model: provider(target.modelId),
-          transport: normalizedTransport,
-          modelId: target.modelId,
-        };
-      }
-      break;
-    case 'google':
-    case 'gemini':
-      if (!explicitApiBaseUrl) {
-        const provider = createGoogleGenerativeAI({ apiKey: options.apiKey });
-        return {
-          model: provider(target.modelId),
-          transport: normalizedTransport,
-          modelId: target.modelId,
-        };
-      }
-      break;
-    case 'azure': {
-      const resourceName = process.env['AZURE_RESOURCE_NAME'];
-      if (!resourceName && !explicitApiBaseUrl) {
-        throw new Error('AZURE_RESOURCE_NAME environment variable is required for Azure OpenAI');
-      }
-
-      const provider = createAzure({
+    case 'openai': {
+      const openai = createOpenAI({
         apiKey: options.apiKey,
-        apiVersion: process.env['AZURE_API_VERSION'] || '2024-02-01',
-        // useDeploymentBasedUrls produces {baseURL}/deployments/{model}/chat/completions,
-        // which is the correct URL structure for both Azure OpenAI and Azure AI Foundry.
-        // Without this flag, @ai-sdk/azure v3 generates {baseURL}/v1/responses (Responses API)
-        // which is not supported on cognitiveservices.azure.com endpoints.
-        useDeploymentBasedUrls: true,
-        ...(explicitApiBaseUrl
-          ? { baseURL: explicitApiBaseUrl }
-          : { resourceName }),
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
       });
 
       return {
-        model: provider.chat(target.modelId),
-        transport: normalizedTransport,
-        modelId: target.modelId,
+        model: openai(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl || OPENAI_API_BASE_URL,
+      };
+    }
+    case 'azure': {
+      const azure = createAzure({
+        apiKey: options.apiKey,
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+      });
+      return {
+        model: azure(modelId),
+        transport: provider,
+        modelId,
         baseURL: explicitApiBaseUrl,
       };
     }
-    default:
-      break;
+    case 'anthropic': {
+      const anthropic = createAnthropic({
+        apiKey: options.apiKey,
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+      });
+      return {
+        model: anthropic(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl,
+      };
+    }
+    case 'google': {
+      const google = createGoogleGenerativeAI({
+        apiKey: options.apiKey,
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+      });
+      return {
+        model: google(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl,
+      };
+    }
+    case 'mistral': {
+      const mistral = createMistral({
+        apiKey: options.apiKey,
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+      });
+      return {
+        model: mistral(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl || MISTRAL_API_BASE_URL,
+      };
+    }
+    case 'groq': {
+      const groq = createGroq({
+        apiKey: options.apiKey,
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+      });
+      return {
+        model: groq(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl || GROQ_API_BASE_URL,
+      };
+    }
+    case 'xai': {
+      const xai = createXai({
+        apiKey: options.apiKey,
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+      });
+      return {
+        model: xai(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl || XAI_API_BASE_URL,
+      };
+    }
+    case 'cohere': {
+      const cohere = createCohere({
+        apiKey: options.apiKey,
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+      });
+      return {
+        model: cohere(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl || COHERE_API_BASE_URL,
+      };
+    }
+    case 'deepseek': {
+      const deepseek = createDeepSeek({
+        apiKey: options.apiKey,
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+      });
+      return {
+        model: deepseek(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl || DEEPSEEK_API_BASE_URL,
+      };
+    }
+    case 'bedrock': {
+      const bedrock = createAmazonBedrock({
+        apiKey: options.apiKey,
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+      });
+      return {
+        model: bedrock(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl,
+      };
+    }
+    case 'togetherai': {
+      const togetherai = createTogetherAI({
+        apiKey: options.apiKey,
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+      });
+      return {
+        model: togetherai(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl || TOGETHERAI_API_BASE_URL,
+      };
+    }
+    case 'fireworks': {
+      const fireworks = createFireworks({
+        apiKey: options.apiKey,
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+      });
+      return {
+        model: fireworks(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl || FIREWORKS_API_BASE_URL,
+      };
+    }
+    case 'litellm': {
+      const litellm = createOpenAI({
+        apiKey: options.apiKey,
+        baseURL: explicitApiBaseUrl || LITELLM_API_BASE_URL,
+      });
+      return {
+        model: litellm(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl || LITELLM_API_BASE_URL,
+      };
+    }
   }
-
-  if (!baseURL) {
-    throw new Error(
-      `No OpenAI-compatible base URL is configured for transport "${normalizedTransport}". `
-      + 'Set apiBaseUrl or use a built-in provider transport.'
-    );
-  }
-
-  const openAICompatibleModelId = resolveOpenAICompatibleModelId(
-    options.model,
-    target.modelId,
-    options.apiBaseUrl,
-    normalizedTransport,
-  );
-  const provider = createOpenAICompatible({
-    name: normalizedTransport,
-    apiKey: options.apiKey,
-    baseURL,
-    includeUsage: true,
-  });
-
-  return {
-    model: provider.chatModel(openAICompatibleModelId),
-    transport: normalizedTransport,
-    modelId: openAICompatibleModelId,
-    baseURL,
-  };
 }
 
 export { resolveVercelGatewayCredential } from '../provider-routing';
@@ -612,7 +807,7 @@ export class DirectAIRuntime implements IRuntime {
               await fallbackGenerateText(prepared, boundedPrompts, options, schema, callId, labelTag, true),
             );
           }
-          throw normalizeRuntimeError(tier2Err, prepared.baseURL);
+          throw normalizeRuntimeError(tier2Err, prepared.transport);
         }
       }
 
@@ -624,23 +819,12 @@ export class DirectAIRuntime implements IRuntime {
         );
       }
 
-      throw normalizeRuntimeError(tier1Err, prepared.baseURL);
+      throw normalizeRuntimeError(tier1Err, prepared.transport);
     }
   }
 
   async listModels(provider: string, apiKey: string, apiBaseUrl?: string): Promise<string[]> {
-    const normalizedProvider = normalizeTransport(provider);
-
-    // Vercel AI Gateway is OpenAI-compatible; query its /v1/models endpoint directly
-    // since OpenCode's listModels intentionally skips the vercel transport.
-    if (normalizedProvider === 'vercel') {
-      const credential = resolveVercelGatewayCredential(apiKey);
-      const baseUrl = apiBaseUrl?.trim() || VERCEL_AI_GATEWAY_BASE_URL;
-      return fetchOpenAICompatibleModels(credential || '', baseUrl);
-    }
-
-    const runtime = new OpenCodeCLIRuntime();
-    return runtime.listModels(provider, apiKey, apiBaseUrl);
+    return fetchCodebiteProviderModels(provider, apiKey, apiBaseUrl);
   }
 
   async isAvailable(): Promise<boolean> {
@@ -649,8 +833,21 @@ export class DirectAIRuntime implements IRuntime {
 
   async runAgenticReview<T>(_options: AgenticRepositoryReviewOptions, _schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>> {
     throw new Error(
-      'Agentic repository review requires the OpenCode CLI runtime or BATEYE_RUNTIME=mock. '
+      'Agentic repository review requires the Codebite runtime or BATEYE_RUNTIME=mock. '
       + 'The Vercel AI SDK runtime cannot inspect the repository before reporting findings.'
     );
+  }
+}
+
+function effortToMistralReasoning(effort: string): 'none' | 'high' | undefined {
+  switch (effort.toLowerCase()) {
+    case 'none':
+    case 'minimal':
+      return 'none';
+    case 'high':
+    case 'xhigh':
+      return 'high';
+    default:
+      return undefined;
   }
 }

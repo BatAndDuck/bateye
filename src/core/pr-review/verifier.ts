@@ -53,8 +53,8 @@ const DIFF_GATE_TOLERANCE_LINES = 3;
  * Hard deterministic gate: rejects findings whose anchor file or lines are
  * not present in (or within DIFF_GATE_TOLERANCE_LINES of) the PR diff.
  *
- * This runs BEFORE the semantic verifier so non-diff findings never reach
- * the expensive LLM call.
+ * This runs before findings are reported so non-diff findings are rejected
+ * deterministically without any extra LLM filtering.
  */
 export function verifyFindingsAgainstDiff(
   findings: PRFinding[],

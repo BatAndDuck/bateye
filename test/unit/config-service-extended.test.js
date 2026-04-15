@@ -11,6 +11,7 @@ const {
   resolveConfig,
   resolveAuthEnvName,
   resolveApiKey,
+  resolveGitHubToken,
   setConfigField,
 } = require('../../dist/features/config/application/config-service');
 const {
@@ -26,6 +27,12 @@ function writeConfig(repoPath, data) {
   const configDir = path.join(repoPath, '.bateye');
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(path.join(configDir, 'config.json'), JSON.stringify(data, null, 2));
+}
+
+function writeLocalConfig(repoPath, data) {
+  const configDir = path.join(repoPath, '.bateye');
+  fs.mkdirSync(configDir, { recursive: true });
+  fs.writeFileSync(path.join(configDir, 'config.local.json'), JSON.stringify(data, null, 2));
 }
 
 function withCredentialStore(testFn) {
@@ -57,11 +64,47 @@ test('loadConfig reads existing config file', () => {
   assert.deepEqual(config.exclude, ['dist']);
 });
 
+test('loadConfig merges config.local.json over config.json', () => {
+  const tmpDir = makeTmpDir();
+  writeConfig(tmpDir, {
+    model: 'anthropic/shared-model',
+    exclude: ['dist'],
+    prReview: {
+      maxReviewers: 5,
+    },
+  });
+  writeLocalConfig(tmpDir, {
+    model: 'openai/local-model',
+    prReview: {
+      autoApprove: {
+        enabled: false,
+      },
+    },
+  });
+
+  const config = loadConfig(tmpDir);
+  assert.equal(config.model, 'openai/local-model');
+  assert.deepEqual(config.exclude, ['dist']);
+  assert.deepEqual(config.prReview, {
+    maxReviewers: 5,
+    autoApprove: {
+      enabled: false,
+    },
+  });
+});
+
 test('loadConfig throws on malformed JSON', () => {
   const tmpDir = makeTmpDir();
   fs.mkdirSync(path.join(tmpDir, '.bateye'), { recursive: true });
   fs.writeFileSync(path.join(tmpDir, '.bateye', 'config.json'), '{ invalid json }');
   assert.throws(() => loadConfig(tmpDir), /Failed to parse/);
+});
+
+test('loadConfig throws on malformed local config JSON', () => {
+  const tmpDir = makeTmpDir();
+  writeConfig(tmpDir, { model: 'anthropic/shared-model' });
+  fs.writeFileSync(path.join(tmpDir, '.bateye', 'config.local.json'), '{ invalid json }');
+  assert.throws(() => loadConfig(tmpDir), /config\.local\.json/);
 });
 
 // saveConfig
@@ -118,11 +161,30 @@ test('resolveConfig uses config transport and apiBaseUrl when specified', () => 
   const tmpDir = makeTmpDir();
   writeConfig(tmpDir, {
     transport: 'vercel',
-    apiBaseUrl: 'https://ai-gateway.vercel.sh/v1',
+    apiBaseUrl: 'https://ai-gateway.vercel.sh/v3/ai',
   });
   const config = resolveConfig(tmpDir);
   assert.equal(config.transport, 'vercel');
-  assert.equal(config.apiBaseUrl, 'https://ai-gateway.vercel.sh/v1');
+  assert.equal(config.apiBaseUrl, 'https://ai-gateway.vercel.sh/v3/ai');
+});
+
+test('resolveConfig gives local config priority for matching fields', () => {
+  const tmpDir = makeTmpDir();
+  writeConfig(tmpDir, {
+    model: 'anthropic/shared-model',
+    transport: 'auto',
+    exclude: ['dist'],
+  });
+  writeLocalConfig(tmpDir, {
+    model: 'openai/local-model',
+    transport: 'vercel',
+    exclude: ['dist', 'generated'],
+  });
+
+  const config = resolveConfig(tmpDir);
+  assert.equal(config.model, 'openai/local-model');
+  assert.equal(config.transport, 'vercel');
+  assert.deepEqual(config.exclude, ['dist', 'generated']);
 });
 
 test('resolveConfig returns empty exclude array when absent', () => {
@@ -147,7 +209,22 @@ test('resolveApiKey returns API key from default environment variable', () => {
   }
 });
 
-test('resolveApiKey uses VERCEL_OIDC_TOKEN for Vercel models', () => {
+test('resolveApiKey prefers config apiKey over environment and credential store', withCredentialStore(storePath => {
+  const repoPath = makeTmpDir();
+  const original = process.env.BATEYE_LLM_MODEL_API_KEY;
+  process.env.BATEYE_LLM_MODEL_API_KEY = 'env-key-12345';
+  writeLocalConfig(repoPath, { apiKey: 'config-key-67890' });
+  saveRepoApiKey(repoPath, 'stored-key-24680', storePath);
+
+  try {
+    assert.equal(resolveApiKey(resolveConfig(repoPath), repoPath), 'config-key-67890');
+  } finally {
+    if (original === undefined) delete process.env.BATEYE_LLM_MODEL_API_KEY;
+    else process.env.BATEYE_LLM_MODEL_API_KEY = original;
+  }
+}));
+
+test('resolveApiKey uses VERCEL_OIDC_TOKEN for Vercel-routed supported models', () => {
   const originalDefaultKey = process.env.BATEYE_LLM_MODEL_API_KEY;
   const originalGatewayKey = process.env.AI_GATEWAY_API_KEY;
   const originalToken = process.env.VERCEL_OIDC_TOKEN;
@@ -155,7 +232,7 @@ test('resolveApiKey uses VERCEL_OIDC_TOKEN for Vercel models', () => {
   delete process.env.AI_GATEWAY_API_KEY;
   process.env.VERCEL_OIDC_TOKEN = 'vercel-oidc-token';
   try {
-    const key = resolveApiKey({ model: 'vercel/minimax/minimax-m2.5', transport: 'auto' });
+    const key = resolveApiKey({ model: 'vercel/openai/gpt-5.4-nano', transport: 'auto' });
     assert.equal(key, 'vercel-oidc-token');
   } finally {
     if (originalDefaultKey === undefined) {
@@ -181,6 +258,41 @@ test('resolveAuthEnvName returns VERCEL_OIDC_TOKEN for Vercel transport', () => 
     resolveAuthEnvName({ model: 'anthropic/claude-sonnet-4-5', transport: 'vercel' }),
     'VERCEL_OIDC_TOKEN',
   );
+});
+
+test('resolveGitHubToken prefers explicit token, then config, then env', () => {
+  const original = process.env.GITHUB_TOKEN;
+  process.env.GITHUB_TOKEN = 'env-github-token';
+
+  try {
+    assert.equal(
+      resolveGitHubToken({ githubToken: 'config-github-token' }, 'explicit-github-token'),
+      'explicit-github-token',
+    );
+    assert.equal(
+      resolveGitHubToken({ githubToken: 'config-github-token' }),
+      'config-github-token',
+    );
+    assert.equal(
+      resolveGitHubToken(undefined),
+      'env-github-token',
+    );
+  } finally {
+    if (original === undefined) delete process.env.GITHUB_TOKEN;
+    else process.env.GITHUB_TOKEN = original;
+  }
+});
+
+test('resolveGitHubToken ignores blank config placeholders', () => {
+  const original = process.env.GITHUB_TOKEN;
+  delete process.env.GITHUB_TOKEN;
+
+  try {
+    assert.equal(resolveGitHubToken({ githubToken: '   ' }), undefined);
+  } finally {
+    if (original === undefined) delete process.env.GITHUB_TOKEN;
+    else process.env.GITHUB_TOKEN = original;
+  }
 });
 
 test('resolveApiKey throws when required environment variable is not set', withCredentialStore(() => {
@@ -373,13 +485,13 @@ test('setConfigField supports transport fields', () => {
   const tmpDir = makeTmpDir();
   writeConfig(tmpDir, { model: 'anthropic/model' });
   setConfigField(tmpDir, 'transport', 'vercel');
-  setConfigField(tmpDir, 'apiBaseUrl', 'https://ai-gateway.vercel.sh/v1');
+  setConfigField(tmpDir, 'apiBaseUrl', 'https://ai-gateway.vercel.sh/v3/ai');
 
   const content = JSON.parse(
     fs.readFileSync(path.join(tmpDir, '.bateye', 'config.json'), 'utf-8'),
   );
   assert.equal(content.transport, 'vercel');
-  assert.equal(content.apiBaseUrl, 'https://ai-gateway.vercel.sh/v1');
+  assert.equal(content.apiBaseUrl, 'https://ai-gateway.vercel.sh/v3/ai');
 });
 
 test('setConfigField works when no config file exists yet', () => {
@@ -389,6 +501,26 @@ test('setConfigField works when no config file exists yet', () => {
     fs.readFileSync(path.join(tmpDir, '.bateye', 'config.json'), 'utf-8'),
   );
   assert.equal(content.model, 'anthropic/new-model');
+});
+
+test('setConfigField updates config.json without copying local overrides into it', () => {
+  const tmpDir = makeTmpDir();
+  writeConfig(tmpDir, { model: 'anthropic/shared-model' });
+  writeLocalConfig(tmpDir, { transport: 'vercel' });
+
+  setConfigField(tmpDir, 'apiBaseUrl', 'https://gateway.example/v1');
+
+  const sharedConfig = JSON.parse(
+    fs.readFileSync(path.join(tmpDir, '.bateye', 'config.json'), 'utf-8'),
+  );
+  assert.deepEqual(sharedConfig, {
+    model: 'anthropic/shared-model',
+    apiBaseUrl: 'https://gateway.example/v1',
+  });
+
+  const effectiveConfig = resolveConfig(tmpDir);
+  assert.equal(effectiveConfig.transport, 'vercel');
+  assert.equal(effectiveConfig.apiBaseUrl, 'https://gateway.example/v1');
 });
 
 test('setConfigField rejects non-array values for exclude', () => {

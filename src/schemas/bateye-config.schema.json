@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://bateye.dev/schemas/bateye-config.schema.json",
   "title": "BatEye Configuration",
-  "description": "Configuration schema for .bateye/config.json",
+  "description": "Configuration schema for .bateye/config.json and .bateye/config.local.json",
   "type": "object",
   "properties": {
     "$schema": {
@@ -11,18 +11,28 @@
     },
     "model": {
       "type": "string",
-      "description": "Primary analysis model in provider/model format (e.g. anthropic/claude-sonnet-4-5)",
-      "examples": ["anthropic/claude-sonnet-4-5", "openai/gpt-4o"]
+      "description": "Primary analysis model in provider/model format (for example vercel/openai/gpt-5.4-nano or anthropic/claude-sonnet-4-5)",
+      "examples": ["vercel/openai/gpt-5.4-nano", "anthropic/claude-sonnet-4-5"]
+    },
+    "apiKey": {
+      "type": "string",
+      "description": "Optional plaintext API key override. Use only in .bateye/config.local.json so it stays gitignored.",
+      "examples": ["sk-...", ""]
     },
     "transport": {
       "type": "string",
       "description": "Optional transport used to send requests. Use this when the model name represents the routed provider/model but the HTTP transport should be a gateway such as Vercel AI Gateway.",
-      "examples": ["auto", "vercel", "openrouter", "openai"]
+      "examples": ["auto", "vercel", "openai", "anthropic", "google", "mistral"]
     },
     "apiBaseUrl": {
       "type": "string",
-      "description": "Optional OpenAI-compatible base URL for custom gateways or proxies.",
-      "examples": ["https://ai-gateway.vercel.sh/v1", "https://my-gateway.example.com/v1"]
+      "description": "Optional provider-specific base URL override for supported AI SDK providers. Not supported by the Codebite-backed agentic review runtime.",
+      "examples": ["https://ai-gateway.vercel.sh/v3/ai", "https://my-provider-proxy.example/v1"]
+    },
+    "githubToken": {
+      "type": "string",
+      "description": "Optional plaintext GitHub token override for pr-review --github. Use only in .bateye/config.local.json so it stays gitignored.",
+      "examples": ["ghp_...", ""]
     },
     "exclude": {
       "type": "array",
@@ -50,15 +60,6 @@
               "enum": ["info", "low", "medium"],
               "description": "Maximum finding severity that still allows auto-approval."
             }
-          },
-          "required": ["enabled"],
-          "additionalProperties": false
-        },
-        "semanticVerification": {
-          "type": "object",
-          "description": "Controls the LLM-based semantic verification pass that confirms findings are real. Disabling it skips the pass entirely - faster and cheaper, but may let false-positives through. Defaults to enabled.",
-          "properties": {
-            "enabled": { "type": "boolean" }
           },
           "required": ["enabled"],
           "additionalProperties": false

@@ -3,8 +3,7 @@
  *
  * Sets `reasoningEffort: "high"` in `.bateye/config.json` for an OpenAI-style
  * model and runs `pr-review --dry-run` against the mock runtime. Asserts that
- * every structured run() call (orchestrator + semantic verifier) and every
- * runAgenticReview() call (reviewer agents) carry `reasoningEffort: "high"` in
+ * every agentic planner/reviewer call carries `reasoningEffort: "high"` in
  * the mock runtime log, proving the option threads through the full pipeline.
  */
 
@@ -58,31 +57,18 @@ Report only concrete security problems after investigating the current repositor
 `);
   commitAll(repoPath, 'trimmed token');
 
-  // Mock runtime fixtures: one orchestrator run + one semantic-verifier run + one reviewer agentic run
+  // Mock runtime fixtures: one planner run + one reviewer agentic run
   const fixturePath = path.join(repoPath, 'mock-runtime.json');
   const logPath = path.join(repoPath, 'mock-runtime-log.json');
 
   writeJson(fixturePath, {
     runs: [
-      // Orchestrator (structured run)
+      // PR planner
       {
         data: {
           intentSummary: 'The PR trims the token before checking its length.',
           selectedReviewers: [
             { reviewerId: 'security', reason: 'Auth change needs security review.', confidence: 0.95 },
-          ],
-        },
-      },
-      // Semantic verifier (structured run) — one finding, verified
-      {
-        data: {
-          verifications: [
-            {
-              findingId: 'SECURITY_1',
-              supported: true,
-              classification: 'direct',
-              reason: 'The finding is anchored to the changed line.',
-            },
           ],
         },
       },
@@ -127,33 +113,26 @@ Report only concrete security problems after investigating the current repositor
 
   const runtimeLog = JSON.parse(fs.readFileSync(logPath, 'utf-8'));
 
-  const structuredRuns = runtimeLog.filter(e => e.type === 'run');
   const agenticRuns = runtimeLog.filter(e => e.type === 'runAgenticReview');
 
-  // Expect exactly 2 structured runs: orchestrator + semantic verifier
-  assert.equal(structuredRuns.length, 2, 'Expected orchestrator + semantic verifier structured runs');
-  // Expect exactly 1 agentic run: the security reviewer
-  assert.equal(agenticRuns.length, 1, 'Expected 1 agentic reviewer run');
+  assert.equal(agenticRuns.length, 2, 'Expected 1 planner run plus 1 agentic reviewer run');
+  const plannerRuns = agenticRuns.filter(entry => entry.callLabel === 'pr-planner');
+  const reviewerRuns = agenticRuns.filter(entry => entry.callLabel === 'reviewer:Security Reviewer');
+  assert.equal(plannerRuns.length, 1, 'Expected 1 planner run');
+  assert.equal(reviewerRuns.length, 1, 'Expected 1 reviewer run');
 
   // Every run must carry reasoningEffort: "high"
-  for (const entry of structuredRuns) {
-    assert.equal(
-      entry.reasoningEffort,
-      'high',
-      `structured run (${entry.promptPreview?.slice(0, 40)}) must carry reasoningEffort: "high"`,
-    );
-  }
   for (const entry of agenticRuns) {
     assert.equal(
       entry.reasoningEffort,
       'high',
-      `agentic run (${entry.promptPreview?.slice(0, 40)}) must carry reasoningEffort: "high"`,
+      `agentic run (${entry.callLabel || entry.promptPreview?.slice(0, 40)}) must carry reasoningEffort: "high"`,
     );
   }
 
   // The pipeline must also build the reasoningOverrides list.
   // Every run should carry at least one override for openai/gpt-5.
-  for (const entry of [...structuredRuns, ...agenticRuns]) {
+  for (const entry of agenticRuns) {
     assert.ok(
       Array.isArray(entry.reasoningOverrides) && entry.reasoningOverrides.length > 0,
       `run (${entry.promptPreview?.slice(0, 40)}) must carry at least one reasoningOverride`,

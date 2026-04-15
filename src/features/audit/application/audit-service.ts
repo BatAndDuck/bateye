@@ -16,16 +16,16 @@ import {
 } from '../../../core/config/defaults';
 import { ensureDir, writeAuditResult } from '../../../core/output/writer';
 import { IRuntime, TokenUsage } from '../../../core/runtime/interface';
-import { getAuditRuntime, createStructuredRuntime } from '../../../core/runtime/factory';
+import { getAuditRuntime } from '../../../core/runtime/factory';
 import { formatErrorWithCauses } from '../../../core/runtime/error-format';
 import { briefError, categorizeError } from '../../../core/output/user-error';
 import { addTokens, formatTokenSummary } from '../../../core/runtime/token-utils';
 import { resolveApiKey, resolveConfig } from '../../config/application/config-service';
 import { loadReviewersForMode } from '../../reviewers/application/reviewer-registry';
 import { selectAuditReviewers } from './audit-orchestrator';
-import { verifyAuditFindings } from './audit-verifier';
 import { BATEYE_VERSION } from '../../../version';
 import { resolveDiagnosticDir } from '../../../core/output/diagnostics';
+import { validateCodebiteAgenticModels } from '../../../core/runtime/codebite/index';
 
 /**
  * Minimum confidence required to keep a finding, by severity.
@@ -90,8 +90,8 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
 
   // Build the reasoning-override list once. Includes config.model (used by orchestrator
   // and verifier) plus every candidate reviewer's model override, deduped by model id.
-  // OpenCodeCLIRuntime needs every model name upfront so it can seed opencode.json before
-  // spawning its server. Undefined when reasoningEffort isn't configured.
+  // The list is preserved for runtime diagnostics and compatibility with the existing
+  // pipeline threading. Undefined when reasoningEffort isn't configured.
   // Guard against non-string values that could appear in hand-edited config files.
   const reasoningEffort = typeof config.reasoningEffort === 'string' && config.reasoningEffort
     ? config.reasoningEffort
@@ -102,6 +102,16 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
           .map(m => [m, { model: m, reasoningEffort }]),
       ).values())
     : undefined;
+
+  if (process.env.BATEYE_RUNTIME !== 'mock') {
+    validateCodebiteAgenticModels(
+      [config.model, ...allReviewers.map(r => r.model || config.model)].map(model => ({
+        model,
+        transport: config.transport,
+        apiBaseUrl: config.apiBaseUrl,
+      })),
+    );
+  }
 
   // Phase 2: Index repository
   log('Indexing repository...');
@@ -179,33 +189,9 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
     }
   }
 
-  // Phase 7: Skeptic verification pass (filter false positives)
-  log('Running skeptic verification pass...');
-  let verifiedFindings = deduped;
-  let semanticRejectedCount = 0;
-  try {
-    const verifierRuntime = await createStructuredRuntime();
-    const verifierResult = await verifyAuditFindings(deduped, {
-      repoPath,
-      model: config.model,
-      apiKey,
-      transport: config.transport,
-      apiBaseUrl: config.apiBaseUrl,
-      runtime: verifierRuntime,
-      log,
-      reasoningEffort,
-      reasoningOverrides,
-    });
-    verifiedFindings = verifierResult.kept;
-    semanticRejectedCount = verifierResult.rejected.length;
-    if (semanticRejectedCount > 0) {
-      log(`Skeptic verifier rejected ${semanticRejectedCount} finding(s) as speculative or inapplicable.`);
-    }
-  } catch (err) {
-    log(`Warning: skeptic verifier failed (keeping all deduplicated findings): ${briefError(err)}`);
-  }
+  const verifiedFindings = deduped;
 
-  // Phase 8: Rebuild per-reviewer arrays using verified findings, then assemble result
+  // Phase 7: Rebuild per-reviewer arrays using verified findings, then assemble result
   const verifiedIdSet = new Set(verifiedFindings.map(f => f.id));
   const finalReviewerResults = successfulResults.map(rr => ({
     ...rr,
@@ -228,7 +214,6 @@ export async function runAudit(options: AuditOptions, dependencies: AuditDepende
       rawFindings: rawAllFindings.length,
       confidenceRejected: confidenceDropped,
       deterministicRejected: 0,
-      semanticRejected: semanticRejectedCount,
       finalFindings: verifiedFindings.length,
     },
     failedCount,

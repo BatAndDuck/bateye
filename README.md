@@ -8,7 +8,7 @@ BatEye is useful when you want to:
 - audit a repo before a release
 - review a diff locally before opening a PR
 - run AI review in GitHub Actions
-- use your own provider or a local model instead of a SaaS-only tool
+- use your own supported provider instead of a SaaS-only tool
 
 ## Install
 
@@ -34,11 +34,11 @@ bateye audit
 bateye pr-review
 ```
 
-Prefer environment variables or local models?
-- `BATEYE_LLM_MODEL_API_KEY=<your-key>` works too.
-- `bateye conf --model ollama/llama3.2` uses local Ollama and skips the API key drama.
+Prefer environment variables?
+- `BATEYE_LLM_MODEL_API_KEY=<your-key>` works for direct provider models such as `openai/gpt-5.4-nano`.
+- `AI_GATEWAY_API_KEY=<your-key>` or `VERCEL_OIDC_TOKEN=<token>` are required for Vercel-routed models such as `vercel/openai/gpt-5.4-nano`.
 
-BatEye writes results to `.bateye/out/`.
+BatEye writes results to `.bateye/out/`. Use `.bateye/config.local.json` for local-only overrides you do not want to commit, including optional `apiKey` and `githubToken` fields.
 
 ## Two jobs, one bat
 
@@ -56,6 +56,10 @@ bateye audit --output ./report.json
 
 Diff-focused review for the changes you are actually about to merge.
 
+`pr-review` now runs in two stages:
+- one deep Codebite planner run (`codebite@0.5.0`, deep mode, `maxSteps=150`) that investigates the full change context and prepares reviewer-specific briefings
+- bounded reviewer runs (`maxSteps=20`, non-deep) that start from those briefings instead of rediscovering the repo from scratch
+
 ```bash
 bateye pr-review
 bateye pr-review --base main --head HEAD
@@ -68,12 +72,16 @@ Drop Markdown reviewer prompts into `.bateye/reviewers/` to add new reviewers or
 
 ## Bring your own model
 
-BatEye works with OpenAI, Anthropic, OpenRouter, Google, Groq, Azure, LiteLLM, Ollama, LM Studio, Vercel AI Gateway, and more.
+BatEye's structured and Codebite-backed review flows support the full current Codebite provider set through the Vercel AI SDK: OpenAI, Anthropic, Google, Mistral, Vercel AI Gateway, Groq, xAI, Cohere, DeepSeek, AWS Bedrock, Azure OpenAI, Together AI, Fireworks AI, and LiteLLM.
 
 ```bash
+bateye conf --model openai/gpt-5.4-nano --apikey <key>
+bateye conf --model vercel/openai/gpt-5.4-nano --apikey <ai-gateway-key>
 bateye conf --model anthropic/claude-sonnet-4-5 --apikey <key>
-bateye conf --model openrouter/meta-llama/llama-3.3-70b-instruct --apikey <key>
-bateye conf --model ollama/llama3.2
+bateye conf --model google/gemini-2.5-pro --apikey <key>
+bateye conf --model mistral/mistral-large-latest --apikey <key>
+bateye conf --model groq/llama-3.3-70b-versatile --apikey <key>
+bateye conf --model deepseek/deepseek-chat --apikey <key>
 ```
 
 Provider setup details live here: [Providers](./docs/providers.md)
@@ -87,6 +95,7 @@ Start here if you want specifics instead of vibes:
 | Pick a model or provider | [Providers](./docs/providers.md) |
 | Configure BatEye | [Configuration](./docs/configuration.md) |
 | Run PR review in CI | [GitHub Actions](./docs/github-actions.md) |
+| Benchmark planner-backed PR review | [Benchmark README](./.bateye/benchmark/README.md) |
 | See built-in reviewers or write my own | [Reviewers](./docs/reviewers.md) |
 | Fix a broken setup | [Troubleshooting](./docs/troubleshooting.md) |
 | Browse the docs map | [Docs index](./docs/README.md) |

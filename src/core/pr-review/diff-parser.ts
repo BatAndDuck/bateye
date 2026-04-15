@@ -150,10 +150,23 @@ export function getCodeAtLine(parsed: ParsedDiff, filePath: string, line: number
   return null;
 }
 
-export function buildReviewerDiffContext(parsed: ParsedDiff): string {
+function resolveDiffEntries(parsed: ParsedDiff, selectedFiles?: string[]): Array<[string, FileDiff]> {
+  if (!selectedFiles || selectedFiles.length === 0) {
+    return Array.from(parsed.files.entries());
+  }
+
+  return selectedFiles
+    .map(filePath => {
+      const fileDiff = parsed.files.get(filePath);
+      return fileDiff ? [filePath, fileDiff] as [string, FileDiff] : null;
+    })
+    .filter((entry): entry is [string, FileDiff] => entry !== null);
+}
+
+export function buildReviewerDiffContext(parsed: ParsedDiff, selectedFiles?: string[]): string {
   const sections: string[] = [];
 
-  for (const [filePath, fileDiff] of parsed.files) {
+  for (const [filePath, fileDiff] of resolveDiffEntries(parsed, selectedFiles)) {
     const lines: string[] = [];
     lines.push(`=== FILE: ${filePath} ===`);
 
@@ -175,8 +188,8 @@ export function buildReviewerDiffContext(parsed: ParsedDiff): string {
   return sections.join('\n\n');
 }
 
-export function getFilesInDiff(parsed: ParsedDiff): string[] {
-  return Array.from(parsed.files.keys());
+export function getFilesInDiff(parsed: ParsedDiff, selectedFiles?: string[]): string[] {
+  return resolveDiffEntries(parsed, selectedFiles).map(([filePath]) => filePath);
 }
 
 export function getChangedLineContent(parsed: ParsedDiff, filePath: string): string[] {

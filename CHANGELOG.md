@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Changed
+- Replaced the previous bundled agentic review runtime with Codebite for `audit` and `pr-review`.
+- Agentic review now supports only `openai`, `anthropic`, `google`, `mistral`, and `vercel`, with this repo defaulting to `vercel/openai/gpt-5.4-nano`.
+- Added committed `.codebite.json` repo defaults and updated docs, doctor output, model listing, and CI workflow language to match the Codebite runtime.
+
 ## 0.1.9
 
 ### Changed
@@ -18,7 +23,7 @@
 - Structure repair prompt now wraps malformed JSON in explicit `--- BEGIN/END JSON DATA ---` delimiters with an instruction to treat contents as inert data, preventing instruction-like strings in AI-generated JSON values from influencing the repair model.
 - Model-not-found errors (e.g. Anthropic `model: <name>` validation errors) now include a hint to run `bateye models` to list available models for the provider.
 - `bateye models --provider vercel` now returns the models available on the Vercel AI Gateway by querying its OpenAI-compatible `/v1/models` endpoint directly.
-- Gemini provider smoke test now passes: `buildOpenCodeEnvironment` also sets `GOOGLE_GENERATIVE_AI_API_KEY` (required by OpenCode's `@ai-sdk/google` dependency) in addition to `GOOGLE_API_KEY` and `GEMINI_API_KEY`.
+- Gemini provider smoke test now passes: the agentic runtime environment also sets `GOOGLE_GENERATIVE_AI_API_KEY` in addition to `GOOGLE_API_KEY` and `GEMINI_API_KEY`.
 
 ## 0.1.5
 
@@ -38,7 +43,7 @@
 ### Added
 - `bateye conf --model ... --apikey ...` for quick model switching and repo-scoped credential storage.
 - Diagnostic mode and prompt capture controls for local troubleshooting.
-- Provider-agnostic routing through the Vercel AI SDK plus OpenCode runtime compatibility improvements.
+- Provider-agnostic routing through the Vercel AI SDK plus agentic runtime compatibility improvements.
 - `bateye reviewers` command - lists all available built-in and user-defined reviewers with their IDs and descriptions.
 - `disabledReviewers` config option - disable specific reviewer IDs per mode (`audit` or `prReview`) in `.bateye/config.json`.
 - Mock runtime for offline development/testing: set `BATEYE_RUNTIME=mock` with `BATEYE_MOCK_RUNTIME_FIXTURES` to replay pre-recorded AI responses without live API calls.
@@ -55,7 +60,7 @@
 - Semgrep SAST scanner no longer shows "Exit code undefined: unknown error" when `semgrep` is not installed - reviewer now runs without tool data instead of being skipped entirely.
 - Secretlint scanner no longer shows "Exit code 2: npm warn exec package not found" - added `--yes` flag for automatic install via `npx`.
 - Test environment variable `BATEYE_LLM_MODEL_API_KEY` is now saved and restored in all unit tests, preventing cross-test pollution.
-- Agentic runtimes no longer require a separate global `opencode-ai` install; normal BatEye installs now bundle and resolve the OpenCode runtime automatically.
+- Agentic runtimes no longer require a separate global runtime install; normal BatEye installs bundle and resolve the review runtime automatically.
 
 ### Changed
 - Reorganized core workflows into feature-oriented slices for audit, config, and reviewers.

@@ -17,7 +17,7 @@ function runPRReview(args, env) {
   });
 }
 
-test('pr-review command runs agentic reviewers, semantically verifies findings, and writes the final report', () => {
+test('pr-review command runs agentic reviewers and writes the final report after deterministic verification', () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-int-'));
   initGitRepo(repoPath);
 
@@ -84,25 +84,42 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
         data: {
           intentSummary: 'The PR refactors normalization flow intentionally and should be checked by security and follow-up reviewers.',
           selectedReviewers: [
-            { reviewerId: 'pr-tool', reason: 'Changed TypeScript logic needs a security scan.' , confidence: 0.9 },
-            { reviewerId: 'pr-follow-up', reason: 'The updated function should get a code quality pass.' , confidence: 0.9 },
+            {
+              reviewerId: 'pr-tool',
+              reason: 'Changed TypeScript logic needs a security scan.',
+              confidence: 0.9,
+              briefing: 'Start at src/service.ts, trace the normalized value from assignment to return, and compare with any shared sanitization helpers before broadening.',
+              contextPaths: ['src/service.ts', 'src'],
+              verticalFlows: ['buildMessage() input -> normalized local -> return value'],
+              businessContext: ['The function appears to normalize user-visible input before returning it.'],
+              consistencyReferences: ['src/service.ts'],
+              testLocations: ['src', 'test'],
+              issueHints: ['Normalized value is returned directly from the changed block.'],
+            },
+            {
+              reviewerId: 'pr-follow-up',
+              reason: 'The updated function should get a code quality pass.',
+              confidence: 0.9,
+              briefing: 'Review the same function for missing companion validation or readability regressions, but avoid repeating the security reviewer surface.',
+              contextPaths: ['src/service.ts'],
+              verticalFlows: ['buildMessage() input -> normalized local -> return value'],
+              businessContext: ['This is a small normalization helper used in the changed service file.'],
+              consistencyReferences: ['src/service.ts'],
+              testLocations: ['src'],
+              issueHints: ['The helper has no visible validation step after normalization.'],
+            },
           ],
         },
       },
       {
         data: {
-          verifications: [
+          decisions: [
             {
-              findingId: 'PR_TOOL_PR_1',
-              supported: true,
-              classification: 'direct',
-              reason: 'The finding is supported by the current file content and anchored to changed code.',
-            },
-            {
-              findingId: 'PR_FOLLOW_UP_PR_2',
-              supported: false,
-              classification: 'unrelated',
-              reason: 'The anchor file is not part of the PR diff, so the finding is not related to the reviewed changes.',
+              aId: 'PR_TOOL_PR_1',
+              bId: 'PR_FOLLOW_UP_PR_1',
+              verdict: 'duplicate',
+              confidence: 0.93,
+              rationale: 'Both findings describe the same missing validation issue in the same changed line.',
             },
           ],
         },
@@ -194,6 +211,9 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
   assert.equal(report.baseRef, 'main');
   assert.equal(report.headRef, 'HEAD');
   assert.equal(report.selectedReviewers.length, 2);
+  assert.equal(report.selectedReviewers[0].briefing.includes('Start at src/service.ts'), true);
+  assert.deepEqual(report.selectedReviewers[0].verticalFlows, ['buildMessage() input -> normalized local -> return value']);
+  assert.deepEqual(report.selectedReviewers[0].issueHints, ['Normalized value is returned directly from the changed block.']);
   assert.equal(report.findings.length, 1);
   assert.equal(report.rejectedFindings, 1);
   assert.deepEqual(report.verificationStats, {
@@ -201,7 +221,6 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
     confidenceRejected: 0,
     deterministicRejected: 0,
     diffGateRejected: 1,
-    semanticRejected: 0,
     finalFindings: 1,
   });
   assert.match(report.summary, /Verification/);
@@ -213,8 +232,11 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
   const finding = report.findings[0];
   assert.equal(finding.filePath, 'src/service.ts');
   assert.equal(finding.startLine, 2);
-  assert.deepEqual(finding.verificationTrail, ['file:src/service.ts', 'search:normalized']);
-  assert.deepEqual(finding.searchedFor, ['escaping', 'validation']);
+  assert.deepEqual(
+    new Set(finding.verificationTrail),
+    new Set(['file:src/service.ts', 'search:normalized', 'search:return normalized']),
+  );
+  assert.deepEqual(new Set(finding.searchedFor), new Set(['escaping', 'validation']));
   assert.match(finding.reviewerId, /pr-tool/);
   assert.match(finding.reviewerId, /pr-follow-up/);
 
@@ -222,10 +244,193 @@ process.stdout.write('PR TOOL OK\\n' + files.join('\\n'));
   assert.deepEqual(toolLog.files, ['src/service.ts']);
 
   const runtimeLog = JSON.parse(fs.readFileSync(logPath, 'utf-8'));
-  // Two non-agentic runs: the orchestrator and semantic verification.
-  assert.equal(runtimeLog.filter(entry => entry.type === 'run').length, 2);
-  assert.equal(runtimeLog.filter(entry => entry.type === 'runAgenticReview').length, 2);
-  assert.equal(runtimeLog.find(entry => entry.type === 'runAgenticReview').repoPath, repoPath);
+  assert.equal(runtimeLog.filter(entry => entry.type === 'run').length, 1);
+  assert.equal(runtimeLog.filter(entry => entry.type === 'runAgenticReview').length, 3);
+  const dedupRun = runtimeLog.find(entry => entry.type === 'run' && entry.callLabel === 'pr-dedup-arbiter-1');
+  assert.ok(dedupRun);
+  const plannerRun = runtimeLog.find(entry => entry.callLabel === 'pr-planner');
+  assert.equal(plannerRun.repoPath, repoPath);
+  assert.equal(plannerRun.maxSteps, 150);
+  assert.equal(plannerRun.deepMode, true);
+  const reviewerRuns = runtimeLog.filter(entry => entry.callLabel && entry.callLabel.startsWith('reviewer:'));
+  assert.deepEqual(
+    reviewerRuns.map(entry => entry.callLabel).sort(),
+    ['reviewer:PR Follow-up Reviewer', 'reviewer:PR Tool Reviewer'],
+  );
+  assert.ok(reviewerRuns.every(entry => entry.maxSteps === 20));
+  assert.ok(reviewerRuns.every(entry => entry.deepMode === false));
+
+  const promptDir = path.join(repoPath, '.bateye', 'out', 'prompts');
+  const reviewerPrompt = fs
+    .readdirSync(promptDir)
+    .find(file => file.endsWith('reviewer-pr-tool-user.txt'));
+  assert.ok(reviewerPrompt);
+  const reviewerPromptText = fs.readFileSync(path.join(promptDir, reviewerPrompt), 'utf-8');
+  assert.match(reviewerPromptText, /## Planner Briefing/);
+  assert.match(reviewerPromptText, /Normalized value is returned directly from the changed block/);
+  assert.match(reviewerPromptText, /## Planner Starting Paths/);
+});
+
+test('pr-review command keeps same-line findings separate when the dedup arbiter marks them distinct', () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-dedup-distinct-'));
+  initGitRepo(repoPath);
+
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
+    model: 'anthropic/mock-model',
+    exclude: [],
+  });
+
+  writeText(path.join(repoPath, '.bateye', 'reviewers', 'pr-logging.md'), `---
+id: pr-logging
+name: PR Logging Reviewer
+mode: pr-review
+category: documentation
+---
+Report only concrete logging and secret-exposure issues.
+`);
+
+  writeText(path.join(repoPath, '.bateye', 'reviewers', 'pr-resiliency.md'), `---
+id: pr-resiliency
+name: PR Resiliency Reviewer
+mode: pr-review
+category: sre
+---
+Report only concrete retry, timeout, and transient-failure issues.
+`);
+
+  writeText(path.join(repoPath, 'src', 'service.ts'), `export async function publish(token: string) {
+  return postToken(token);
+}
+`);
+  commitAll(repoPath, 'base');
+
+  runOk('git', ['checkout', '-b', 'feature/dedup-distinct'], { cwd: repoPath });
+  writeText(path.join(repoPath, 'src', 'service.ts'), `export async function publish(token: string) {
+  return postToken(token, { logTokenPrefix: token.slice(0, 8) });
+}
+`);
+  commitAll(repoPath, 'feature change');
+
+  const fixturePath = path.join(repoPath, 'mock-runtime.json');
+  const logPath = path.join(repoPath, 'mock-runtime-log.json');
+  writeJson(fixturePath, {
+    runs: [
+      {
+        data: {
+          intentSummary: 'The PR changes one publish helper and should be checked for logging and resiliency concerns.',
+          selectedReviewers: [
+            {
+              reviewerId: 'pr-logging',
+              reason: 'The changed warning statement needs a logging pass.',
+              confidence: 0.95,
+              briefing: 'Inspect the changed publish call in src/service.ts for token exposure.',
+              contextPaths: ['src/service.ts'],
+              verticalFlows: ['publish() -> postToken() network call'],
+              businessContext: ['The helper publishes a token through a network call.'],
+              consistencyReferences: [],
+              testLocations: ['src'],
+              issueHints: ['The changed call passes a token prefix into the network helper options.'],
+            },
+            {
+              reviewerId: 'pr-resiliency',
+              reason: 'The changed network publish flow needs a resiliency pass.',
+              confidence: 0.93,
+              briefing: 'Inspect the same helper for retry and transient-failure handling around postToken().',
+              contextPaths: ['src/service.ts'],
+              verticalFlows: ['publish() -> warning log -> postToken()'],
+              businessContext: ['The helper performs a network publish operation.'],
+              consistencyReferences: [],
+              testLocations: ['src'],
+              issueHints: ['The changed publish path still returns the network call directly.'],
+            },
+          ],
+        },
+      },
+      {
+        data: {
+          decisions: [
+            {
+              aId: 'PR_LOGGING_PR_1',
+              bId: 'PR_RESILIENCY_PR_1',
+              verdict: 'distinct',
+              confidence: 0.96,
+              rationale: 'One finding is a secret-leak logging issue and the other is a missing retry concern in the same changed block.',
+            },
+          ],
+        },
+      },
+    ],
+    agenticRuns: [
+      {
+        data: {
+          score: 62,
+          summary: 'A concrete logging issue exists.',
+          findings: [
+            {
+              id: 'PR_LOGGING_PR_1',
+              title: 'Warning log includes part of the token',
+              description: 'The changed publish call passes a token prefix into helper options, which can flow into logs or downstream telemetry.',
+              priority: 'critical',
+              confidence: 0.95,
+              filePath: 'src/service.ts',
+              startLine: 2,
+              endLine: 2,
+              codeQuote: '  return postToken(token, { logTokenPrefix: token.slice(0, 8) });',
+              evidence: ['Changed publish call includes a token prefix option.'],
+              verificationTrail: ['file:src/service.ts', 'search:logTokenPrefix'],
+              searchedFor: ['token.slice'],
+              recommendation: 'Remove the token prefix from the helper options or scrub it before logging.',
+              tags: ['logging'],
+            },
+          ],
+        },
+      },
+      {
+        data: {
+          score: 70,
+          summary: 'A resiliency issue exists in the same changed block.',
+          findings: [
+            {
+              id: 'PR_RESILIENCY_PR_1',
+              title: 'Publish path has no transient-failure retry',
+              description: 'The changed publish flow returns the network call directly without any retry handling.',
+              priority: 'high',
+              confidence: 0.91,
+              filePath: 'src/service.ts',
+              startLine: 2,
+              endLine: 2,
+              codeQuote: '  return postToken(token, { logTokenPrefix: token.slice(0, 8) });',
+              evidence: ['The changed helper still returns the network call directly.'],
+              verificationTrail: ['file:src/service.ts', 'search:postToken'],
+              searchedFor: ['retry', 'postToken'],
+              recommendation: 'Wrap the network call in the existing retry helper or add bounded retry handling.',
+              tags: ['resiliency'],
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  const result = runPRReview(['--cwd', repoPath, '--base', 'main', '--dry-run'], {
+    BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+    BATEYE_RUNTIME: 'mock',
+    BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
+    BATEYE_MOCK_RUNTIME_LOG: logPath,
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json'), 'utf-8'));
+  assert.equal(report.findings.length, 2);
+  assert.deepEqual(
+    report.findings.map(finding => finding.id).sort(),
+    ['PR_LOGGING_PR_1', 'PR_RESILIENCY_PR_1'],
+  );
+
+  const runtimeLog = JSON.parse(fs.readFileSync(logPath, 'utf-8'));
+  const dedupRun = runtimeLog.find(entry => entry.type === 'run' && entry.callLabel === 'pr-dedup-arbiter-1');
+  assert.ok(dedupRun);
 });
 
 test('pr-review command fails when there are no changed files between the requested refs', () => {
@@ -252,6 +457,71 @@ test('pr-review command fails when there are no changed files between the reques
   assert.equal(result.status, 1);
   assert.match(result.stdout + result.stderr, /No changed files found between the specified refs/);
   assert.equal(fs.existsSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json')), false);
+});
+
+test('pr-review command diagnostic mode announces and writes the diagnostics directory', () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-diagnostic-int-'));
+  initGitRepo(repoPath);
+
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
+    model: 'anthropic/mock-model',
+    exclude: [],
+  });
+
+  writeText(path.join(repoPath, 'src', 'service.ts'), `export function buildMessage(name: string) {
+  return name.trim();
+}
+`);
+  commitAll(repoPath, 'base');
+
+  runOk('git', ['checkout', '-b', 'feature/pr-review-diagnostic'], { cwd: repoPath });
+  writeText(path.join(repoPath, 'src', 'service.ts'), `export function buildMessage(name: string) {
+  const normalized = name.trim();
+  return normalized;
+}
+`);
+  commitAll(repoPath, 'feature change');
+
+  const fixturePath = path.join(repoPath, 'mock-runtime.json');
+  writeJson(fixturePath, {
+    runs: [
+      {
+        data: {
+          intentSummary: 'The PR changes one TypeScript function and should be checked by the local reviewer.',
+          selectedReviewers: [
+            {
+              reviewerId: 'bug-hunter-local',
+              reason: 'The changed function needs a general bug pass.',
+              confidence: 0.9,
+            },
+          ],
+        },
+      },
+    ],
+    agenticRuns: [
+      {
+        data: {
+          score: 95,
+          summary: 'No issues found.',
+          findings: [],
+        },
+      },
+    ],
+  });
+
+  const result = spawnSync('node', ['dist/index.js', '--diagnostic', '--cwd', repoPath, 'pr-review', '--base', 'main', '--dry-run'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+      BATEYE_RUNTIME: 'mock',
+      BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
+    },
+    encoding: 'utf-8',
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Diagnostics enabled\. Writing PR review traces to/);
 });
 
 test('pr-review command uses exactly the reviewers the orchestrator selected, no more', () => {
@@ -309,7 +579,101 @@ test('pr-review command uses exactly the reviewers the orchestrator selected, no
   assert.deepEqual(selectedIds, ['bug-hunter']);
 
   const runtimeLog = JSON.parse(fs.readFileSync(logPath, 'utf-8'));
-  assert.equal(runtimeLog.filter(entry => entry.type === 'runAgenticReview').length, 1);
+  assert.equal(runtimeLog.filter(entry => entry.type === 'runAgenticReview').length, 2);
+});
+
+test('pr-review command falls back per reviewer when planner paths are invalid', () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-planner-fallback-'));
+  initGitRepo(repoPath);
+
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
+    model: 'anthropic/mock-model',
+    exclude: [],
+  });
+
+  writeText(path.join(repoPath, '.bateye', 'reviewers', 'fallback-reviewer.md'), `---
+id: fallback-reviewer
+name: Fallback Reviewer
+mode: pr-review
+category: code-quality
+---
+Investigate concrete code quality regressions only.
+`);
+
+  writeText(path.join(repoPath, 'src', 'index.ts'), `export function formatName(name: string) {
+  return name.trim();
+}
+`);
+  commitAll(repoPath, 'base');
+
+  runOk('git', ['checkout', '-b', 'feature/planner-fallback'], { cwd: repoPath });
+  writeText(path.join(repoPath, 'src', 'index.ts'), `export function formatName(name: string) {
+  const normalized = name.trim();
+  return normalized.toUpperCase();
+}
+`);
+  commitAll(repoPath, 'feature change');
+
+  const fixturePath = path.join(repoPath, 'mock-runtime.json');
+  const logPath = path.join(repoPath, 'mock-runtime-log.json');
+  writeJson(fixturePath, {
+    runs: [
+      {
+        data: {
+          intentSummary: 'The PR updates one formatting helper.',
+          selectedReviewers: [
+            {
+              reviewerId: 'fallback-reviewer',
+              reason: 'Formatting flow changed.',
+              confidence: 0.93,
+              briefing: 'Investigate the formatting helper and its immediate callers.',
+              contextPaths: ['src/missing.ts', 'docs/missing.md'],
+              verticalFlows: ['formatName() input -> normalized local -> uppercase return'],
+              businessContext: ['The helper formats user-provided names.'],
+              consistencyReferences: ['src/missing.ts'],
+              testLocations: ['test/missing'],
+              issueHints: ['Planner paths are intentionally invalid in this fixture.'],
+            },
+          ],
+        },
+      },
+    ],
+    agenticRuns: [
+      {
+        data: {
+          score: 95,
+          summary: 'No issues found.',
+          findings: [],
+        },
+      },
+    ],
+  });
+
+  const result = runPRReview(['--cwd', repoPath, '--base', 'main', '--dry-run'], {
+    BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+    BATEYE_RUNTIME: 'mock',
+    BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
+    BATEYE_MOCK_RUNTIME_LOG: logPath,
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+
+  const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json'), 'utf-8'));
+  assert.ok(report.issues.some(issue => issue.code === 'pr-reviewer-planner-context-fallback'));
+  assert.equal(report.status, 'degraded');
+
+  const runtimeLog = JSON.parse(fs.readFileSync(logPath, 'utf-8'));
+  const reviewerRun = runtimeLog.find(entry => entry.callLabel === 'reviewer:Fallback Reviewer');
+  assert.deepEqual(reviewerRun.initialFiles, ['src/index.ts']);
+
+  const promptDir = path.join(repoPath, '.bateye', 'out', 'prompts');
+  const reviewerPrompt = fs
+    .readdirSync(promptDir)
+    .find(file => file.endsWith('reviewer-fallback-reviewer-user.txt'));
+  assert.ok(reviewerPrompt);
+  const reviewerPromptText = fs.readFileSync(path.join(promptDir, reviewerPrompt), 'utf-8');
+  assert.match(reviewerPromptText, /had to fall back to the broader PR context/);
+  assert.match(reviewerPromptText, /planner paths did not resolve to readable files/);
 });
 
 test('pr-review command runs all reviewers the orchestrator selected without filtering', () => {
@@ -460,7 +824,7 @@ Investigate code quality issues only.
   assert.match(report.summary, /Review completed with warnings/);
 });
 
-test('pr-review command rejects false positives when current code preserves the behavior elsewhere in the file', () => {
+test('pr-review command keeps reviewer findings when current code preserves the behavior elsewhere in the file', () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-inline-fp-'));
   initGitRepo(repoPath);
 
@@ -508,18 +872,6 @@ export function buildRepoIndex(config) {
           ],
         },
       },
-      {
-        data: {
-          verifications: [
-            {
-              findingId: 'BUG_HUNTER_LOCAL_1',
-              supported: false,
-              classification: 'unclear',
-              reason: 'The current file still applies config.exclude inline, so the claimed regression does not exist.',
-            },
-          ],
-        },
-      },
     ],
     agenticRuns: [
       {
@@ -558,18 +910,17 @@ export function buildRepoIndex(config) {
   assert.equal(result.status, 0, result.stderr || result.stdout);
 
   const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json'), 'utf-8'));
-  assert.equal(report.findings.length, 0);
+  assert.equal(report.findings.length, 1);
   assert.deepEqual(report.verificationStats, {
     rawFindings: 1,
     confidenceRejected: 0,
     deterministicRejected: 0,
     diffGateRejected: 0,
-    semanticRejected: 1,
-    finalFindings: 0,
+    finalFindings: 1,
   });
 });
 
-test('pr-review command rejects workflow absence claims when the current workflow already contains the gate', () => {
+test('pr-review command keeps workflow findings after deterministic verification', () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-workflow-fp-'));
   initGitRepo(repoPath);
 
@@ -630,18 +981,6 @@ jobs:
           ],
         },
       },
-      {
-        data: {
-          verifications: [
-            {
-              findingId: 'CI_CD_LOCAL_1',
-              supported: false,
-              classification: 'unclear',
-              reason: 'The current workflow still configures npm cache in actions/setup-node.',
-            },
-          ],
-        },
-      },
     ],
     agenticRuns: [
       {
@@ -680,11 +1019,11 @@ jobs:
   assert.equal(result.status, 0, result.stderr || result.stdout);
 
   const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json'), 'utf-8'));
-  assert.equal(report.findings.length, 0);
-  assert.equal(report.verificationStats.semanticRejected, 1);
+  assert.equal(report.findings.length, 1);
+  assert.equal(report.verificationStats.finalFindings, 1);
 });
 
-test('pr-review command rejects findings anchored only to removed code', () => {
+test('pr-review command keeps findings anchored to changed files even if the quote references removed code', () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-removed-code-'));
   initGitRepo(repoPath);
 
@@ -728,18 +1067,6 @@ Report only concrete issues that still exist after investigating the current fil
           ],
         },
       },
-      {
-        data: {
-          verifications: [
-            {
-              findingId: 'REMOVED_CODE_REVIEWER_1',
-              supported: false,
-              classification: 'unrelated',
-              reason: 'The quoted code only exists in removed lines, so the finding does not describe a current PR defect.',
-            },
-          ],
-        },
-      },
     ],
     agenticRuns: [
       {
@@ -778,14 +1105,13 @@ Report only concrete issues that still exist after investigating the current fil
   assert.equal(result.status, 0, result.stderr || result.stdout);
 
   const report = JSON.parse(fs.readFileSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json'), 'utf-8'));
-  assert.equal(report.findings.length, 0);
+  assert.equal(report.findings.length, 1);
   assert.deepEqual(report.verificationStats, {
     rawFindings: 1,
     confidenceRejected: 0,
     deterministicRejected: 0,
     diffGateRejected: 0,
-    semanticRejected: 1,
-    finalFindings: 0,
+    finalFindings: 1,
   });
 });
 
@@ -802,6 +1128,9 @@ test('pr-review command in github mode filters already-posted findings and updat
         maxSeverity: 'low',
       },
     },
+  });
+  writeJson(path.join(repoPath, '.bateye', 'config.local.json'), {
+    githubToken: 'github-test-token-from-config',
   });
 
   writeText(path.join(repoPath, '.bateye', 'reviewers', 'github-reviewer.md'), `---
@@ -835,18 +1164,6 @@ Report only concrete code quality findings after investigating the current repos
           intentSummary: 'The PR updates one TypeScript function and should be reviewed by the GitHub reviewer only.',
           selectedReviewers: [
             { reviewerId: 'github-reviewer', reason: 'Updated TypeScript code should be reviewed.' , confidence: 0.9 },
-          ],
-        },
-      },
-      {
-        data: {
-          verifications: [
-            {
-              findingId: 'GITHUB_REVIEWER_1',
-              supported: true,
-              classification: 'direct',
-              reason: 'The low-severity issue is supported by the current file content.',
-            },
           ],
         },
       },
@@ -923,7 +1240,6 @@ Report only concrete code quality findings after investigating the current repos
       BATEYE_RUNTIME: 'mock',
       BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
       BATEYE_OCTOKIT_FIXTURES: octokitFixturePath,
-      GITHUB_TOKEN: 'github-test-token',
       GITHUB_REPOSITORY: 'BatEyeOrg/BatEye',
       PR_NUMBER: '7',
       COMMENT_ID: '99',
@@ -942,7 +1258,6 @@ Report only concrete code quality findings after investigating the current repos
     confidenceRejected: 0,
     deterministicRejected: 0,
     diffGateRejected: 0,
-    semanticRejected: 0,
     finalFindings: 0,
   });
 
@@ -997,18 +1312,6 @@ Report only concrete findings anchored to the changed file.
           intentSummary: 'The PR updates one TypeScript function and should be reviewed by the inline GitHub reviewer only.',
           selectedReviewers: [
             { reviewerId: 'github-inline-reviewer', reason: 'Changed TypeScript code should be reviewed.' , confidence: 0.9 },
-          ],
-        },
-      },
-      {
-        data: {
-          verifications: [
-            {
-              findingId: 'GITHUB_INLINE_REVIEWER_1',
-              supported: true,
-              classification: 'direct',
-              reason: 'The finding is supported by the changed code and current file state.',
-            },
           ],
         },
       },

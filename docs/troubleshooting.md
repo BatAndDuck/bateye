@@ -85,7 +85,7 @@ bateye reviewers   # lists what BatEye can see
 
 3. **Use a faster model:**
    ```bash
-   bateye config set model groq/llama-3.3-70b-versatile
+   bateye config set model google/gemini-2.0-flash
    ```
 
 4. **Check the output for partial results** - `.bateye/out/audit.json` may have partial data even if the CLI didn't exit cleanly.
@@ -117,9 +117,9 @@ The workflow reads `BATEYE_LLM_MODEL_API_KEY` - not provider-specific names like
 
 ---
 
-## OpenCode runtime unavailable
+## Codebite runtime unavailable
 
-**Symptom:** `Cannot find OpenCode runtime` or similar
+**Symptom:** `Codebite runtime is not available` or similar
 
 **Fix:**
 ```bash
@@ -127,7 +127,41 @@ npm install -g bateye   # reinstall
 bateye doctor
 ```
 
-BatEye bundles the OpenCode runtime - no separate `npm install -g opencode-ai` needed. A global `opencode` install is only used as a fallback.
+BatEye bundles the Codebite runtime through its normal dependencies. There is no separate global agent CLI to install.
+
+Current PR review uses `codebite@0.5.0`, including deep-mode planner runs and Codebite diagnostics.
+
+---
+
+## PR review finished as DEGRADED with planner-context warnings
+
+**Symptom:** `bateye pr-review` completes, but `.bateye/out/pr-review.json` contains warnings such as `pr-reviewer-planner-context-fallback`
+
+**Meaning:** The deep planner selected a reviewer, but the planner's focused paths were missing, invalid, or too sparse for that reviewer. BatEye fell back to the broader PR context for that reviewer instead of aborting the whole run.
+
+**Fix / next checks:**
+1. Re-run with diagnostics enabled:
+   ```bash
+   bateye --diagnostic pr-review
+   ```
+2. Inspect `.bateye/out/diagnostics/` for the planner JSONL and rendered `.trace.md` files.
+3. Check whether the PR changes moved or renamed files after the planner investigated them.
+4. If you use custom reviewers, confirm their `selectWhen` rules are not selecting a domain with no useful nearby paths.
+
+This warning means review coverage degraded for that reviewer, not that BatEye skipped the review entirely.
+
+---
+
+## Benchmark diagnostics are missing
+
+**Symptom:** `scripts/benchmark.ts` ran, but you expected planner/reviewer diagnostics and no diagnostics directory was produced
+
+**Fix:**
+```bash
+npx ts-node scripts/benchmark.ts --model "openai/gpt-5.4-nano" --pr "https://github.com/BatAndDuck/bateye/pull/20" --diagnostics
+```
+
+With `--diagnostics`, the benchmark prints both the benchmark markdown path and the diagnostics directory path. The diagnostics files are written under `.bateye/benchmark/diagnostics/`.
 
 ---
 

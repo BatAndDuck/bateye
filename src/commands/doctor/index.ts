@@ -1,14 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
-import execa from 'execa';
 import { loadConfig, resolveConfig } from '../../core/config/loader';
-import { CONFIG_FILE } from '../../core/config/defaults';
+import { CONFIG_FILE, CONFIG_LOCAL_FILE } from '../../core/config/defaults';
 import { loadReviewers } from '../../core/reviewers/loader';
 import { isGitRepo } from '../../core/git/index';
 import { resolveApiKey, resolveAuthEnvName } from '../../features/config/application/config-service';
 import { maskApiKey, resolveStoredApiKey } from '../../features/config/application/credential-store';
-import { resolveOpenCodeInvocation } from '../../core/runtime/opencode-cli/command';
+import { resolveCodebiteRuntimeInfo } from '../../core/runtime/codebite/index';
 import { BATEYE_VERSION } from '../../version';
 
 interface CheckResult {
@@ -32,22 +31,28 @@ export async function runDoctor(repoPath: string): Promise<void> {
     suggestion: isGit ? undefined : 'PR review requires a git repository. Run `git init` if needed.',
   });
 
-  const configPath = path.join(repoPath, CONFIG_FILE);
-  if (fs.existsSync(configPath)) {
+  const configFiles = [CONFIG_FILE, CONFIG_LOCAL_FILE];
+  const existingConfigFiles = configFiles.filter(configFile => fs.existsSync(path.join(repoPath, configFile)));
+  const configLabel = 'Config files (.bateye/config.json, .bateye/config.local.json)';
+  if (existingConfigFiles.length > 0) {
     try {
       loadConfig(repoPath);
-      checks.push({ label: 'Config file (.bateye/config.json)', status: 'ok' });
+      checks.push({
+        label: configLabel,
+        status: 'ok',
+        detail: `Loaded ${existingConfigFiles.join(', ')}`,
+      });
     } catch (err) {
       checks.push({
-        label: 'Config file (.bateye/config.json)',
+        label: configLabel,
         status: 'error',
         detail: (err as Error).message,
-        suggestion: 'Fix the JSON syntax error in .bateye/config.json, or delete it and run `bateye init`.',
+        suggestion: 'Fix the JSON syntax error in .bateye/config.json or .bateye/config.local.json, or delete the broken file and run `bateye init`.',
       });
     }
   } else {
     checks.push({
-      label: 'Config file (.bateye/config.json)',
+      label: configLabel,
       status: 'warn',
       detail: 'Not found',
       suggestion: 'Run `bateye init` to create the config file and directory structure.',
@@ -57,6 +62,7 @@ export async function runDoctor(repoPath: string): Promise<void> {
   const config = resolveConfig(repoPath);
   const authEnv = resolveAuthEnvName(config);
   const envApiKey = process.env[authEnv]?.trim() || undefined;
+  const configuredApiKey = config.apiKey?.trim() || undefined;
   const storedApiKey = resolveStoredApiKey(repoPath);
   const apiKey = (() => {
     try {
@@ -67,7 +73,9 @@ export async function runDoctor(repoPath: string): Promise<void> {
   })();
 
   if (apiKey) {
-    const detail = envApiKey && apiKey === envApiKey
+    const detail = configuredApiKey && apiKey === configuredApiKey
+      ? `${maskApiKey(apiKey)} from BatEye config`
+      : envApiKey && apiKey === envApiKey
       ? `${maskApiKey(apiKey)} from ${authEnv}`
       : storedApiKey && apiKey === storedApiKey
         ? `${maskApiKey(apiKey)} from BatEye credential store`
@@ -107,17 +115,19 @@ export async function runDoctor(repoPath: string): Promise<void> {
     });
   }
 
-  try {
-    const invocation = resolveOpenCodeInvocation();
-    const result = await execa(invocation.command, [...invocation.args, '--version'], { timeout: 3000 });
-    const sourceLabel = invocation.source === 'bundled' ? 'bundled with BatEye' : 'from PATH';
-    checks.push({ label: 'OpenCode CLI', status: 'ok', detail: `${result.stdout.trim()} (${sourceLabel})` });
-  } catch {
+  const codebiteInfo = resolveCodebiteRuntimeInfo();
+  if (codebiteInfo) {
     checks.push({
-      label: 'OpenCode CLI (agentic runtime)',
+      label: 'Codebite runtime',
+      status: 'ok',
+      detail: `${codebiteInfo.version} (bundled with BatEye)`,
+    });
+  } else {
+    checks.push({
+      label: 'Codebite runtime (agentic review)',
       status: 'warn',
       detail: 'Not available',
-      suggestion: 'Reinstall: npm install -g bateye   OR add `opencode` to PATH. Required for audit and pr-review.',
+      suggestion: 'Reinstall BatEye dependencies with `npm install`, `npm ci`, or `npm install -g bateye`.',
     });
   }
 

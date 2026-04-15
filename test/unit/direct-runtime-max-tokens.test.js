@@ -9,10 +9,10 @@ function loadRuntimeWithMocks() {
   const originalLoad = Module._load.bind(Module);
   const calls = {
     anthropicProviderOptions: [],
-    azureProviderOptions: [],
     googleProviderOptions: [],
+    mistralProviderOptions: [],
     openAIProviderOptions: [],
-    openAICompatibleOptions: [],
+    gatewayProviderOptions: [],
     generateObjectCalls: [],
     generateTextCalls: [],
   };
@@ -24,17 +24,17 @@ function loadRuntimeWithMocks() {
     },
   };
 
-  const mockAzure = {
-    createAzure(options = {}) {
-      calls.azureProviderOptions.push(options);
-      return modelId => ({ provider: 'azure', modelId, options });
-    },
-  };
-
   const mockGoogle = {
     createGoogleGenerativeAI(options = {}) {
       calls.googleProviderOptions.push(options);
       return modelId => ({ provider: 'google', modelId, options });
+    },
+  };
+
+  const mockMistral = {
+    createMistral(options = {}) {
+      calls.mistralProviderOptions.push(options);
+      return modelId => ({ provider: 'mistral', modelId, options });
     },
   };
 
@@ -45,18 +45,11 @@ function loadRuntimeWithMocks() {
     },
   };
 
-  const mockOpenAICompatible = {
-    createOpenAICompatible(options = {}) {
-      calls.openAICompatibleOptions.push(options);
-      return {
-        chatModel(modelId) {
-          return { provider: 'openai-compatible', modelId, options };
-        },
-      };
-    },
-  };
-
   const mockAI = {
+    createGateway(options = {}) {
+      calls.gatewayProviderOptions.push(options);
+      return modelId => ({ provider: 'vercel', modelId, options });
+    },
     async generateObject(options) {
       calls.generateObjectCalls.push(options);
       return {
@@ -73,21 +66,23 @@ function loadRuntimeWithMocks() {
   Module._load = function (request, parent, isMain) {
     if (request === 'ai') return mockAI;
     if (request === '@ai-sdk/anthropic') return mockAnthropic;
-    if (request === '@ai-sdk/azure') return mockAzure;
     if (request === '@ai-sdk/google') return mockGoogle;
+    if (request === '@ai-sdk/mistral') return mockMistral;
     if (request === '@ai-sdk/openai') return mockOpenAI;
-    if (request === '@ai-sdk/openai-compatible') return mockOpenAICompatible;
     return originalLoad(request, parent, isMain);
   };
 
   const runtimeKey = require.resolve('../../dist/core/runtime/direct/index');
+  const gatewayHelperKey = require.resolve('../../dist/core/runtime/vercel-gateway');
   delete require.cache[runtimeKey];
+  delete require.cache[gatewayHelperKey];
 
   return {
     calls,
     restore() {
       Module._load = originalLoad;
       delete require.cache[runtimeKey];
+      delete require.cache[gatewayHelperKey];
     },
     runtimeModule: require('../../dist/core/runtime/direct/index'),
   };
@@ -111,7 +106,7 @@ test('DirectAIRuntime.run uses the native Anthropic provider when no gateway bas
 
     assert.deepEqual(result.data, { ok: true });
     assert.equal(fixture.calls.anthropicProviderOptions.length, 1);
-    assert.equal(fixture.calls.openAICompatibleOptions.length, 0);
+    assert.equal(fixture.calls.gatewayProviderOptions.length, 0);
     assert.equal(fixture.calls.generateObjectCalls[0].model.provider, 'anthropic');
     assert.equal(fixture.calls.generateObjectCalls[0].model.modelId, 'claude-sonnet-4-5');
   } finally {
@@ -119,7 +114,7 @@ test('DirectAIRuntime.run uses the native Anthropic provider when no gateway bas
   }
 });
 
-test('DirectAIRuntime.run routes explicit apiBaseUrl through the OpenAI-compatible provider and preserves the full model id', async () => {
+test('DirectAIRuntime.run keeps explicit apiBaseUrl on the Anthropic AI SDK provider', async () => {
   const { z } = require('zod');
   const fixture = loadRuntimeWithMocks();
 
@@ -128,8 +123,8 @@ test('DirectAIRuntime.run routes explicit apiBaseUrl through the OpenAI-compatib
     const result = await runtime.run(
       {
         model: 'anthropic/claude-sonnet-4-5',
-        apiKey: 'gateway-key',
-        apiBaseUrl: 'https://litellm.example.com/v1',
+        apiKey: 'proxy-key',
+        apiBaseUrl: 'https://anthropic-proxy.example/v1',
         systemPrompt: 'Return JSON.',
         userMessage: 'Say ok.',
       },
@@ -137,12 +132,11 @@ test('DirectAIRuntime.run routes explicit apiBaseUrl through the OpenAI-compatib
     );
 
     assert.deepEqual(result.data, { ok: true });
-    assert.equal(fixture.calls.anthropicProviderOptions.length, 0);
-    assert.equal(fixture.calls.openAICompatibleOptions.length, 1);
-    assert.equal(fixture.calls.openAICompatibleOptions[0].baseURL, 'https://litellm.example.com/v1');
-    assert.equal(fixture.calls.openAICompatibleOptions[0].name, 'anthropic');
-    assert.equal(fixture.calls.generateObjectCalls[0].model.provider, 'openai-compatible');
-    assert.equal(fixture.calls.generateObjectCalls[0].model.modelId, 'anthropic/claude-sonnet-4-5');
+    assert.equal(fixture.calls.anthropicProviderOptions.length, 1);
+    assert.equal(fixture.calls.anthropicProviderOptions[0].baseURL, 'https://anthropic-proxy.example/v1');
+    assert.equal(fixture.calls.gatewayProviderOptions.length, 0);
+    assert.equal(fixture.calls.generateObjectCalls[0].model.provider, 'anthropic');
+    assert.equal(fixture.calls.generateObjectCalls[0].model.modelId, 'claude-sonnet-4-5');
   } finally {
     fixture.restore();
   }
@@ -166,9 +160,34 @@ test('DirectAIRuntime.run uses the native OpenAI provider for OpenAI models with
 
     assert.deepEqual(result.data, { ok: true });
     assert.equal(fixture.calls.openAIProviderOptions.length, 1);
-    assert.equal(fixture.calls.openAICompatibleOptions.length, 0);
+    assert.equal(fixture.calls.gatewayProviderOptions.length, 0);
     assert.equal(fixture.calls.generateObjectCalls[0].model.provider, 'openai');
     assert.equal(fixture.calls.generateObjectCalls[0].model.modelId, 'gpt-5.4-nano');
+  } finally {
+    fixture.restore();
+  }
+});
+
+test('DirectAIRuntime.run uses the native Mistral provider for Mistral models', async () => {
+  const { z } = require('zod');
+  const fixture = loadRuntimeWithMocks();
+
+  try {
+    const runtime = new fixture.runtimeModule.DirectAIRuntime();
+    const result = await runtime.run(
+      {
+        model: 'mistral/mistral-large-latest',
+        apiKey: 'mistral-key',
+        systemPrompt: 'Return JSON.',
+        userMessage: 'Say ok.',
+      },
+      z.object({ ok: z.boolean() }),
+    );
+
+    assert.deepEqual(result.data, { ok: true });
+    assert.equal(fixture.calls.mistralProviderOptions.length, 1);
+    assert.equal(fixture.calls.generateObjectCalls[0].model.provider, 'mistral');
+    assert.equal(fixture.calls.generateObjectCalls[0].model.modelId, 'mistral-large-latest');
   } finally {
     fixture.restore();
   }
@@ -195,9 +214,10 @@ test('DirectAIRuntime.run resolves Vercel AI Gateway credentials from .env when 
     );
 
     assert.deepEqual(result.data, { ok: true });
-    assert.equal(fixture.calls.openAICompatibleOptions.length, 1);
-    assert.equal(fixture.calls.openAICompatibleOptions[0].apiKey, 'env-gateway-key');
-    assert.equal(fixture.calls.openAICompatibleOptions[0].baseURL, 'https://ai-gateway.vercel.sh/v1');
+  assert.equal(fixture.calls.gatewayProviderOptions.length, 1);
+  assert.equal(fixture.calls.gatewayProviderOptions[0].apiKey, 'env-gateway-key');
+  assert.equal(typeof fixture.calls.gatewayProviderOptions[0].fetch, 'function');
+  assert.equal(fixture.calls.generateObjectCalls[0].model.provider, 'vercel');
     assert.equal(fixture.calls.generateObjectCalls[0].model.modelId, 'anthropic/claude-sonnet-4-5');
   } finally {
     fixture.restore();

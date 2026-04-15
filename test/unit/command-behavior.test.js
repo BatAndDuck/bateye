@@ -55,16 +55,13 @@ test('runDoctor reports when the API key comes from the BatEye credential store'
         gray: value => value,
       },
     },
-    execa: {
-      __esModule: true,
-      default: async () => ({ stdout: '1.2.27' }),
-    },
     '../../core/config/loader': {
       loadConfig: () => ({ model: 'openai/gpt-5.4-nano' }),
       resolveConfig: () => ({ model: 'openai/gpt-5.4-nano', transport: 'auto', exclude: [] }),
     },
     '../../core/config/defaults': {
       CONFIG_FILE: '.bateye/config.json',
+      CONFIG_LOCAL_FILE: '.bateye/config.local.json',
     },
     '../../core/reviewers/loader': {
       loadReviewers: () => ({ reviewers: [{ id: 'security-api' }], warnings: [] }),
@@ -80,8 +77,8 @@ test('runDoctor reports when the API key comes from the BatEye credential store'
       resolveStoredApiKey: () => 'stored-key-123456',
       maskApiKey: value => `***${value.slice(-4)}`,
     },
-    '../../core/runtime/opencode-cli/command': {
-      resolveOpenCodeInvocation: () => ({ command: 'node', args: ['opencode'], source: 'bundled' }),
+    '../../core/runtime/codebite/index': {
+      resolveCodebiteRuntimeInfo: () => ({ version: '0.2.1', packageJsonPath: 'C:\\repo\\node_modules\\codebite\\package.json' }),
     },
   });
 
@@ -90,7 +87,7 @@ test('runDoctor reports when the API key comes from the BatEye credential store'
       await fixture.module.runDoctor('C:\\repo');
       const output = lines.join('\n');
       assert.match(output, /API key \(BATEYE_LLM_MODEL_API_KEY\).*from BatEye credential store/);
-      assert.match(output, /OpenCode CLI.*1\.2\.27 \(bundled with BatEye\)/);
+      assert.match(output, /Codebite runtime.*0\.2\.1 \(bundled with BatEye\)/);
       assert.match(output, /Model - openai\/gpt-5\.4-nano/);
     });
   } finally {
@@ -105,7 +102,7 @@ test('runDoctor reports when the API key comes from the BatEye credential store'
 
 test('runModels uses the matching apiBaseUrl and prints the quick conf hint', async () => {
   const listCalls = [];
-  class MockOpenCodeRuntime {
+  class MockDirectRuntime {
     async listModels(provider, apiKey, apiBaseUrl) {
       listCalls.push({ provider, apiKey, apiBaseUrl });
       return ['gpt-5.4-nano', 'gpt-5.4-mini'];
@@ -131,14 +128,22 @@ test('runModels uses the matching apiBaseUrl and prints the quick conf hint', as
       }),
       resolveApiKey: () => 'repo-key',
     },
-    '../../core/runtime/opencode-cli/index': {
-      OpenCodeCLIRuntime: MockOpenCodeRuntime,
+    '../../core/runtime/direct/index': {
+      DirectAIRuntime: MockDirectRuntime,
     },
     '../../core/runtime/interface': {
       parseProviderAndModel: model => {
         const [provider, ...rest] = model.split('/');
         return { provider, modelId: rest.join('/') };
       },
+    },
+    '../../core/runtime/codebite/models': {
+      SUPPORTED_CODEBITE_PROVIDERS: ['openai', 'anthropic', 'google', 'mistral', 'vercel', 'groq', 'xai', 'cohere', 'deepseek', 'bedrock', 'azure', 'togetherai', 'fireworks', 'litellm'],
+      normalizeCodebiteProvider: provider => provider,
+      formatSupportedCodebiteProviders: () => 'openai, anthropic, google, mistral, vercel, groq, xai, cohere, deepseek, bedrock, azure, togetherai, fireworks, litellm',
+    },
+    '../../features/config/application/config-service': {
+      resolveAuthEnvName: () => 'BATEYE_LLM_MODEL_API_KEY',
     },
   });
 
@@ -152,7 +157,7 @@ test('runModels uses the matching apiBaseUrl and prints the quick conf hint', as
         apiKey: 'repo-key',
         apiBaseUrl: 'https://gateway.example/v1',
       });
-      assert.match(output, /Quick setup:\s+bateye conf --model openai\/gpt-5\.4-nano --apikey <key>/);
+      assert.match(output, /Quick setup:\s+bateye conf --model vercel\/openai\/gpt-5\.4-nano --apikey <key>/);
       assert.match(output, /gpt-5\.4-nano.*configured/);
     });
   } finally {

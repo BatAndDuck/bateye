@@ -59,6 +59,36 @@ function appendLog(entry: unknown): void {
   fs.writeFileSync(logPath, JSON.stringify(current, null, 2) + '\n', 'utf-8');
 }
 
+function normalizePlannerFixtureData(data: unknown): unknown {
+  if (!data || typeof data !== 'object') {
+    return data;
+  }
+
+  const payload = data as {
+    selectedReviewers?: Array<Record<string, unknown>>;
+  };
+
+  if (!Array.isArray(payload.selectedReviewers)) {
+    return data;
+  }
+
+  return {
+    ...payload,
+    selectedReviewers: payload.selectedReviewers.map((selection) => ({
+      ...selection,
+      briefing: typeof selection.briefing === 'string'
+        ? selection.briefing
+        : `Start from the changed files that match reviewer "${String(selection.reviewerId || 'unknown')}" and investigate the relevant flow directly.`,
+      contextPaths: Array.isArray(selection.contextPaths) ? selection.contextPaths : [],
+      verticalFlows: Array.isArray(selection.verticalFlows) ? selection.verticalFlows : [],
+      businessContext: Array.isArray(selection.businessContext) ? selection.businessContext : [],
+      consistencyReferences: Array.isArray(selection.consistencyReferences) ? selection.consistencyReferences : [],
+      testLocations: Array.isArray(selection.testLocations) ? selection.testLocations : [],
+      issueHints: Array.isArray(selection.issueHints) ? selection.issueHints : [],
+    })),
+  };
+}
+
 export class MockRuntime implements IRuntime {
   async run<T>(options: RunOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>> {
     const fixtures = readFixtures();
@@ -73,6 +103,7 @@ export class MockRuntime implements IRuntime {
       model: options.model,
       reasoningEffort: options.reasoningEffort,
       reasoningOverrides: options.reasoningOverrides,
+      callLabel: options.callLabel,
       promptPreview: options.systemPrompt.slice(0, 80),
     });
 
@@ -88,7 +119,9 @@ export class MockRuntime implements IRuntime {
 
   async runAgenticReview<T>(options: AgenticRepositoryReviewOptions, schema: z.ZodType<T, z.ZodTypeDef, unknown>): Promise<RunResult<T>> {
     const fixtures = readFixtures();
-    const next = fixtures.agenticRuns?.shift();
+    const next = options.callLabel === 'pr-planner'
+      ? (fixtures.runs.shift() || fixtures.agenticRuns?.shift())
+      : fixtures.agenticRuns?.shift();
     if (!next) {
       throw new Error('No mock runtime response remaining for runAgenticReview()');
     }
@@ -101,11 +134,19 @@ export class MockRuntime implements IRuntime {
       reasoningOverrides: options.reasoningOverrides,
       repoPath: options.repoPath,
       initialFiles: options.initialFiles || [],
+      maxSteps: options.maxSteps,
+      deepMode: options.deepMode,
+      disableSubagents: options.disableSubagents,
+      callLabel: options.callLabel,
       promptPreview: options.systemPrompt.slice(0, 80),
     });
 
+    const responseData = options.callLabel === 'pr-planner'
+      ? normalizePlannerFixtureData(next.data)
+      : next.data;
+
     return {
-      data: schema.parse(next.data),
+      data: schema.parse(responseData),
       model: next.model || options.model,
       runtime: next.runtime || 'cli',
       durationMs: 0,

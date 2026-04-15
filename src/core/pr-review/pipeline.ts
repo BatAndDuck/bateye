@@ -1,11 +1,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { PRFinding, PRReviewResult, ReviewIssue, Reviewer, Priority } from '../../types/index';
+import { PRFinding, PRReviewResult, ReviewIssue, Reviewer, Priority, ReviewerPlanSelection } from '../../types/index';
 import { buildRepoProfile } from '../../features/audit/application/audit-orchestrator';
 import { RepoProfile } from '../prompts/audit';
-import { resolveConfig, resolveApiKey } from '../config/loader';
+import { resolveConfig, resolveApiKey, resolveGitHubToken } from '../config/loader';
 import { loadReviewersForMode } from '../reviewers/loader';
-import { getPRReviewRuntime } from '../runtime/factory';
+import { getPRReviewRuntime, getStructuredRuntime } from '../runtime/factory';
 import { prReviewerAnalysisSchema, PRReviewerAnalysis } from '../validation/schemas';
 import {
   buildPRReviewSystemPrompt,
@@ -15,24 +15,27 @@ import {
 import { getGitDiff, getChangedFiles, getCommitSummaries, getRepoOwnerAndName, CommitSummary } from '../git/index';
 import { selectReviewers } from './orchestrator';
 import { writePRReviewResult, ensureDir } from '../output/writer';
+import { resolveDiagnosticDir } from '../output/diagnostics';
 import {
   MAX_CONCURRENT_PR_REVIEWERS,
-  MAX_ORCHESTRATOR_TIMEOUT_MS,
   MAX_PR_CURRENT_CONTEXT_CHARS,
   MAX_PR_CURRENT_FILE_CHARS,
+  MAX_PR_PLANNER_TIMEOUT_MS,
+  MAX_PR_REVIEWER_FILES_TO_INSPECT,
   MAX_PR_REVIEWER_TIMEOUT_MS,
   MAX_PR_REVIEWER_RETRY_CONCURRENCY,
   MAX_PR_REVIEWER_RETRIES,
   MAX_STRUCTURED_DIFF_CHARS,
   OUTPUT_DIR,
+  PR_PLANNER_MAX_STEPS,
+  PR_REVIEWER_MAX_STEPS,
   PR_REVIEW_OUTPUT_FILE,
   BATEYE_BREAKING_CHANGES_MARKER,
 } from '../config/defaults';
 import { GitHubReviewPlatform, getGitHubEnvContext } from '../github/platform';
 import { parseUnifiedDiff, buildReviewerDiffContext, getFilesInDiff } from './diff-parser';
 import { verifyFindings, verifyFindingsAgainstDiff } from './verifier';
-import { verifyFindingsSemantically } from './semantic-verifier';
-import { deduplicateFindings } from './deduplicator';
+import { buildFindingDedupPlan, mergeDuplicateFindings, PRFindingDuplicateDecision } from './deduplicator';
 import { buildConversation, filterAlreadyPosted, PRConversation } from './conversation';
 import { IRuntime, TokenUsage } from '../runtime/interface';
 import { formatErrorWithCauses } from '../runtime/error-format';
@@ -40,6 +43,8 @@ import { addTokens, formatTokenSummary } from '../runtime/token-utils';
 import { runReviewerTool } from '../tools/runner';
 import { formatToolContext } from '../tools/format';
 import { logPrompt } from '../output/prompt-logger';
+import { extractCodebiteArtifactPaths, extractCodebiteFailureDetail, validateCodebiteAgenticModels } from '../runtime/codebite/index';
+import { formatDedupArbiterError, runPRDedupArbiter } from './dedup-arbiter';
 
 export interface PRReviewPipelineOptions {
   repoPath: string;
@@ -206,6 +211,130 @@ function buildCurrentFileContext(repoPath: string, currentDiffFiles: string[]): 
   }).join('\n\n');
 }
 
+interface ReviewerExecutionContext {
+  structuredDiff: string;
+  changedFiles: string[];
+  currentFileContext: string;
+  initialFiles: string[];
+  plannerSelection?: ReviewerPlanSelection;
+  usingPlannerContext: boolean;
+  plannerFallbackReason?: string;
+}
+
+function normalizePlannerPath(relativePath: string): string {
+  return relativePath.replace(/\\/g, '/').replace(/^\.\//, '').trim();
+}
+
+function resolveRepoPath(repoPath: string, relativePath: string): string | null {
+  const normalizedRoot = path.resolve(repoPath);
+  const candidate = path.resolve(repoPath, relativePath);
+
+  if (candidate !== normalizedRoot && !candidate.startsWith(`${normalizedRoot}${path.sep}`)) {
+    return null;
+  }
+
+  return candidate;
+}
+
+function buildPlannerFallbackReason(
+  plannerSelection: ReviewerPlanSelection,
+  referencedPaths: string[],
+  existingFiles: string[],
+  focusedDiffFiles: string[],
+): string {
+  const reasons: string[] = [];
+
+  if (!plannerSelection.briefing?.trim()) {
+    reasons.push('planner briefing was empty');
+  }
+  if (referencedPaths.length === 0) {
+    reasons.push('planner did not provide focused paths');
+  }
+  if (existingFiles.length === 0) {
+    reasons.push('planner paths did not resolve to readable files');
+  }
+  if (focusedDiffFiles.length === 0) {
+    reasons.push('planner paths did not map to changed files');
+  }
+
+  return reasons.length > 0
+    ? reasons.join('; ')
+    : 'planner context was too sparse to seed a focused reviewer run';
+}
+
+function resolveReviewerExecutionContext(args: {
+  repoPath: string;
+  parsedDiff: ReturnType<typeof parseUnifiedDiff>;
+  fullStructuredDiff: string;
+  fullCurrentDiffFiles: string[];
+  fullCurrentFileContext: string;
+  plannerSelection?: ReviewerPlanSelection;
+}): ReviewerExecutionContext {
+  const {
+    repoPath,
+    parsedDiff,
+    fullStructuredDiff,
+    fullCurrentDiffFiles,
+    fullCurrentFileContext,
+    plannerSelection,
+  } = args;
+
+  if (!plannerSelection) {
+    return {
+      structuredDiff: fullStructuredDiff,
+      changedFiles: fullCurrentDiffFiles,
+      currentFileContext: fullCurrentFileContext,
+      initialFiles: fullCurrentDiffFiles.slice(0, MAX_PR_REVIEWER_FILES_TO_INSPECT),
+      usingPlannerContext: false,
+      plannerFallbackReason: 'no planner selection metadata was available for this reviewer',
+    };
+  }
+
+  const referencedPaths = Array.from(new Set(
+    [
+      ...(plannerSelection.contextPaths || []),
+      ...(plannerSelection.consistencyReferences || []),
+      ...(plannerSelection.testLocations || []),
+    ]
+      .map(pathItem => normalizePlannerPath(pathItem))
+      .filter(Boolean),
+  ));
+
+  const existingFiles = referencedPaths.filter(pathItem => {
+    const absolutePath = resolveRepoPath(repoPath, pathItem);
+    return absolutePath ? fs.existsSync(absolutePath) && fs.statSync(absolutePath).isFile() : false;
+  });
+  const focusedDiffFiles = getFilesInDiff(parsedDiff, referencedPaths);
+  const initialFiles = Array.from(new Set([
+    ...focusedDiffFiles,
+    ...existingFiles,
+  ])).slice(0, MAX_PR_REVIEWER_FILES_TO_INSPECT);
+
+  if (!plannerSelection.briefing?.trim() || focusedDiffFiles.length === 0 || initialFiles.length === 0) {
+    return {
+      structuredDiff: fullStructuredDiff,
+      changedFiles: fullCurrentDiffFiles,
+      currentFileContext: fullCurrentFileContext,
+      initialFiles: fullCurrentDiffFiles.slice(0, MAX_PR_REVIEWER_FILES_TO_INSPECT),
+      plannerSelection,
+      usingPlannerContext: false,
+      plannerFallbackReason: buildPlannerFallbackReason(plannerSelection, referencedPaths, existingFiles, focusedDiffFiles),
+    };
+  }
+
+  return {
+    structuredDiff: buildReviewerDiffContext(parsedDiff, focusedDiffFiles),
+    changedFiles: focusedDiffFiles,
+    currentFileContext: buildCurrentFileContext(repoPath, focusedDiffFiles),
+    initialFiles,
+    plannerSelection: {
+      ...plannerSelection,
+      contextPaths: referencedPaths,
+    },
+    usingPlannerContext: true,
+  };
+}
+
 async function runWithConcurrency<TInput, TOutput>(
   items: TInput[],
   maxConcurrency: number,
@@ -234,6 +363,10 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   log('Loading configuration...');
   const config = resolveConfig(repoPath);
   const apiKey = resolveApiKey(config, repoPath);
+  const diagnosticDir = resolveDiagnosticDir(repoPath);
+  if (diagnosticDir) {
+    log(`Diagnostics enabled. Writing PR review traces to ${diagnosticDir}`);
+  }
   const baseRef = options.baseRef || 'origin/main';
   const headRef = options.headRef || 'HEAD';
 
@@ -261,7 +394,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   let conversation: PRConversation | null = null;
 
   if (options.github && !options.dryRun) {
-    const token = options.githubToken || process.env.GITHUB_TOKEN;
+    const token = resolveGitHubToken(config, options.githubToken);
     if (token) {
       const ghCtx = await resolveGitHubContext(options, repoPath);
       if (ghCtx) {
@@ -297,19 +430,26 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   // Used to contextualise reviewer prompts (e.g. CLI tool vs web service).
   const repoProfile = buildPRRepoProfile(repoPath, changedFiles);
 
-  // Validate that the agentic runtime is available before calling the orchestrator.
-  // This surfaces errors like "cannot use BATEYE_RUNTIME=direct" immediately.
-  const runtime = await getPRReviewRuntime();
-
   log('Loading reviewers...');
   const { reviewers } = loadReviewersForMode(repoPath, 'pr-review', config);
 
+  if (process.env.BATEYE_RUNTIME !== 'mock') {
+    validateCodebiteAgenticModels(
+      [config.model, ...reviewers.map(r => r.model || config.model)].map(model => ({
+        model,
+        transport: config.transport,
+        apiBaseUrl: config.apiBaseUrl,
+      })),
+    );
+  }
+
+  // Validate that the agentic runtime is available before calling the orchestrator.
+  // This surfaces runtime/config errors immediately.
+  const runtime = await getPRReviewRuntime();
+
   // Build the reasoning-override list once. Includes config.model plus every reviewer's
-  // model override, deduped by model id.
-  //   reasoningEffort (scalar) — passed to structured calls (orchestrator, semantic
-  //     verifier); those use DirectAIRuntime which reads options.reasoningEffort directly.
-  //   reasoningOverrides (list) — consumed only by OpenCodeCLIRuntime, which needs every
-  //     model name upfront so it can seed opencode.json before spawning its server.
+  // model override, deduped by model id. The list is preserved for runtime diagnostics
+  // and compatibility with the existing pipeline threading.
   // Undefined when reasoningEffort isn't configured.
   // Guard against non-string values that could appear in hand-edited config files.
   const reasoningEffort = typeof config.reasoningEffort === 'string' && config.reasoningEffort
@@ -324,14 +464,14 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
 
   const promptLogDir = path.join(repoPath, OUTPUT_DIR, 'prompts');
 
-  // Each orchestrator attempt has MAX_ORCHESTRATOR_TIMEOUT_MS; up to 3 attempts total.
-  const orchestratorTimeoutSec = Math.round(MAX_ORCHESTRATOR_TIMEOUT_MS / 1000);
-  log(`Selecting relevant reviewers... (model: ${config.model}, timeout: ${orchestratorTimeoutSec}s/attempt)`);
+  const plannerTimeoutSec = Math.round(MAX_PR_PLANNER_TIMEOUT_MS / 1000);
+  log(`Running deep reviewer planner... (model: ${config.model}, maxSteps: ${PR_PLANNER_MAX_STEPS}, timeout: ${plannerTimeoutSec}s/attempt)`);
   // Heartbeat so CI logs don't appear frozen while waiting for the model response.
-  const heartbeat = setInterval(() => log('  - Still waiting for reviewer selection (model is thinking)...'), 30_000);
+  const heartbeat = setInterval(() => log('  - Still waiting for deep planner synthesis (model is thinking)...'), 30_000);
   let orchestratorResult;
   try {
     orchestratorResult = await selectReviewers(
+      repoPath,
       changedFiles,
       rawDiff,
       commits,
@@ -351,33 +491,50 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   }
   issues.push(...orchestratorResult.issues);
 
-  const selectedReviewerIds = new Set(orchestratorResult.selectedReviewers.map(r => r.reviewerId));
-  const selectedReviewers = reviewers.filter(r => selectedReviewerIds.has(r.id));
+  const reviewerById = new Map(reviewers.map(reviewer => [reviewer.id, reviewer]));
+  const selectedReviewerPlans = orchestratorResult.selectedReviewers.filter(selection => reviewerById.has(selection.reviewerId));
+  const selectedReviewers = selectedReviewerPlans.map(selection => reviewerById.get(selection.reviewerId) as Reviewer);
   if (orchestratorResult.tokensUsed) {
-    log(`[token-diag] Orchestrator (${config.model}): ${formatTokenSummary(orchestratorResult.tokensUsed)}`);
+    log(`[token-diag] Planner (${config.model}): ${formatTokenSummary(orchestratorResult.tokensUsed)}`);
   }
 
   log(`Selected ${selectedReviewers.length} reviewer(s): ${selectedReviewers.map(r => r.name).join(', ')}`);
 
+  const reviewerRuns = selectedReviewerPlans.map((plannerSelection, index) => ({
+    reviewer: selectedReviewers[index],
+    plannerSelection,
+    executionContext: resolveReviewerExecutionContext({
+      repoPath,
+      parsedDiff,
+      fullStructuredDiff: structuredDiff,
+      fullCurrentDiffFiles: currentDiffFiles,
+      fullCurrentFileContext: currentFileContext,
+      plannerSelection,
+    }),
+  }));
+
   // Estimate cost BEFORE running reviewers so user sees what's about to happen
-  const estInputPerReviewer = Math.round((Math.min(structuredDiff.length, MAX_STRUCTURED_DIFF_CHARS) + currentFileContext.length + 2500) / 4);
-  const estTotalInput = estInputPerReviewer * selectedReviewers.length;
-  log(`[token-diag] Estimated cost preview: ${selectedReviewers.length} reviewers × ~${estInputPerReviewer.toLocaleString()} input tokens/ea = ~${estTotalInput.toLocaleString()} total input tokens (agentic calls may multiply this 2-5×)`);
+  const estimatedReviewerInputs = reviewerRuns.map(run =>
+    Math.round((Math.min(run.executionContext.structuredDiff.length, MAX_STRUCTURED_DIFF_CHARS) + run.executionContext.currentFileContext.length + 2500) / 4)
+  );
+  const estAverageInputPerReviewer = estimatedReviewerInputs.length > 0
+    ? Math.round(estimatedReviewerInputs.reduce((sum, value) => sum + value, 0) / estimatedReviewerInputs.length)
+    : 0;
+  const estTotalInput = estimatedReviewerInputs.reduce((sum, value) => sum + value, 0);
+  log(`[token-diag] Estimated cost preview: ${selectedReviewers.length} reviewers × ~${estAverageInputPerReviewer.toLocaleString()} input tokens/ea = ~${estTotalInput.toLocaleString()} total input tokens (agentic calls may multiply this 2-5×)`);
 
   const concurrency = Math.min(MAX_CONCURRENT_PR_REVIEWERS, selectedReviewers.length);
   log(`Running ${selectedReviewers.length} agentic reviewer(s) with concurrency ${concurrency} (model: ${config.model})...`);
-  log(`[token-diag] Per-reviewer estimated input context: structured diff (~${Math.round(Math.min(structuredDiff.length, MAX_STRUCTURED_DIFF_CHARS) / 4).toLocaleString()} tokens) + file context (~${Math.round(currentFileContext.length / 4).toLocaleString()} tokens) + system prompt (~600 tokens)`);
+  log(`[token-diag] Reviewer mode: deepMode=false, maxSteps=${PR_REVIEWER_MAX_STEPS}. Planner context will narrow diff/file seeding per reviewer when usable.`);
 
   const intentSummary = orchestratorResult.intentSummary;
 
   let reviewerRunResults = await runWithConcurrency(
-    selectedReviewers,
+    reviewerRuns,
     MAX_CONCURRENT_PR_REVIEWERS,
-    reviewer => runPRReviewer(
-      reviewer,
-      structuredDiff,
-      currentDiffFiles,
-      currentFileContext,
+    reviewerRun => runPRReviewer(
+      reviewerRun.reviewer,
+      reviewerRun.executionContext,
       commits,
       repoPath,
       config.model,
@@ -405,17 +562,15 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     }
     if (failedIndices.length === 0) break;
 
-    const failedReviewers = failedIndices.map(i => selectedReviewers[i]);
-    log(`Retrying ${failedReviewers.length} failed reviewer(s) (round ${retryRound}/${MAX_PR_REVIEWER_RETRIES}, concurrency ${MAX_PR_REVIEWER_RETRY_CONCURRENCY}): ${failedReviewers.map(r => r.name).join(', ')}`);
+    const failedReviewerRuns = failedIndices.map(i => reviewerRuns[i]);
+    log(`Retrying ${failedReviewerRuns.length} failed reviewer(s) (round ${retryRound}/${MAX_PR_REVIEWER_RETRIES}, concurrency ${MAX_PR_REVIEWER_RETRY_CONCURRENCY}): ${failedReviewerRuns.map(r => r.reviewer.name).join(', ')}`);
 
     const retryResults = await runWithConcurrency(
-      failedReviewers,
+      failedReviewerRuns,
       MAX_PR_REVIEWER_RETRY_CONCURRENCY,
-      reviewer => runPRReviewer(
-        reviewer,
-        structuredDiff,
-        currentDiffFiles,
-        currentFileContext,
+      reviewerRun => runPRReviewer(
+        reviewerRun.reviewer,
+        reviewerRun.executionContext,
         commits,
         repoPath,
         config.model,
@@ -489,8 +644,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   }
 
   // Diff-gate: hard-reject any finding whose anchor file/lines are not in the PR diff.
-  // This runs deterministically (no LLM) and prevents non-diff findings from reaching
-  // the expensive semantic verifier.
+  // This runs deterministically (no LLM) and blocks clearly out-of-scope findings.
   log('Running diff-gate verification...');
   const diffGate = verifyFindingsAgainstDiff(deterministic.verified, parsedDiff);
   log(`Diff-gate: accepted ${diffGate.verified.length}, rejected ${diffGate.rejected.length}`);
@@ -502,56 +656,68 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   }
 
   log('Deduplicating verified findings...');
-  const deduped = deduplicateFindings(diffGate.verified);
-  log(`After dedup: ${deduped.length} findings (removed ${diffGate.verified.length - deduped.length} duplicates)`);
-  logPRFindingList(log, deduped, 'Pre-semantic findings detail');
+  const dedupPlan = buildFindingDedupPlan(diffGate.verified);
+  const obviousDuplicateCount = dedupPlan.obviousDecisions.length;
+  const ambiguousDuplicateCount = dedupPlan.ambiguousCandidates.length;
+  let dedupDecisions: PRFindingDuplicateDecision[] = [...dedupPlan.obviousDecisions];
+  let dedupTokensUsed: TokenUsage | undefined;
 
-  let semanticVerified: PRFinding[] = [];
-  let semanticRejectedCount = 0;
-  let semanticTokens: TokenUsage | undefined;
+  log(
+    `Dedup plan: ${obviousDuplicateCount} obvious duplicate pair(s), `
+    + `${ambiguousDuplicateCount} ambiguous pair(s) for LLM review`,
+  );
 
-  const semanticEnabled = config.prReview?.semanticVerification?.enabled !== false;
+  if (ambiguousDuplicateCount > 0) {
+    try {
+      const structuredRuntime = await getStructuredRuntime();
+      const dedupArbiter = await runPRDedupArbiter({
+        candidates: dedupPlan.ambiguousCandidates,
+        runtime: structuredRuntime,
+        model: config.model,
+        apiKey,
+        transport: config.transport,
+        apiBaseUrl: config.apiBaseUrl,
+        promptLogDir,
+        onLog: log,
+      });
 
-  if (deduped.length > 0 && semanticEnabled) {
-    log(`Running semantic verification on ${deduped.length} finding(s)...`);
-    const semantic = await verifyFindingsSemantically(deduped, {
-      repoPath,
-      parsedDiff,
-      runtime,
-      model: config.model,
-      apiKey,
-      transport: config.transport,
-      apiBaseUrl: config.apiBaseUrl,
-      log,
-      promptLogDir,
-      reasoningEffort: reasoningEffort,
-      reasoningOverrides,
-    });
-    issues.push(...semantic.issues);
-    semanticVerified = semantic.verified;
-    semanticRejectedCount = semantic.rejected.length;
-    semanticTokens = semantic.tokensUsed;
-    log(`Semantic verification: accepted ${semantic.verified.length}, rejected ${semantic.rejected.length}`);
-    if (semantic.tokensUsed) {
-      log(`[token-diag] Semantic verification (${config.model}): ${formatTokenSummary(semantic.tokensUsed)}`);
-    }
+      dedupTokensUsed = dedupArbiter.tokensUsed;
+      dedupDecisions = dedupDecisions.concat(
+        dedupArbiter.decisions.filter(
+          decision => decision.verdict === 'duplicate' && decision.confidence >= 0.8,
+        ),
+      );
 
-    if (semantic.rejected.length > 0) {
-      for (const rejected of semantic.rejected) {
-        log(`  ✗ Rejected (semantic): "${rejected.finding.title}" - ${rejected.reason}`);
+      const llmDuplicateCount = dedupArbiter.decisions.filter(
+        decision => decision.verdict === 'duplicate' && decision.confidence >= 0.8,
+      ).length;
+      const llmDistinctCount = dedupArbiter.decisions.filter(
+        decision => decision.verdict === 'distinct',
+      ).length;
+      const llmUnsureCount = dedupArbiter.decisions.filter(
+        decision => decision.verdict === 'unsure' || decision.confidence < 0.8,
+      ).length;
+
+      log(
+        `Dedup arbiter: ${llmDuplicateCount} duplicate, ${llmDistinctCount} distinct, `
+        + `${llmUnsureCount} kept separate`,
+      );
+      if (dedupTokensUsed) {
+        log(`[token-diag] Dedup arbiter subtotal: ${formatTokenSummary(dedupTokensUsed)}`);
       }
+    } catch (err) {
+      log(`${formatDedupArbiterError(err)} Keeping ambiguous findings separate.`);
     }
-  } else if (!semanticEnabled) {
-    log('Skipping semantic verification - disabled via config (prReview.semanticVerification.enabled: false).');
-    semanticVerified = deduped;
-  } else {
-    log('Skipping semantic verification - no findings remain after deterministic/schema validation and deduplication.');
   }
 
-  let finalFindings = semanticVerified;
+  const deduped = mergeDuplicateFindings(diffGate.verified, dedupDecisions);
+  log(`After dedup: ${deduped.length} findings (removed ${diffGate.verified.length - deduped.length} duplicates)`);
+  logPRFindingList(log, deduped, 'Verified findings detail');
+
+  let finalFindings = deduped;
   if (conversation) {
     log('Filtering already-posted findings...');
-    finalFindings = filterAlreadyPosted(semanticVerified, conversation);
+    finalFindings = filterAlreadyPosted(deduped, conversation);
     log(`After filter: ${finalFindings.length} new findings to post`);
   }
 
@@ -560,7 +726,6 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     confidenceRejected: allFindings.length - confidenceKept.length,
     deterministicRejected: deterministic.rejected.length,
     diffGateRejected: diffGate.rejected.length,
-    semanticRejected: semanticRejectedCount,
     finalFindings: finalFindings.length,
   };
 
@@ -575,8 +740,8 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     grandTotal = addTokens(grandTotal, reviewerTokenTotal);
     hasGrandTotalData = true;
   }
-  if (semanticTokens) {
-    grandTotal = addTokens(grandTotal, semanticTokens);
+  if (dedupTokensUsed) {
+    grandTotal = addTokens(grandTotal, dedupTokensUsed);
     hasGrandTotalData = true;
   }
   if (hasGrandTotalData) {
@@ -587,11 +752,12 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     log(`[token-diag] ═══ GRAND TOTAL: ${formatTokenSummary(grandTotal)}${reviewerTokensAreEstimated ? ' (⚠ UNDERESTIMATED - see reviewers line)' : ''} ═══`);
     log(`[token-diag]   orchestrator: ${orchestratorResult.tokensUsed ? formatTokenSummary(orchestratorResult.tokensUsed) : 'n/a'}`);
     log(`[token-diag]   reviewers (${selectedReviewers.length}x): ${hasTokenData ? formatTokenSummary(reviewerTokenTotal) + reviewerSuffix : 'n/a'}`);
-    log(`[token-diag]   semantic verification: ${semanticTokens ? formatTokenSummary(semanticTokens) : 'skipped (no findings)'}`);
+    if (dedupTokensUsed) {
+      log(`[token-diag]   dedup arbiter: ${formatTokenSummary(dedupTokensUsed)}`);
+    }
     if (reviewerTokensAreEstimated) {
-      log(`[token-diag] ⚠ Reviewer token counts reflect the initial prompt size only. OpenCode does not`);
-      log(`[token-diag]   expose cumulative session usage - each tool call re-sends the full conversation`);
-      log(`[token-diag]   history, so true input tokens per reviewer ≈ initial_tokens × number_of_turns.`);
+      log('[token-diag] ⚠ Reviewer token counts are estimated for one or more agentic calls.');
+      log('[token-diag]   The Codebite-backed runtime did not report complete per-step usage for every turn.');
     }
   }
 
@@ -614,7 +780,7 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
     summary: '',
     findings: finalFindings,
     issues,
-    rejectedFindings: verificationStats.deterministicRejected + verificationStats.diffGateRejected + verificationStats.semanticRejected,
+    rejectedFindings: verificationStats.deterministicRejected + verificationStats.diffGateRejected,
     verificationStats,
     tokenUsage: hasGrandTotalData ? grandTotal : undefined,
     generatedAt: new Date().toISOString(),
@@ -727,9 +893,7 @@ interface PRReviewerRunResult {
 
 async function runPRReviewer(
   reviewer: Reviewer,
-  structuredDiff: string,
-  currentDiffFiles: string[],
-  currentFileContext: string,
+  executionContext: ReviewerExecutionContext,
   commits: CommitSummary[],
   repoPath: string,
   model: string,
@@ -752,7 +916,7 @@ async function runPRReviewer(
   if (reviewer.tool) {
     const targetFiles =
       reviewer.tool.targeting === 'file' && reviewer.tool.fileArgs
-        ? currentDiffFiles
+        ? executionContext.changedFiles
         : undefined;
 
     const toolResult = await runReviewerTool(reviewer.tool, repoPath, targetFiles);
@@ -786,16 +950,38 @@ async function runPRReviewer(
     }
   }
 
+  if (executionContext.plannerSelection && !executionContext.usingPlannerContext) {
+    log(`  ⚠ ${reviewer.name}: falling back to broader PR context because planner paths were not usable (${executionContext.plannerFallbackReason})`);
+    issues.push({
+      severity: 'warning',
+      code: 'pr-reviewer-planner-context-fallback',
+      message: `Planner context for reviewer "${reviewer.name}" was too sparse, so BatEye fell back to the broader PR context: ${executionContext.plannerFallbackReason}`,
+      stage: 'reviewer-planner-context',
+      reviewerId: reviewer.id,
+      reviewerName: reviewer.name,
+    });
+  }
+
   const systemPrompt = buildPRReviewSystemPrompt(reviewer.instructions, reviewer.id, reviewer.name, repoProfile);
-  const userMessage = buildPRReviewUserMessage(structuredDiff, currentDiffFiles, currentFileContext, toolContext, commits, intentSummary);
-  const initialFiles = currentDiffFiles;
+  const userMessage = buildPRReviewUserMessage({
+    structuredDiff: executionContext.structuredDiff,
+    changedFiles: executionContext.changedFiles,
+    currentFileContext: executionContext.currentFileContext,
+    toolContext,
+    commits,
+    intentSummary,
+    plannerSelection: executionContext.plannerSelection,
+    usingPlannerContext: executionContext.usingPlannerContext,
+    plannerFallbackReason: executionContext.plannerFallbackReason,
+  });
+  const initialFiles = executionContext.initialFiles;
 
   if (promptLogDir) {
     logPrompt(promptLogDir, `reviewer-${reviewer.id}`, systemPrompt, userMessage);
   }
 
   try {
-    log(`  Running reviewer: ${reviewer.name} (model=${reviewer.model || model}, changedFiles=${currentDiffFiles.length}, seededFiles=${initialFiles.length})...`);
+    log(`  Running reviewer: ${reviewer.name} (model=${reviewer.model || model}, changedFiles=${executionContext.changedFiles.length}, seededFiles=${initialFiles.length}, maxSteps=${PR_REVIEWER_MAX_STEPS}, plannerScoped=${executionContext.usingPlannerContext})...`);
     const runResult = await runtime.runAgenticReview<PRReviewerAnalysis>(
       {
         systemPrompt,
@@ -809,6 +995,9 @@ async function runPRReviewer(
         maxTokens: 8096,
         temperature: 0,
         timeoutMs: MAX_PR_REVIEWER_TIMEOUT_MS,
+        maxSteps: PR_REVIEWER_MAX_STEPS,
+        deepMode: false,
+        disableSubagents: false,
         callLabel: `reviewer:${reviewer.name}`,
         reasoningEffort,
         reasoningOverrides,
@@ -832,6 +1021,14 @@ async function runPRReviewer(
     const msg = formatErrorWithCauses(err);
     const isTimeout = /timed out after/i.test(msg);
     log(`  ✗ ${reviewer.name} failed: ${msg}`);
+    const failureDetail = extractCodebiteFailureDetail(err);
+    if (failureDetail) {
+      log(`  - ${reviewer.name} failure detail: ${failureDetail}`);
+    }
+    const artifactPaths = extractCodebiteArtifactPaths(err);
+    if (artifactPaths.length > 0) {
+      log(`  - ${reviewer.name} diagnostics: ${artifactPaths.join(', ')}`);
+    }
     issues.push({
       severity: isTimeout ? 'warning' : 'warning',
       code: isTimeout ? 'pr-reviewer-timeout' : 'pr-reviewer-failed',

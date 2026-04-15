@@ -27,7 +27,26 @@ Run `bateye reviewers` to see the full list with descriptions.
 
 For `bateye audit`, BatEye runs all applicable reviewers by default.
 
-For `bateye pr-review`, an orchestrator AI selects the most relevant reviewers based on the diff content, then runs them as parallel investigators.
+For `bateye pr-review`, BatEye now uses a two-stage planner/reviewer flow:
+
+1. A deep Codebite planner run investigates the PR, surrounding code, dependencies, docs, tests, and vertical flows.
+2. The planner selects reviewers and prepares reviewer-specific briefings, focused paths, flow references, test locations, and issue hints.
+3. Reviewers then run with a bounded budget (`maxSteps=20`, non-deep) using that seeded context.
+
+The planner budget is fixed internally at `maxSteps=150` with deep mode enabled. Reviewer budgets are also fixed internally and are not user-configurable in this release.
+
+### What the planner gives each reviewer
+
+Each selected PR reviewer receives a compact briefing that can include:
+- what changed in the reviewer's domain
+- the file and folder paths to inspect first
+- full vertical flow notes to trace upstream and downstream behavior
+- repo-derived business context
+- useful consistency references elsewhere in the repo
+- relevant automated tests or nearby test gaps
+- short issue hints discovered during planning
+
+This is meant to reduce overlap between reviewers and save tokens by avoiding repeated global investigation.
 
 ### Run specific reviewers
 
@@ -125,3 +144,5 @@ Each reviewer produces:
 ```
 
 The full audit report at `.bateye/out/audit.json` contains results from all reviewers plus an overall summary.
+
+For PR review, `.bateye/out/pr-review.json` also persists the planner metadata for each selected reviewer so benchmark runs and diagnostics can show exactly what context each reviewer was given.

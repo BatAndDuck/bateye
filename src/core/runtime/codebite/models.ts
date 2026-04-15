@@ -1,0 +1,178 @@
+import { createGateway } from 'ai';
+import { normalizeTransport } from '../interface';
+import {
+  fetchOpenAICompatibleModels,
+  MISTRAL_API_BASE_URL,
+  OPENAI_API_BASE_URL,
+  resolveVercelGatewayCredential,
+  VERCEL_AI_GATEWAY_BASE_URL,
+} from '../provider-routing';
+
+export const SUPPORTED_CODEBITE_PROVIDERS = [
+  'openai',
+  'anthropic',
+  'google',
+  'mistral',
+  'vercel',
+  'groq',
+  'xai',
+  'cohere',
+  'deepseek',
+  'bedrock',
+  'azure',
+  'togetherai',
+  'fireworks',
+  'litellm',
+] as const;
+
+export type CodebiteProvider = (typeof SUPPORTED_CODEBITE_PROVIDERS)[number];
+
+const ANTHROPIC_API_VERSION = '2023-06-01';
+const FETCH_TIMEOUT_MS = 10_000;
+const GROQ_API_BASE_URL = 'https://api.groq.com/openai/v1';
+const XAI_API_BASE_URL = 'https://api.x.ai/v1';
+const DEEPSEEK_API_BASE_URL = 'https://api.deepseek.com/v1';
+const FIREWORKS_API_BASE_URL = 'https://api.fireworks.ai/inference/v1';
+const TOGETHERAI_API_BASE_URL = 'https://api.together.xyz/v1';
+const LITELLM_API_BASE_URL = 'http://localhost:4000';
+
+export function normalizeCodebiteProvider(provider: string): CodebiteProvider | null {
+  switch (normalizeTransport(provider)) {
+    case 'openai':
+    case 'anthropic':
+    case 'google':
+    case 'mistral':
+    case 'vercel':
+    case 'groq':
+    case 'xai':
+    case 'cohere':
+    case 'deepseek':
+    case 'bedrock':
+    case 'azure':
+    case 'togetherai':
+    case 'fireworks':
+    case 'litellm':
+      return normalizeTransport(provider) as CodebiteProvider;
+    case 'gemini':
+      return 'google';
+    case 'together':
+      return 'togetherai';
+    case 'aws':
+    case 'aws-bedrock':
+    case 'amazon-bedrock':
+      return 'bedrock';
+    default:
+      return null;
+  }
+}
+
+export function formatSupportedCodebiteProviders(): string {
+  return SUPPORTED_CODEBITE_PROVIDERS.join(', ');
+}
+
+export async function fetchCodebiteProviderModels(
+  provider: string,
+  apiKey: string,
+  apiBaseUrl?: string,
+  cwd?: string,
+): Promise<string[]> {
+  const normalizedProvider = normalizeCodebiteProvider(provider);
+  if (!normalizedProvider) {
+    return [];
+  }
+
+  switch (normalizedProvider) {
+    case 'openai':
+      return fetchOpenAICompatibleModels(apiKey, apiBaseUrl?.trim() || OPENAI_API_BASE_URL);
+    case 'mistral':
+      return fetchOpenAICompatibleModels(
+        apiKey,
+        apiBaseUrl?.trim() || MISTRAL_API_BASE_URL,
+      );
+    case 'groq':
+      return fetchOpenAICompatibleModels(apiKey, apiBaseUrl?.trim() || GROQ_API_BASE_URL);
+    case 'xai':
+      return fetchOpenAICompatibleModels(apiKey, apiBaseUrl?.trim() || XAI_API_BASE_URL);
+    case 'deepseek':
+      return fetchOpenAICompatibleModels(apiKey, apiBaseUrl?.trim() || DEEPSEEK_API_BASE_URL);
+    case 'fireworks':
+      return fetchOpenAICompatibleModels(apiKey, apiBaseUrl?.trim() || FIREWORKS_API_BASE_URL);
+    case 'togetherai':
+      return fetchOpenAICompatibleModels(apiKey, apiBaseUrl?.trim() || TOGETHERAI_API_BASE_URL);
+    case 'litellm':
+      return fetchOpenAICompatibleModels(apiKey, apiBaseUrl?.trim() || LITELLM_API_BASE_URL);
+    case 'vercel': {
+      const credential = resolveVercelGatewayCredential(apiKey, cwd) || apiKey;
+      return fetchVercelGatewayModels(credential, apiBaseUrl?.trim() || VERCEL_AI_GATEWAY_BASE_URL);
+    }
+    case 'anthropic':
+      return fetchAnthropicModels(apiKey);
+    case 'google':
+      return fetchGoogleModels(apiKey);
+    case 'cohere':
+    case 'bedrock':
+    case 'azure':
+    default:
+      return [];
+  }
+}
+
+async function fetchVercelGatewayModels(apiKey: string, baseURL: string): Promise<string[]> {
+  try {
+    const gateway = createGateway({ apiKey, baseURL });
+    const response = await gateway.getAvailableModels();
+    return (response.models ?? [])
+      .map(model => model.id?.trim())
+      .filter((id): id is string => Boolean(id))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+async function fetchAnthropicModels(apiKey: string): Promise<string[]> {
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/models', {
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': ANTHROPIC_API_VERSION,
+      },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const body = await response.json() as { data?: Array<{ id?: string }> };
+    return (body.data ?? [])
+      .map(model => model.id?.trim())
+      .filter((id): id is string => Boolean(id))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+async function fetchGoogleModels(apiKey: string): Promise<string[]> {
+  try {
+    const url = new URL('https://generativelanguage.googleapis.com/v1beta/models');
+    url.searchParams.set('key', apiKey);
+
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      return [];
+    }
+
+    const body = await response.json() as { models?: Array<{ name?: string }> };
+    return (body.models ?? [])
+      .map(model => model.name?.replace(/^models\//, '').trim())
+      .filter((id): id is string => Boolean(id))
+      .sort();
+  } catch {
+    return [];
+  }
+}

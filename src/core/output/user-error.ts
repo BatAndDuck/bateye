@@ -1,5 +1,6 @@
 import { formatErrorWithCauses } from '../runtime/error-format';
 import { isRuntimeDebugEnabled } from '../runtime/debug';
+import { extractCodebiteFailureDetail } from '../runtime/codebite/index';
 
 export const ISSUE_TRACKER_URL = 'https://github.com/BatAndDuck/bateye/issues';
 
@@ -25,9 +26,7 @@ export interface ErrorDiagnosis {
  * Works on the full error chain string (output of formatErrorWithCauses).
  */
 export function categorizeError(msg: string): ErrorDiagnosis {
-  if (
-    /key not allowed|unauthorized|forbidden|invalid.*api.?key|api.?key.*invalid|incorrect.*api.*key|authentication failed|unauthenticated|invalid_api_key/i.test(msg)
-  ) {
+  if (hasAuthFailureSignal(msg)) {
     return {
       category: 'auth',
       brief: 'API key rejected by provider.',
@@ -89,6 +88,19 @@ export function categorizeError(msg: string): ErrorDiagnosis {
   return { category: 'unknown', brief };
 }
 
+function hasAuthFailureSignal(msg: string): boolean {
+  if (
+    /key not allowed|invalid.*api.?key|api.?key.*invalid|incorrect.*api.*key|authentication failed|unauthenticated|invalid_api_key|credential.*required|error verifying oidc token|rejected the configured bearer token/i.test(msg)
+  ) {
+    return true;
+  }
+
+  return (
+    /(unauthorized|forbidden|status=401|status=403|401 unauthorized|403 forbidden)/i.test(msg)
+    && /(api.?key|credential|token|bearer|auth|oidc|gateway)/i.test(msg)
+  );
+}
+
 /**
  * Returns a one-line error summary for use inside progress / warning messages.
  *
@@ -98,6 +110,14 @@ export function categorizeError(msg: string): ErrorDiagnosis {
 export function briefError(err: unknown): string {
   const full = formatErrorWithCauses(err instanceof Error ? err : new Error(String(err)));
   if (isRuntimeDebugEnabled()) return full;
+
+  const codebiteDetail = extractCodebiteFailureDetail(err);
+  if (codebiteDetail) {
+    const conciseDetail = codebiteDetail.length > 220
+      ? `${codebiteDetail.slice(0, 217)}...`
+      : codebiteDetail;
+    return `Codebite worker failed: ${conciseDetail}`;
+  }
 
   const { brief, hint } = categorizeError(full);
   const hintSuffix = hint ? ` — ${hint}` : '';

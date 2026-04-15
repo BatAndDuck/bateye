@@ -20,7 +20,7 @@ Go to **Settings → Secrets and variables → Actions → New repository secret
 
 | Secret name | Value |
 |---|---|
-| `BATEYE_LLM_MODEL_API_KEY` | Your AI provider API key (Anthropic, OpenAI, OpenRouter, etc.) |
+| `BATEYE_LLM_MODEL_API_KEY` | Your BatEye review credential (for example OpenAI, Anthropic, Google, Mistral, Vercel AI Gateway, Groq, xAI, Cohere, DeepSeek, Bedrock, Azure, Together AI, Fireworks, or LiteLLM) |
 
 Optionally add a fallback key:
 
@@ -115,7 +115,7 @@ Commit a `.bateye/config.json` to your repo root and the workflow picks it up au
 
 ```json
 {
-  "model": "anthropic/claude-sonnet-4-5",
+  "model": "vercel/openai/gpt-5.4-nano",
   "exclude": ["generated", "vendor"],
   "disabledReviewers": {
     "prReview": ["inline-docs", "responsiveness"]
@@ -162,14 +162,13 @@ Find them under **Actions → the workflow run → Artifacts**. Useful for debug
 
 The workflow:
 1. Checks out the PR's head commit (full history for `git diff`)
-2. Installs dependencies and runs lint + tests
+2. Installs dependencies, verifies the bundled Codebite runtime, and runs lint + tests
 3. Links BatEye globally from source (so the exact PR code is tested)
 4. Creates a minimal `.bateye/config.json` if none exists in the repo
 5. Runs `bateye pr-review --github --pr-number <N>`
 
 The review itself:
 1. Parses the unified diff into structured per-line format
-2. Runs each reviewer (up to 10 concurrently) as an agentic AI investigator
+2. Runs each reviewer (up to 10 concurrently) through the Codebite-backed agentic runtime
 3. Deduplicates findings across reviewers
-4. Runs a semantic verification pass to filter false positives
-5. Posts inline comments and a summary to the PR
+4. Posts inline comments and a summary to the PR
