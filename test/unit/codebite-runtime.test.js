@@ -98,7 +98,7 @@ test('buildCodebiteWorkerScript imports Codebite from absolute file URLs', () =>
 
   const script = buildCodebiteWorkerScript(packageJsonPath);
 
-  assert.match(script, /import \{ runAgent \} from "file:\/\/\/C:\/repo\/node_modules\/codebite\/dist\/agent\.js"/);
+  assert.match(script, /import \{ runAgent \} from "file:\/\/\/.+node_modules\/codebite\/dist\/agent\.js"/);
   assert.match(script, /import \{ createGateway \} from "file:\/\/\//);
   assert.match(script, /import \{ createOpenAI \} from "file:\/\/\//);
   assert.match(script, /import \{ createAmazonBedrock \} from "file:\/\/\//);
