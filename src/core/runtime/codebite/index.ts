@@ -9,6 +9,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import { buildProviderOptions, prepareModel } from '../direct/index';
 import { logRuntimeDebug } from '../debug';
 import { formatErrorWithCauses } from '../error-format';
+import { resolveVercelGatewayCredential } from '../provider-routing';
 import {
   AgenticRepositoryReviewOptions,
   IRuntime,
@@ -569,15 +570,33 @@ export class CodebiteAgentRuntime implements IRuntime {
 
 function buildCodebiteRuntimeConfig(options: AgenticRepositoryReviewOptions): CodebiteRuntimeConfig {
   const supported = assertCodebiteAgenticSupport(options);
+  const resolvedApiKey = resolveCodebiteApiKey(options, supported);
 
   return {
     ...supported,
-    apiKey: options.apiKey,
+    apiKey: resolvedApiKey,
     maxSteps: options.maxSteps ?? supported.maxSteps,
     deepMode: options.deepMode ?? supported.deepMode,
     disableSubagents: options.disableSubagents ?? supported.disableSubagents,
     tools: buildCodebiteToolConfig(),
   };
+}
+
+function resolveCodebiteApiKey(
+  options: Pick<AgenticRepositoryReviewOptions, 'apiKey' | 'repoPath' | 'cwd'>,
+  supported: Pick<CodebiteRuntimeConfig, 'provider'>,
+): string {
+  if (supported.provider === 'vercel') {
+    const credential = resolveVercelGatewayCredential(options.apiKey, options.cwd || options.repoPath);
+    if (!credential) {
+      throw new Error(
+        'Vercel AI Gateway requires a credential. Set BATEYE_LLM_MODEL_API_KEY, AI_GATEWAY_API_KEY, or VERCEL_OIDC_TOKEN.'
+      );
+    }
+    return credential;
+  }
+
+  return options.apiKey;
 }
 
 function buildCodebiteToolConfig(): CodebiteRuntimeConfig['tools'] {
@@ -711,18 +730,37 @@ async function runCodebiteWorker(args: {
 }): Promise<CodebiteWorkerRunResult> {
   fs.writeFileSync(args.inputPath, JSON.stringify(args.payload, null, 2), 'utf-8');
 
-  const workerRun = await execa(process.execPath, ['--input-type=module', '--eval', args.workerScript], {
-    cwd: args.repoPath,
-    timeout: args.timeoutMs,
-    reject: true,
-    env: {
-      ...process.env,
-      BATEYE_CODEBITE_INPUT: args.inputPath,
-      BATEYE_CODEBITE_OUTPUT: args.outputPath,
-    },
-  });
+  let workerRun: { stdout: string; stderr: string };
+  try {
+    const execaResult = await execa(process.execPath, ['--input-type=module', '--eval', args.workerScript], {
+      cwd: args.repoPath,
+      encoding: 'utf8',
+      timeout: args.timeoutMs,
+      reject: true,
+      env: {
+        ...process.env,
+        BATEYE_CODEBITE_INPUT: args.inputPath,
+        BATEYE_CODEBITE_OUTPUT: args.outputPath,
+      },
+    });
+    workerRun = {
+      stdout: String(execaResult.stdout ?? ''),
+      stderr: String(execaResult.stderr ?? ''),
+    };
+  } catch (err) {
+    throw normalizeCodebiteWorkerError(err, args.payload.config.provider);
+  }
 
-  const workerOutput = JSON.parse(fs.readFileSync(args.outputPath, 'utf-8')) as CodebiteWorkerOutput;
+  if (!fs.existsSync(args.outputPath)) {
+    throw new Error('Codebite worker exited without writing a response payload.');
+  }
+
+  let workerOutput: CodebiteWorkerOutput;
+  try {
+    workerOutput = JSON.parse(fs.readFileSync(args.outputPath, 'utf-8')) as CodebiteWorkerOutput;
+  } catch (err) {
+    throw new Error(`Codebite worker wrote malformed response JSON: ${formatErrorWithCauses(err)}`, { cause: err });
+  }
   const rawText = typeof workerOutput.text === 'string' ? workerOutput.text.trim() : '';
   if (!rawText) {
     throw new Error('Codebite returned an empty response.');
@@ -734,6 +772,49 @@ async function runCodebiteWorker(args: {
     stdout: workerRun.stdout,
     stderr: workerRun.stderr,
   };
+}
+
+function normalizeCodebiteWorkerError(error: unknown, provider: CodebiteProvider): Error {
+  const message = formatErrorWithCauses(error);
+  if (provider === 'vercel' && /Error verifying OIDC token/i.test(message)) {
+    return new Error(
+      'Vercel AI Gateway rejected the configured bearer token for inference. '
+      + 'Use an AI Gateway API key created in Vercel AI Gateway, or provide VERCEL_OIDC_TOKEN. '
+      + `Original error: ${message}`
+    );
+  }
+
+  const candidate = error as {
+    stdout?: string;
+    stderr?: string;
+    exitCode?: number;
+  } | null;
+  const stderr = summarizeCodebiteWorkerStream(candidate?.stderr);
+  const stdout = summarizeCodebiteWorkerStream(candidate?.stdout);
+  const details = [
+    typeof candidate?.exitCode === 'number' ? `exitCode=${candidate.exitCode}` : null,
+    stderr ? `stderr: ${stderr}` : null,
+    stdout ? `stdout: ${stdout}` : null,
+  ].filter(Boolean);
+
+  if (details.length > 0) {
+    return new Error(
+      `Codebite worker process failed before producing a response (${details.join('; ')})`,
+      { cause: error instanceof Error ? error : undefined },
+    );
+  }
+
+  return error instanceof Error ? error : new Error(message);
+}
+
+function summarizeCodebiteWorkerStream(value: string | undefined): string {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return '';
+  }
+
+  const compact = normalized.replace(/\s+/g, ' ');
+  return compact.length > 400 ? `${compact.slice(0, 397)}...` : compact;
 }
 
 function shouldRetryStructuredOutputAttempt(error: unknown): boolean {

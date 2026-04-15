@@ -173,6 +173,60 @@ test('CodebiteAgentRuntime forwards maxSteps, deepMode, disableSubagents, and di
   }
 });
 
+test('CodebiteAgentRuntime resolves Vercel gateway credentials from AI_GATEWAY_API_KEY for Codebite runs', async () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-codebite-vercel-credential-'));
+  const schema = z.object({ ok: z.boolean() });
+  const originalGatewayApiKey = process.env.AI_GATEWAY_API_KEY;
+  let capturedPayload;
+
+  process.env.AI_GATEWAY_API_KEY = 'gateway-env-key';
+
+  const fixture = loadWithMocks('../../dist/core/runtime/codebite/index', {
+    execa: {
+      __esModule: true,
+      default: async (_command, _args, options) => {
+        capturedPayload = JSON.parse(fs.readFileSync(options.env.BATEYE_CODEBITE_INPUT, 'utf-8'));
+        fs.writeFileSync(
+          options.env.BATEYE_CODEBITE_OUTPUT,
+          JSON.stringify({
+            text: '{"ok":true}',
+            usage: { inputTokens: 7, outputTokens: 3 },
+          }),
+          'utf-8',
+        );
+        return { stdout: '', stderr: '' };
+      },
+    },
+    '../debug': {
+      logRuntimeDebug: () => {},
+    },
+  });
+
+  try {
+    const runtime = new fixture.module.CodebiteAgentRuntime();
+    const result = await runtime.runAgenticReview(
+      {
+        systemPrompt: 'Return JSON only.',
+        userMessage: 'Report success.',
+        model: 'vercel/openai/gpt-5.4-nano',
+        apiKey: '',
+        repoPath,
+        transport: 'auto',
+        initialFiles: ['src/index.ts'],
+        timeoutMs: 5000,
+      },
+      schema,
+    );
+
+    assert.deepEqual(result.data, { ok: true });
+    assert.equal(capturedPayload.config.apiKey, 'gateway-env-key');
+  } finally {
+    fixture.restore();
+    if (originalGatewayApiKey === undefined) delete process.env.AI_GATEWAY_API_KEY;
+    else process.env.AI_GATEWAY_API_KEY = originalGatewayApiKey;
+  }
+});
+
 test('CodebiteAgentRuntime repairs invalid JSON output and validates it against the schema', async () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-codebite-runtime-'));
   const schema = z.object({ ok: z.boolean() });
@@ -353,6 +407,49 @@ test('CodebiteAgentRuntime retries once internally after a first-pass parse fail
     assert.ok(rawFile, 'expected a raw parse-failure artifact');
     assert.ok(traceFile, 'expected a trace parse-failure artifact');
     assert.match(fs.readFileSync(path.join(diagnosticsDir, rawFile), 'utf-8'), /\{"ok": tru\\q\}/);
+  } finally {
+    fixture.restore();
+  }
+});
+
+test('CodebiteAgentRuntime surfaces worker stderr when the Codebite subprocess exits before writing output', async () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-codebite-worker-failure-'));
+  const schema = z.object({ ok: z.boolean() });
+
+  const fixture = loadWithMocks('../../dist/core/runtime/codebite/index', {
+    execa: {
+      __esModule: true,
+      default: async () => {
+        const error = new Error('Command failed with exit code 1: node');
+        error.exitCode = 1;
+        error.stderr = 'Provider returned 503 Service Unavailable';
+        error.stdout = '';
+        throw error;
+      },
+    },
+    '../debug': {
+      logRuntimeDebug: () => {},
+    },
+  });
+
+  try {
+    const runtime = new fixture.module.CodebiteAgentRuntime();
+    await assert.rejects(
+      runtime.runAgenticReview(
+        {
+          systemPrompt: 'Return JSON only.',
+          userMessage: 'Report success.',
+          model: 'vercel/openai/gpt-5.4-nano',
+          apiKey: 'gateway-key',
+          repoPath,
+          transport: 'auto',
+          initialFiles: ['src/index.ts'],
+          timeoutMs: 5000,
+        },
+        schema,
+      ),
+      /Codebite worker process failed before producing a response \(exitCode=1; stderr: Provider returned 503 Service Unavailable\)/,
+    );
   } finally {
     fixture.restore();
   }

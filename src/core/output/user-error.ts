@@ -25,9 +25,7 @@ export interface ErrorDiagnosis {
  * Works on the full error chain string (output of formatErrorWithCauses).
  */
 export function categorizeError(msg: string): ErrorDiagnosis {
-  if (
-    /key not allowed|unauthorized|forbidden|invalid.*api.?key|api.?key.*invalid|incorrect.*api.*key|authentication failed|unauthenticated|invalid_api_key/i.test(msg)
-  ) {
+  if (hasAuthFailureSignal(msg)) {
     return {
       category: 'auth',
       brief: 'API key rejected by provider.',
@@ -87,6 +85,19 @@ export function categorizeError(msg: string): ErrorDiagnosis {
     ? firstSegment.slice(0, 157) + '...'
     : firstSegment || 'Unknown error.';
   return { category: 'unknown', brief };
+}
+
+function hasAuthFailureSignal(msg: string): boolean {
+  if (
+    /key not allowed|invalid.*api.?key|api.?key.*invalid|incorrect.*api.*key|authentication failed|unauthenticated|invalid_api_key|credential.*required|error verifying oidc token|rejected the configured bearer token/i.test(msg)
+  ) {
+    return true;
+  }
+
+  return (
+    /(unauthorized|forbidden|status=401|status=403|401 unauthorized|403 forbidden)/i.test(msg)
+    && /(api.?key|credential|token|bearer|auth|oidc|gateway)/i.test(msg)
+  );
 }
 
 /**
