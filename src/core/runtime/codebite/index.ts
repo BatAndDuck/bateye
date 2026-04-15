@@ -41,6 +41,7 @@ export type CodebiteRuntimeConfig = {
   provider: CodebiteProvider;
   model: string;
   apiKey: string;
+  baseURL?: string;
   maxSteps: number;
   deepMode: boolean;
   tools: {
@@ -62,15 +63,79 @@ type CodebiteWorkerOutput = {
   };
 };
 
+type CodebiteDiagnosisRecord = {
+  type?: string;
+  timestamp?: string;
+  stepNumber?: number;
+  finishReason?: string;
+  question?: string;
+  executionPrompt?: string;
+  systemPrompt?: string;
+  repositoryStructure?: string;
+  initialMessages?: Array<{ role?: string; content?: unknown }>;
+  inputContext?: {
+    startedAt?: string;
+    system?: string;
+    messages?: Array<{ role?: string; content?: unknown }>;
+    activeTools?: string[];
+    toolChoice?: unknown;
+  };
+  output?: {
+    text?: string;
+    toolCalls?: Array<{ toolName?: string; input?: unknown }>;
+    toolResults?: Array<{ toolCallId?: string; output?: unknown; error?: unknown }>;
+    responseMessages?: unknown;
+  };
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+  };
+  totalUsage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+  };
+  stepCount?: number;
+  finalText?: string;
+};
+
+function resolvePackageModuleUrl(packageName: string): string {
+  const packageJsonPath = require.resolve(`${packageName}/package.json`);
+  return pathToFileURL(path.join(path.dirname(packageJsonPath), 'dist', 'index.js')).href;
+}
+
 export function buildCodebiteWorkerScript(packageJsonPath: string): string {
   const packageRoot = path.dirname(packageJsonPath);
   const agentModuleUrl = pathToFileURL(path.join(packageRoot, 'dist', 'agent.js')).href;
-  const providerModuleUrl = pathToFileURL(path.join(packageRoot, 'dist', 'provider.js')).href;
+  const openaiModuleUrl = resolvePackageModuleUrl('@ai-sdk/openai');
+  const anthropicModuleUrl = resolvePackageModuleUrl('@ai-sdk/anthropic');
+  const googleModuleUrl = resolvePackageModuleUrl('@ai-sdk/google');
+  const mistralModuleUrl = resolvePackageModuleUrl('@ai-sdk/mistral');
+  const azureModuleUrl = resolvePackageModuleUrl('@ai-sdk/azure');
+  const cohereModuleUrl = resolvePackageModuleUrl('@ai-sdk/cohere');
+  const deepseekModuleUrl = resolvePackageModuleUrl('@ai-sdk/deepseek');
+  const fireworksModuleUrl = resolvePackageModuleUrl('@ai-sdk/fireworks');
+  const groqModuleUrl = resolvePackageModuleUrl('@ai-sdk/groq');
+  const togetheraiModuleUrl = resolvePackageModuleUrl('@ai-sdk/togetherai');
+  const xaiModuleUrl = resolvePackageModuleUrl('@ai-sdk/xai');
+  const bedrockModuleUrl = resolvePackageModuleUrl('@ai-sdk/amazon-bedrock');
 
   return String.raw`
 import { readFile, writeFile } from 'node:fs/promises';
 import { runAgent } from ${JSON.stringify(agentModuleUrl)};
-import { resolveModel } from ${JSON.stringify(providerModuleUrl)};
+import { createOpenAI } from ${JSON.stringify(openaiModuleUrl)};
+import { createAnthropic } from ${JSON.stringify(anthropicModuleUrl)};
+import { createGoogleGenerativeAI } from ${JSON.stringify(googleModuleUrl)};
+import { createMistral } from ${JSON.stringify(mistralModuleUrl)};
+import { createAzure } from ${JSON.stringify(azureModuleUrl)};
+import { createCohere } from ${JSON.stringify(cohereModuleUrl)};
+import { createDeepSeek } from ${JSON.stringify(deepseekModuleUrl)};
+import { createFireworks } from ${JSON.stringify(fireworksModuleUrl)};
+import { createGroq } from ${JSON.stringify(groqModuleUrl)};
+import { createTogetherAI } from ${JSON.stringify(togetheraiModuleUrl)};
+import { createXai } from ${JSON.stringify(xaiModuleUrl)};
+import { createAmazonBedrock } from ${JSON.stringify(bedrockModuleUrl)};
 
 const inputPath = process.env.BATEYE_CODEBITE_INPUT;
 const outputPath = process.env.BATEYE_CODEBITE_OUTPUT;
@@ -82,6 +147,84 @@ if (!inputPath || !outputPath) {
 const payload = JSON.parse(await readFile(inputPath, 'utf8'));
 const model = resolveModel(payload.config);
 const usage = { inputTokens: 0, outputTokens: 0 };
+
+function resolveModel(config) {
+  switch (config.provider) {
+    case 'vercel':
+      process.env.AI_GATEWAY_API_KEY = config.apiKey;
+      return config.model;
+    case 'openai':
+      return createOpenAI({
+        apiKey: config.apiKey,
+        ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+      }).languageModel(config.model);
+    case 'anthropic':
+      return createAnthropic({
+        apiKey: config.apiKey,
+        ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+      }).languageModel(config.model);
+    case 'google':
+      return createGoogleGenerativeAI({
+        apiKey: config.apiKey,
+        ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+      }).languageModel(config.model);
+    case 'mistral':
+      return createMistral({
+        apiKey: config.apiKey,
+        ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+      }).languageModel(config.model);
+    case 'azure':
+      return createAzure({
+        apiKey: config.apiKey,
+        ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+      }).languageModel(config.model);
+    case 'cohere':
+      return createCohere({
+        apiKey: config.apiKey,
+        ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+      }).languageModel(config.model);
+    case 'deepseek':
+      return createDeepSeek({
+        apiKey: config.apiKey,
+        ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+      }).languageModel(config.model);
+    case 'fireworks':
+      return createFireworks({
+        apiKey: config.apiKey,
+        ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+      }).languageModel(config.model);
+    case 'groq':
+      return createGroq({
+        apiKey: config.apiKey,
+        ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+      }).languageModel(config.model);
+    case 'togetherai':
+      return createTogetherAI({
+        apiKey: config.apiKey,
+        ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+      }).languageModel(config.model);
+    case 'xai':
+      return createXai({
+        apiKey: config.apiKey,
+        ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+      }).languageModel(config.model);
+    case 'bedrock':
+      return createAmazonBedrock({
+        apiKey: config.apiKey,
+        ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+      }).languageModel(config.model);
+    case 'litellm':
+      return createOpenAI({
+        apiKey: config.apiKey,
+        baseURL: config.baseURL || 'http://localhost:4000',
+      }).languageModel(config.model);
+    default:
+      throw new Error(
+        'Unknown provider "' + config.provider + '". Supported providers: '
+        + 'openai, anthropic, google, mistral, vercel, groq, xai, cohere, deepseek, bedrock, azure, togetherai, fireworks, litellm'
+      );
+  }
+}
 
 const text = await runAgent({
   model,
@@ -119,13 +262,6 @@ export function resolveCodebiteRuntimeInfo(): CodebiteRuntimeInfo | null {
 export function assertCodebiteAgenticSupport(
   options: Pick<RunOptions, 'model' | 'transport' | 'apiBaseUrl'>,
 ): CodebiteRuntimeConfig {
-  if (options.apiBaseUrl?.trim()) {
-    throw new Error(
-      'Codebite-backed agentic review does not support custom apiBaseUrl overrides. '
-      + `Use one of the native providers: ${formatSupportedCodebiteProviders()}.`
-    );
-  }
-
   const target = resolveModelTarget(options.model, options.transport);
   const normalizedTransport = normalizeTransport(target.transport);
   const provider = normalizeCodebiteProvider(normalizedTransport);
@@ -137,10 +273,19 @@ export function assertCodebiteAgenticSupport(
     );
   }
 
+  const baseURL = options.apiBaseUrl?.trim() || undefined;
+  if ((provider === 'azure' || provider === 'litellm') && !baseURL) {
+    throw new Error(
+      `Agentic review with transport "${provider}" requires apiBaseUrl. `
+      + 'Set it in .bateye/config.json or via `bateye config set apiBaseUrl <url>`.'
+    );
+  }
+
   return {
     provider,
     model: target.modelId,
     apiKey: '',
+    ...(baseURL ? { baseURL } : {}),
     maxSteps: DEFAULT_CODEBITE_MAX_STEPS,
     deepMode: false,
     tools: {},
@@ -180,11 +325,13 @@ export class CodebiteAgentRuntime implements IRuntime {
     const labelTag = options.callLabel ? ` [${options.callLabel}]` : '';
     const timeoutMs = options.timeoutMs ?? DEFAULT_AGENTIC_TIMEOUT_MS;
 
-    const payload = {
+  const payload = {
       config: runtimeConfig,
       question,
       contextDiagnosisPath: resolveCodebiteContextDiagnosisPath(options),
     };
+    const contextDiagnosisPath = payload.contextDiagnosisPath;
+    const tracePath = resolveCodebiteTracePath(contextDiagnosisPath);
 
     fs.writeFileSync(inputPath, JSON.stringify(payload, null, 2), 'utf-8');
 
@@ -194,7 +341,7 @@ export class CodebiteAgentRuntime implements IRuntime {
     );
 
     try {
-      await execa(process.execPath, ['--input-type=module', '--eval', workerScript], {
+      const workerRun = await execa(process.execPath, ['--input-type=module', '--eval', workerScript], {
         cwd: options.repoPath,
         timeout: timeoutMs,
         reject: true,
@@ -229,6 +376,19 @@ export class CodebiteAgentRuntime implements IRuntime {
         );
       }
 
+      writeCodebiteDiagnosticTrace({
+        contextDiagnosisPath,
+        tracePath,
+        provider: runtimeConfig.provider,
+        model: runtimeConfig.model,
+        labelTag,
+        question,
+        workerStdout: workerRun.stdout,
+        workerStderr: workerRun.stderr,
+        responseText: workerOutput.text,
+        finalRawResponse: parsed.rawResponse,
+      });
+
       return {
         data: parsed.data,
         model: options.model,
@@ -238,6 +398,15 @@ export class CodebiteAgentRuntime implements IRuntime {
         tokensUsed,
       };
     } catch (err) {
+      writeCodebiteDiagnosticTrace({
+        contextDiagnosisPath,
+        tracePath,
+        provider: runtimeConfig.provider,
+        model: runtimeConfig.model,
+        labelTag,
+        question,
+        error: formatErrorWithCauses(err),
+      });
       const message =
         `Codebite agentic review failed for ${runtimeConfig.provider}/${runtimeConfig.model}: ${formatErrorWithCauses(err)}`;
       throw new Error(message, { cause: err });
@@ -325,6 +494,243 @@ function resolveCodebiteContextDiagnosisPath(options: AgenticRepositoryReviewOpt
     .replace(/^-+|-+$/g, '')
     .slice(0, 80) || 'agentic-review';
   return path.join(diagnosticDir, `${safeLabel}.codebite.jsonl`);
+}
+
+function resolveCodebiteTracePath(contextDiagnosisPath: string | undefined): string | undefined {
+  if (!contextDiagnosisPath) {
+    return undefined;
+  }
+
+  return contextDiagnosisPath.replace(/\.jsonl$/i, '.trace.md');
+}
+
+function writeCodebiteDiagnosticTrace(args: {
+  contextDiagnosisPath?: string;
+  tracePath?: string;
+  provider: string;
+  model: string;
+  labelTag: string;
+  question: string;
+  workerStdout?: string;
+  workerStderr?: string;
+  responseText?: string;
+  finalRawResponse?: string;
+  error?: string;
+}): void {
+  if (!args.tracePath) {
+    return;
+  }
+
+  try {
+    const records = readCodebiteDiagnosisRecords(args.contextDiagnosisPath);
+    const trace = renderCodebiteDiagnosticTrace(records, args);
+    fs.mkdirSync(path.dirname(args.tracePath), { recursive: true });
+    fs.writeFileSync(args.tracePath, trace, 'utf-8');
+    logRuntimeDebug(`[codebite]${args.labelTag} Diagnostic trace written to ${args.tracePath}`);
+  } catch (err) {
+    logRuntimeDebug(
+      `[codebite]${args.labelTag} Failed to write diagnostic trace: ${formatErrorWithCauses(err)}`,
+    );
+  }
+}
+
+function readCodebiteDiagnosisRecords(contextDiagnosisPath: string | undefined): CodebiteDiagnosisRecord[] {
+  if (!contextDiagnosisPath || !fs.existsSync(contextDiagnosisPath)) {
+    return [];
+  }
+
+  return fs
+    .readFileSync(contextDiagnosisPath, 'utf-8')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => JSON.parse(line) as CodebiteDiagnosisRecord);
+}
+
+function renderCodebiteDiagnosticTrace(
+  records: CodebiteDiagnosisRecord[],
+  args: {
+    provider: string;
+    model: string;
+    question: string;
+    workerStdout?: string;
+    workerStderr?: string;
+    responseText?: string;
+    finalRawResponse?: string;
+    error?: string;
+  },
+): string {
+  const lines: string[] = [];
+  const runStart = records.find(record => record.type === 'run-start');
+  const runFinish = [...records].reverse().find(record => record.type === 'run-finish');
+  const steps = records.filter(record => record.type === 'step');
+
+  lines.push('# Codebite Diagnostic Trace');
+  lines.push('');
+  lines.push(`- Provider: ${args.provider}`);
+  lines.push(`- Model: ${args.model}`);
+  if (runStart?.timestamp) {
+    lines.push(`- Started: ${runStart.timestamp}`);
+  }
+  if (runFinish?.timestamp) {
+    lines.push(`- Finished: ${runFinish.timestamp}`);
+  }
+  if (typeof runFinish?.stepCount === 'number') {
+    lines.push(`- Steps: ${runFinish.stepCount}`);
+  }
+  if (args.error) {
+    lines.push(`- Status: failed`);
+  } else {
+    lines.push(`- Status: complete`);
+  }
+  lines.push('');
+
+  lines.push('## Question');
+  lines.push('');
+  lines.push('```text');
+  lines.push(args.question);
+  lines.push('```');
+  lines.push('');
+
+  if (runStart?.systemPrompt) {
+    lines.push('## System Prompt');
+    lines.push('');
+    lines.push('```text');
+    lines.push(runStart.systemPrompt);
+    lines.push('```');
+    lines.push('');
+  }
+
+  if (runStart?.executionPrompt) {
+    lines.push('## Execution Prompt');
+    lines.push('');
+    lines.push('```text');
+    lines.push(runStart.executionPrompt);
+    lines.push('```');
+    lines.push('');
+  }
+
+  if (runStart?.repositoryStructure) {
+    lines.push('## Repository Structure Snapshot');
+    lines.push('');
+    lines.push('```text');
+    lines.push(runStart.repositoryStructure);
+    lines.push('```');
+    lines.push('');
+  }
+
+  if (steps.length > 0) {
+    lines.push('## Observable Steps');
+    lines.push('');
+    for (const step of steps) {
+      lines.push(`### Step ${step.stepNumber ?? '?'}`);
+      lines.push('');
+      const inputTokens = step.usage?.inputTokens ?? 0;
+      const outputTokens = step.usage?.outputTokens ?? 0;
+      const finishReason = step.finishReason ?? 'unknown';
+      lines.push(`- Finish reason: ${finishReason}`);
+      lines.push(`- Tokens: ${inputTokens} in / ${outputTokens} out`);
+      if (step.inputContext?.activeTools?.length) {
+        lines.push(`- Active tools: ${step.inputContext.activeTools.join(', ')}`);
+      }
+      lines.push('');
+
+      if (step.output?.text) {
+        lines.push('#### Assistant Output');
+        lines.push('');
+        lines.push('```text');
+        lines.push(step.output.text);
+        lines.push('```');
+        lines.push('');
+      }
+
+      if (step.output?.toolCalls?.length) {
+        lines.push('#### Tool Calls');
+        lines.push('');
+        for (const toolCall of step.output.toolCalls) {
+          lines.push(`- ${toolCall.toolName || 'unknown-tool'}`);
+          lines.push('```json');
+          lines.push(JSON.stringify(toolCall.input ?? {}, null, 2));
+          lines.push('```');
+        }
+        lines.push('');
+      }
+
+      if (step.output?.toolResults?.length) {
+        lines.push('#### Tool Results');
+        lines.push('');
+        for (const toolResult of step.output.toolResults) {
+          lines.push(`- ${toolResult.toolCallId || 'tool-result'}`);
+          lines.push('```json');
+          lines.push(JSON.stringify(toolResult.error ?? toolResult.output ?? null, null, 2));
+          lines.push('```');
+        }
+        lines.push('');
+      }
+    }
+  }
+
+  if (args.workerStdout) {
+    lines.push('## Worker Stdout');
+    lines.push('');
+    lines.push('```text');
+    lines.push(args.workerStdout);
+    lines.push('```');
+    lines.push('');
+  }
+
+  if (args.workerStderr) {
+    lines.push('## Worker Stderr');
+    lines.push('');
+    lines.push('```text');
+    lines.push(args.workerStderr);
+    lines.push('```');
+    lines.push('');
+  }
+
+  if (args.responseText) {
+    lines.push('## Raw Codebite Response');
+    lines.push('');
+    lines.push('```text');
+    lines.push(args.responseText);
+    lines.push('```');
+    lines.push('');
+  }
+
+  if (args.finalRawResponse && args.finalRawResponse !== args.responseText) {
+    lines.push('## Final Response Used By BatEye');
+    lines.push('');
+    lines.push('```text');
+    lines.push(args.finalRawResponse);
+    lines.push('```');
+    lines.push('');
+  }
+
+  if (runFinish?.finalText) {
+    lines.push('## Codebite Final Text');
+    lines.push('');
+    lines.push('```text');
+    lines.push(runFinish.finalText);
+    lines.push('```');
+    lines.push('');
+  }
+
+  if (args.error) {
+    lines.push('## Error');
+    lines.push('');
+    lines.push('```text');
+    lines.push(args.error);
+    lines.push('```');
+    lines.push('');
+  }
+
+  lines.push('## Note');
+  lines.push('');
+  lines.push('This file contains the full observable Codebite run: prompts, tool calls, tool results, assistant text, and final output.');
+  lines.push("Provider-hidden chain-of-thought is not available through the runtime, so BatEye logs the complete external trace instead.");
+  lines.push('');
+
+  return lines.join('\n');
 }
 
 async function parseAndRepairCodebiteOutput<T>(

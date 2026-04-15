@@ -56,20 +56,37 @@ test('assertCodebiteAgenticSupport rejects unsupported agentic providers with ac
       transport: 'auto',
       apiBaseUrl: undefined,
     }),
-    /Supported providers: openai, anthropic, google, mistral, vercel/,
+    /Supported providers: openai, anthropic, google, mistral, vercel, groq, xai, cohere, deepseek, bedrock, azure, togetherai, fireworks, litellm/,
   );
 });
 
-test('assertCodebiteAgenticSupport rejects custom apiBaseUrl overrides', () => {
+test('assertCodebiteAgenticSupport requires apiBaseUrl for azure and preserves it in runtime config', () => {
   const { assertCodebiteAgenticSupport } = require('../../dist/core/runtime/codebite/index');
 
   assert.throws(
     () => assertCodebiteAgenticSupport({
-      model: 'openai/gpt-5.4-nano',
-      transport: 'openai',
-      apiBaseUrl: 'https://gateway.example/v1',
+      model: 'azure/my-deployment',
+      transport: 'auto',
+      apiBaseUrl: undefined,
     }),
-    /does not support custom apiBaseUrl overrides/i,
+    /requires apiBaseUrl/i,
+  );
+
+  assert.deepEqual(
+    assertCodebiteAgenticSupport({
+      model: 'azure/my-deployment',
+      transport: 'auto',
+      apiBaseUrl: 'https://azure.example.openai.azure.com/openai',
+    }),
+    {
+      provider: 'azure',
+      model: 'my-deployment',
+      apiKey: '',
+      baseURL: 'https://azure.example.openai.azure.com/openai',
+      maxSteps: 30,
+      deepMode: false,
+      tools: {},
+    },
   );
 });
 
@@ -80,7 +97,9 @@ test('buildCodebiteWorkerScript imports Codebite from absolute file URLs', () =>
   const script = buildCodebiteWorkerScript(packageJsonPath);
 
   assert.match(script, /import \{ runAgent \} from "file:\/\/\/C:\/repo\/node_modules\/codebite\/dist\/agent\.js"/);
-  assert.match(script, /import \{ resolveModel \} from "file:\/\/\/C:\/repo\/node_modules\/codebite\/dist\/provider\.js"/);
+  assert.match(script, /import \{ createOpenAI \} from "file:\/\/\//);
+  assert.match(script, /import \{ createAmazonBedrock \} from "file:\/\/\//);
+  assert.match(script, /function resolveModel\(config\)/);
 });
 
 test('CodebiteAgentRuntime repairs invalid JSON output and validates it against the schema', async () => {

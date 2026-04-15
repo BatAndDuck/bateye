@@ -20,7 +20,7 @@ Go to **Settings → Secrets and variables → Actions → New repository secret
 
 | Secret name | Value |
 |---|---|
-| `BATEYE_LLM_MODEL_API_KEY` | Your BatEye review credential (for example OpenAI, Anthropic, Google, Mistral, or Vercel AI Gateway) |
+| `BATEYE_LLM_MODEL_API_KEY` | Your BatEye review credential (for example OpenAI, Anthropic, Google, Mistral, Vercel AI Gateway, Groq, xAI, Cohere, DeepSeek, Bedrock, Azure, Together AI, Fireworks, or LiteLLM) |
 
 Optionally add a fallback key:
 

@@ -1,7 +1,15 @@
 import { createAnthropic } from '@ai-sdk/anthropic';
+import { createAmazonBedrock } from '@ai-sdk/amazon-bedrock';
+import { createAzure } from '@ai-sdk/azure';
+import { createCohere } from '@ai-sdk/cohere';
+import { createDeepSeek } from '@ai-sdk/deepseek';
+import { createFireworks } from '@ai-sdk/fireworks';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { createGroq } from '@ai-sdk/groq';
 import { createMistral } from '@ai-sdk/mistral';
 import { createOpenAI } from '@ai-sdk/openai';
+import { createTogetherAI } from '@ai-sdk/togetherai';
+import { createXai } from '@ai-sdk/xai';
 import { createGateway, generateObject, generateText, type LanguageModel } from 'ai';
 import { z } from 'zod';
 import { MAX_ORCHESTRATOR_TIMEOUT_MS } from '../../config/defaults';
@@ -18,10 +26,17 @@ import {
   resolveModelTarget,
 } from '../interface';
 import {
+  COHERE_API_BASE_URL,
+  DEEPSEEK_API_BASE_URL,
+  FIREWORKS_API_BASE_URL,
+  GROQ_API_BASE_URL,
+  LITELLM_API_BASE_URL,
   MISTRAL_API_BASE_URL,
   OPENAI_API_BASE_URL,
   resolveVercelGatewayCredential,
+  TOGETHERAI_API_BASE_URL,
   VERCEL_AI_GATEWAY_BASE_URL,
+  XAI_API_BASE_URL,
 } from '../provider-routing';
 import { buildStructureRepairPrompt, extractJsonFromText, formatZodErrors, tryParseAndValidate } from '../structure-repair';
 import {
@@ -103,6 +118,7 @@ export function buildProviderOptions(
 
   switch (normalizeTransport(transport)) {
     case 'openai':
+    case 'azure':
       return { openai: { reasoningEffort: effort } };
     case 'vercel':
       // Vercel AI Gateway is OpenAI-compatible; the OpenAI provider-options
@@ -124,6 +140,69 @@ export function buildProviderOptions(
       const reasoningEffort = effortToMistralReasoning(effort);
       return reasoningEffort ? { mistral: { reasoningEffort } } : undefined;
     }
+    case 'groq': {
+      const reasoningEffort = effortToGroqReasoning(effort);
+      return reasoningEffort ? { groq: { reasoningEffort } } : undefined;
+    }
+    case 'xai': {
+      const reasoningEffort = effortToXaiReasoning(effort);
+      return reasoningEffort ? { xai: { reasoningEffort } } : undefined;
+    }
+    case 'bedrock': {
+      const reasoningConfig = effortToBedrockReasoning(effort);
+      return reasoningConfig ? { bedrock: { reasoningConfig } } : undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
+function effortToGroqReasoning(effort: string): 'none' | 'low' | 'medium' | 'high' | 'default' | undefined {
+  switch (effort.toLowerCase()) {
+    case 'minimal':
+    case 'none':
+      return 'none';
+    case 'low':
+      return 'low';
+    case 'medium':
+      return 'medium';
+    case 'high':
+    case 'xhigh':
+      return 'high';
+    default:
+      return undefined;
+  }
+}
+
+function effortToXaiReasoning(effort: string): 'low' | 'medium' | 'high' | undefined {
+  switch (effort.toLowerCase()) {
+    case 'low':
+    case 'minimal':
+    case 'none':
+      return 'low';
+    case 'medium':
+      return 'medium';
+    case 'high':
+    case 'xhigh':
+      return 'high';
+    default:
+      return undefined;
+  }
+}
+
+function effortToBedrockReasoning(effort: string): { type: 'enabled' | 'adaptive'; maxReasoningEffort?: 'low' | 'medium' | 'high' | 'max' } | undefined {
+  switch (effort.toLowerCase()) {
+    case 'minimal':
+    case 'none':
+      return { type: 'enabled', maxReasoningEffort: 'low' };
+    case 'low':
+      return { type: 'adaptive', maxReasoningEffort: 'low' };
+    case 'medium':
+      return { type: 'adaptive', maxReasoningEffort: 'medium' };
+    case 'high':
+      return { type: 'adaptive', maxReasoningEffort: 'high' };
+    case 'xhigh':
+      return { type: 'adaptive', maxReasoningEffort: 'max' };
     default:
       return undefined;
   }
@@ -496,6 +575,18 @@ export function prepareModel(options: RunOptions): PreparedModel {
         baseURL: explicitApiBaseUrl || OPENAI_API_BASE_URL,
       };
     }
+    case 'azure': {
+      const azure = createAzure({
+        apiKey: options.apiKey,
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+      });
+      return {
+        model: azure(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl,
+      };
+    }
     case 'anthropic': {
       const anthropic = createAnthropic({
         apiKey: options.apiKey,
@@ -530,6 +621,102 @@ export function prepareModel(options: RunOptions): PreparedModel {
         transport: provider,
         modelId,
         baseURL: explicitApiBaseUrl || MISTRAL_API_BASE_URL,
+      };
+    }
+    case 'groq': {
+      const groq = createGroq({
+        apiKey: options.apiKey,
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+      });
+      return {
+        model: groq(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl || GROQ_API_BASE_URL,
+      };
+    }
+    case 'xai': {
+      const xai = createXai({
+        apiKey: options.apiKey,
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+      });
+      return {
+        model: xai(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl || XAI_API_BASE_URL,
+      };
+    }
+    case 'cohere': {
+      const cohere = createCohere({
+        apiKey: options.apiKey,
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+      });
+      return {
+        model: cohere(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl || COHERE_API_BASE_URL,
+      };
+    }
+    case 'deepseek': {
+      const deepseek = createDeepSeek({
+        apiKey: options.apiKey,
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+      });
+      return {
+        model: deepseek(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl || DEEPSEEK_API_BASE_URL,
+      };
+    }
+    case 'bedrock': {
+      const bedrock = createAmazonBedrock({
+        apiKey: options.apiKey,
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+      });
+      return {
+        model: bedrock(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl,
+      };
+    }
+    case 'togetherai': {
+      const togetherai = createTogetherAI({
+        apiKey: options.apiKey,
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+      });
+      return {
+        model: togetherai(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl || TOGETHERAI_API_BASE_URL,
+      };
+    }
+    case 'fireworks': {
+      const fireworks = createFireworks({
+        apiKey: options.apiKey,
+        ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+      });
+      return {
+        model: fireworks(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl || FIREWORKS_API_BASE_URL,
+      };
+    }
+    case 'litellm': {
+      const litellm = createOpenAI({
+        apiKey: options.apiKey,
+        baseURL: explicitApiBaseUrl || LITELLM_API_BASE_URL,
+      });
+      return {
+        model: litellm(modelId),
+        transport: provider,
+        modelId,
+        baseURL: explicitApiBaseUrl || LITELLM_API_BASE_URL,
       };
     }
   }

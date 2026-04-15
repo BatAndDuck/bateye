@@ -94,7 +94,7 @@ If you want BatEye to read credentials from a gitignored file instead of environ
 | `model` | string | `vercel/openai/gpt-5.4-nano` | Primary model in `provider/model-id` format |
 | `apiKey` | string | - | Plaintext LLM API key override. Recommended only in `.bateye/config.local.json` |
 | `transport` | string | `"auto"` | Transport override. `"auto"` uses the provider prefix from `model`. In practice, leave this as `"auto"` unless you are routing a supported model through `vercel` |
-| `apiBaseUrl` | string | - | Provider-specific base URL override for supported AI SDK providers. Not supported by the Codebite-backed review runtime |
+| `apiBaseUrl` | string | - | Provider-specific base URL override for supported AI SDK providers. Required for transports such as `azure` and `litellm` |
 | `githubToken` | string | - | Plaintext GitHub token override for `pr-review --github`. Recommended only in `.bateye/config.local.json` |
 | `reasoningEffort` | string | - | Reasoning/thinking effort for models that support it. Common values: `minimal`, `low`, `medium`, `high`, `xhigh`. See [Reasoning effort](#reasoning-effort) |
 | `exclude` | string[] | - | Additional paths to exclude from analysis |
@@ -106,18 +106,25 @@ If you want BatEye to read credentials from a gitignored file instead of environ
 
 Models are specified as `provider/model-id`. The provider prefix determines which API endpoint and authentication method BatEye uses. Run `bateye models <provider>` to list available model IDs for a provider.
 
-Agentic review commands (`bateye audit`, `bateye pr-review`, and `bateye models`) currently support only `openai`, `anthropic`, `google`, `mistral`, and `vercel`.
+Agentic review commands (`bateye audit`, `bateye pr-review`, and `bateye models`) support `openai`, `anthropic`, `google`, `mistral`, `vercel`, `groq`, `xai`, `cohere`, `deepseek`, `bedrock`, `azure`, `togetherai`, `fireworks`, and `litellm`.
 
 ```
 anthropic/claude-sonnet-4-5     → calls Anthropic API
 openai/gpt-5.4-nano             → calls OpenAI API
 mistral/mistral-large-latest    → calls Mistral API
 vercel/openai/gpt-5.4-nano      → calls Vercel AI Gateway (three-part format)
+groq/llama-3.3-70b-versatile    → calls Groq via the Vercel AI SDK
+azure/my-deployment             → calls Azure OpenAI using your deployment name
+litellm/ollama/llama3           → calls LiteLLM via your configured base URL
 ```
 
 ### Custom API endpoint (`apiBaseUrl`)
 
-The Codebite-backed agentic runtime does not support `apiBaseUrl`. If `apiBaseUrl` is set, `bateye audit` and `bateye pr-review` fail fast with an explicit error instead of attempting a partially supported custom gateway path.
+`apiBaseUrl` can be used with providers that need or benefit from a custom endpoint. In particular:
+
+- `azure` requires `apiBaseUrl`
+- `litellm` uses `http://localhost:4000` by default if you do not set one
+- OpenAI-compatible providers can also override their default endpoint when needed
 
 ### Transport override
 
@@ -183,10 +190,13 @@ bateye conf --reasoningEffort high
 
 | Transport | Wire format |
 |---|---|
-| `openai` / `vercel` | `openai.reasoningEffort` |
+| `openai` / `vercel` / `azure` | `openai.reasoningEffort` |
 | `anthropic` | `anthropic.thinking` (adaptive, Claude 4.6+) |
 | `google` | `google.thinkingConfig.thinkingBudget` (tokens: `minimal`→0, `low`→2048, `medium`→8192, `high`→24576, `xhigh`→32768) |
 | `mistral` | `mistral.reasoningEffort` for `minimal`/`none` → `none`, `high`/`xhigh` → `high`; `low`/`medium` are omitted |
+| `groq` | `groq.reasoningEffort` |
+| `xai` | `xai.reasoningEffort` |
+| `bedrock` | `bedrock.reasoningConfig.maxReasoningEffort` |
 
 Providers that don't support reasoning options receive the call unchanged. Unknown effort strings for the `google` transport also result in the option being omitted rather than causing an error.
 

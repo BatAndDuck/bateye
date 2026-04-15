@@ -4,6 +4,13 @@ import * as path from 'path';
 export const VERCEL_AI_GATEWAY_BASE_URL = 'https://ai-gateway.vercel.sh/v3/ai';
 export const OPENAI_API_BASE_URL = 'https://api.openai.com/v1';
 export const MISTRAL_API_BASE_URL = 'https://api.mistral.ai/v1';
+export const GROQ_API_BASE_URL = 'https://api.groq.com/openai/v1';
+export const XAI_API_BASE_URL = 'https://api.x.ai/v1';
+export const DEEPSEEK_API_BASE_URL = 'https://api.deepseek.com/v1';
+export const FIREWORKS_API_BASE_URL = 'https://api.fireworks.ai/inference/v1';
+export const TOGETHERAI_API_BASE_URL = 'https://api.together.xyz/v1';
+export const COHERE_API_BASE_URL = 'https://api.cohere.com/v2';
+export const LITELLM_API_BASE_URL = 'http://localhost:4000';
 
 function resolveDotEnvValue(name: string, cwd = process.cwd()): string | undefined {
   const fromEnv = process.env[name]?.trim();

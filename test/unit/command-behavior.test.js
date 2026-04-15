@@ -138,9 +138,9 @@ test('runModels uses the matching apiBaseUrl and prints the quick conf hint', as
       },
     },
     '../../core/runtime/codebite/models': {
-      SUPPORTED_CODEBITE_PROVIDERS: ['openai', 'anthropic', 'google', 'mistral', 'vercel'],
+      SUPPORTED_CODEBITE_PROVIDERS: ['openai', 'anthropic', 'google', 'mistral', 'vercel', 'groq', 'xai', 'cohere', 'deepseek', 'bedrock', 'azure', 'togetherai', 'fireworks', 'litellm'],
       normalizeCodebiteProvider: provider => provider,
-      formatSupportedCodebiteProviders: () => 'openai, anthropic, google, mistral, vercel',
+      formatSupportedCodebiteProviders: () => 'openai, anthropic, google, mistral, vercel, groq, xai, cohere, deepseek, bedrock, azure, togetherai, fireworks, litellm',
     },
     '../../features/config/application/config-service': {
       resolveAuthEnvName: () => 'BATEYE_LLM_MODEL_API_KEY',

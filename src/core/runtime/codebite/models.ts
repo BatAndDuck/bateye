@@ -14,12 +14,27 @@ export const SUPPORTED_CODEBITE_PROVIDERS = [
   'google',
   'mistral',
   'vercel',
+  'groq',
+  'xai',
+  'cohere',
+  'deepseek',
+  'bedrock',
+  'azure',
+  'togetherai',
+  'fireworks',
+  'litellm',
 ] as const;
 
 export type CodebiteProvider = (typeof SUPPORTED_CODEBITE_PROVIDERS)[number];
 
 const ANTHROPIC_API_VERSION = '2023-06-01';
 const FETCH_TIMEOUT_MS = 10_000;
+const GROQ_API_BASE_URL = 'https://api.groq.com/openai/v1';
+const XAI_API_BASE_URL = 'https://api.x.ai/v1';
+const DEEPSEEK_API_BASE_URL = 'https://api.deepseek.com/v1';
+const FIREWORKS_API_BASE_URL = 'https://api.fireworks.ai/inference/v1';
+const TOGETHERAI_API_BASE_URL = 'https://api.together.xyz/v1';
+const LITELLM_API_BASE_URL = 'http://localhost:4000';
 
 export function normalizeCodebiteProvider(provider: string): CodebiteProvider | null {
   switch (normalizeTransport(provider)) {
@@ -28,9 +43,24 @@ export function normalizeCodebiteProvider(provider: string): CodebiteProvider | 
     case 'google':
     case 'mistral':
     case 'vercel':
+    case 'groq':
+    case 'xai':
+    case 'cohere':
+    case 'deepseek':
+    case 'bedrock':
+    case 'azure':
+    case 'togetherai':
+    case 'fireworks':
+    case 'litellm':
       return normalizeTransport(provider) as CodebiteProvider;
     case 'gemini':
       return 'google';
+    case 'together':
+      return 'togetherai';
+    case 'aws':
+    case 'aws-bedrock':
+    case 'amazon-bedrock':
+      return 'bedrock';
     default:
       return null;
   }
@@ -59,6 +89,18 @@ export async function fetchCodebiteProviderModels(
         apiKey,
         apiBaseUrl?.trim() || MISTRAL_API_BASE_URL,
       );
+    case 'groq':
+      return fetchOpenAICompatibleModels(apiKey, apiBaseUrl?.trim() || GROQ_API_BASE_URL);
+    case 'xai':
+      return fetchOpenAICompatibleModels(apiKey, apiBaseUrl?.trim() || XAI_API_BASE_URL);
+    case 'deepseek':
+      return fetchOpenAICompatibleModels(apiKey, apiBaseUrl?.trim() || DEEPSEEK_API_BASE_URL);
+    case 'fireworks':
+      return fetchOpenAICompatibleModels(apiKey, apiBaseUrl?.trim() || FIREWORKS_API_BASE_URL);
+    case 'togetherai':
+      return fetchOpenAICompatibleModels(apiKey, apiBaseUrl?.trim() || TOGETHERAI_API_BASE_URL);
+    case 'litellm':
+      return fetchOpenAICompatibleModels(apiKey, apiBaseUrl?.trim() || LITELLM_API_BASE_URL);
     case 'vercel': {
       const credential = resolveVercelGatewayCredential(apiKey, cwd) || apiKey;
       return fetchVercelGatewayModels(credential, apiBaseUrl?.trim() || VERCEL_AI_GATEWAY_BASE_URL);
@@ -67,6 +109,9 @@ export async function fetchCodebiteProviderModels(
       return fetchAnthropicModels(apiKey);
     case 'google':
       return fetchGoogleModels(apiKey);
+    case 'cohere':
+    case 'bedrock':
+    case 'azure':
     default:
       return [];
   }

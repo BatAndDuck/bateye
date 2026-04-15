@@ -68,13 +68,15 @@ Drop Markdown reviewer prompts into `.bateye/reviewers/` to add new reviewers or
 
 ## Bring your own model
 
-BatEye's structured and Codebite-backed review flows currently support only OpenAI, Anthropic, Google, Mistral, and Vercel AI Gateway through the Vercel AI SDK.
+BatEye's structured and Codebite-backed review flows support the full current Codebite provider set through the Vercel AI SDK: OpenAI, Anthropic, Google, Mistral, Vercel AI Gateway, Groq, xAI, Cohere, DeepSeek, AWS Bedrock, Azure OpenAI, Together AI, Fireworks AI, and LiteLLM.
 
 ```bash
 bateye conf --model vercel/openai/gpt-5.4-nano --apikey <key>
 bateye conf --model anthropic/claude-sonnet-4-5 --apikey <key>
 bateye conf --model google/gemini-2.5-pro --apikey <key>
 bateye conf --model mistral/mistral-large-latest --apikey <key>
+bateye conf --model groq/llama-3.3-70b-versatile --apikey <key>
+bateye conf --model deepseek/deepseek-chat --apikey <key>
 ```
 
 Provider setup details live here: [Providers](./docs/providers.md)
