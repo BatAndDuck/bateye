@@ -434,22 +434,44 @@ test('CodebiteAgentRuntime surfaces worker stderr when the Codebite subprocess e
 
   try {
     const runtime = new fixture.module.CodebiteAgentRuntime();
+    let thrownError;
     await assert.rejects(
-      runtime.runAgenticReview(
-        {
-          systemPrompt: 'Return JSON only.',
-          userMessage: 'Report success.',
-          model: 'vercel/openai/gpt-5.4-nano',
-          apiKey: 'gateway-key',
-          repoPath,
-          transport: 'auto',
-          initialFiles: ['src/index.ts'],
-          timeoutMs: 5000,
-        },
-        schema,
-      ),
+      (async () => {
+        try {
+          await runtime.runAgenticReview(
+            {
+              systemPrompt: 'Return JSON only.',
+              userMessage: 'Report success.',
+              model: 'vercel/openai/gpt-5.4-nano',
+              apiKey: 'gateway-key',
+              repoPath,
+              transport: 'auto',
+              initialFiles: ['src/index.ts'],
+              timeoutMs: 5000,
+              callLabel: 'pr-planner',
+            },
+            schema,
+          );
+        } catch (error) {
+          thrownError = error;
+          throw error;
+        }
+      })(),
       /Codebite worker process failed before producing a response \(exitCode=1; stderr: Provider returned 503 Service Unavailable\)/,
     );
+
+    const diagnosticsDir = path.join(repoPath, '.bateye', 'out', 'diagnostics');
+    const artifactFiles = fs.readdirSync(diagnosticsDir);
+    assert.ok(
+      artifactFiles.some(file => file.endsWith('.codebite.failure.summary.json')),
+      'expected a runtime failure summary artifact',
+    );
+    assert.ok(
+      artifactFiles.some(file => file.endsWith('.codebite.failure.trace.md')),
+      'expected a runtime failure trace artifact',
+    );
+    assert.ok(Array.isArray(thrownError.codebiteArtifactPaths));
+    assert.ok(thrownError.codebiteArtifactPaths.some(file => file.endsWith('.codebite.failure.trace.md')));
   } finally {
     fixture.restore();
   }

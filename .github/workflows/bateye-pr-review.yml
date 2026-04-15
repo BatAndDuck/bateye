@@ -109,15 +109,17 @@ jobs:
           # COMMENT_ID lets BatEye add eyes reaction to /review trigger comments
           COMMENT_ID: ${{ steps.pr.outputs.comment-id }}
         run: |
-          bateye pr-review \
+          bateye --diagnostic pr-review \
             --base ${{ steps.pr.outputs.base-sha }} \
             --github \
             --pr-number ${{ steps.pr.outputs.pr-number }}
 
-      - name: Upload prompt logs
+      - name: Upload BatEye logs
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: bateye-prompt-logs-${{ steps.pr.outputs.pr-number }}-${{ github.run_attempt }}
-          path: .bateye/out/prompts/
+          name: bateye-logs-${{ steps.pr.outputs.pr-number }}-${{ github.run_attempt }}
+          path: |
+            .bateye/out/prompts/
+            .bateye/out/diagnostics/
           if-no-files-found: ignore

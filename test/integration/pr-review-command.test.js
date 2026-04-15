@@ -459,6 +459,71 @@ test('pr-review command fails when there are no changed files between the reques
   assert.equal(fs.existsSync(path.join(repoPath, '.bateye', 'out', 'pr-review.json')), false);
 });
 
+test('pr-review command diagnostic mode announces and writes the diagnostics directory', () => {
+  const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-diagnostic-int-'));
+  initGitRepo(repoPath);
+
+  writeJson(path.join(repoPath, '.bateye', 'config.json'), {
+    model: 'anthropic/mock-model',
+    exclude: [],
+  });
+
+  writeText(path.join(repoPath, 'src', 'service.ts'), `export function buildMessage(name: string) {
+  return name.trim();
+}
+`);
+  commitAll(repoPath, 'base');
+
+  runOk('git', ['checkout', '-b', 'feature/pr-review-diagnostic'], { cwd: repoPath });
+  writeText(path.join(repoPath, 'src', 'service.ts'), `export function buildMessage(name: string) {
+  const normalized = name.trim();
+  return normalized;
+}
+`);
+  commitAll(repoPath, 'feature change');
+
+  const fixturePath = path.join(repoPath, 'mock-runtime.json');
+  writeJson(fixturePath, {
+    runs: [
+      {
+        data: {
+          intentSummary: 'The PR changes one TypeScript function and should be checked by the local reviewer.',
+          selectedReviewers: [
+            {
+              reviewerId: 'bug-hunter-local',
+              reason: 'The changed function needs a general bug pass.',
+              confidence: 0.9,
+            },
+          ],
+        },
+      },
+    ],
+    agenticRuns: [
+      {
+        data: {
+          score: 95,
+          summary: 'No issues found.',
+          findings: [],
+        },
+      },
+    ],
+  });
+
+  const result = spawnSync('node', ['dist/index.js', '--diagnostic', '--cwd', repoPath, 'pr-review', '--base', 'main', '--dry-run'], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      BATEYE_LLM_MODEL_API_KEY: 'direct-test-key',
+      BATEYE_RUNTIME: 'mock',
+      BATEYE_MOCK_RUNTIME_FIXTURES: fixturePath,
+    },
+    encoding: 'utf-8',
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Diagnostics enabled\. Writing PR review traces to/);
+});
+
 test('pr-review command uses exactly the reviewers the orchestrator selected, no more', () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-broad-coverage-'));
   initGitRepo(repoPath);

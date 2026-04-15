@@ -58,6 +58,10 @@ export type CodebiteRuntimeInfo = {
   packageJsonPath: string;
 };
 
+type CodebiteRuntimeError = Error & {
+  codebiteArtifactPaths?: string[];
+};
+
 type CodebiteWorkerOutput = {
   text?: string;
   usage?: {
@@ -119,6 +123,14 @@ type CodebiteDiagnosisRecord = {
   };
   stepCount?: number;
   finalText?: string;
+};
+
+type CodebiteFailureArtifactPaths = {
+  summaryPath: string;
+  tracePath: string;
+  stdoutPath?: string;
+  stderrPath?: string;
+  rawResponsePath?: string;
 };
 
 class CodebiteStructuredOutputError extends Error {
@@ -315,6 +327,38 @@ await writeFile(outputPath, JSON.stringify({ text, usage }, null, 2), 'utf8');
 `;
 }
 
+export function extractCodebiteArtifactPaths(error: unknown): string[] {
+  const seen = new Set<unknown>();
+  const paths: string[] = [];
+
+  function visit(value: unknown): void {
+    if (!value || seen.has(value) || typeof value !== 'object') {
+      return;
+    }
+    seen.add(value);
+
+    const candidate = value as { codebiteArtifactPaths?: unknown; cause?: unknown; errors?: unknown[] };
+    if (Array.isArray(candidate.codebiteArtifactPaths)) {
+      for (const pathItem of candidate.codebiteArtifactPaths) {
+        if (typeof pathItem === 'string' && pathItem.trim() && !paths.includes(pathItem.trim())) {
+          paths.push(pathItem.trim());
+        }
+      }
+    }
+
+    if (Array.isArray(candidate.errors)) {
+      for (const nested of candidate.errors) {
+        visit(nested);
+      }
+    }
+
+    visit(candidate.cause);
+  }
+
+  visit(error);
+  return paths;
+}
+
 export function resolveCodebiteRuntimeInfo(): CodebiteRuntimeInfo | null {
   try {
     const packageJsonPath = require.resolve('codebite/package.json');
@@ -398,6 +442,10 @@ export class CodebiteAgentRuntime implements IRuntime {
     const outputPath = path.join(tempDir, 'response.json');
     const labelTag = options.callLabel ? ` [${options.callLabel}]` : '';
     const timeoutMs = options.timeoutMs ?? DEFAULT_AGENTIC_TIMEOUT_MS;
+    let lastQuestion = buildCodebiteQuestion(options, schemaJson);
+    let lastDiagnosticsPath = resolveCodebiteDiagnosticsPath(options, 1);
+    let lastTracePath = resolveCodebiteTracePath(lastDiagnosticsPath);
+    let lastAttempt = 1;
 
     logRuntimeDebug(
       `[codebite]${labelTag} Starting review: provider=${runtimeConfig.provider}, model=${runtimeConfig.model}, `
@@ -425,6 +473,10 @@ export class CodebiteAgentRuntime implements IRuntime {
         );
         const diagnosticsPath = resolveCodebiteDiagnosticsPath(options, attempt);
         const tracePath = resolveCodebiteTracePath(diagnosticsPath);
+        lastAttempt = attempt;
+        lastQuestion = question;
+        lastDiagnosticsPath = diagnosticsPath;
+        lastTracePath = tracePath;
         const workerRun = await runCodebiteWorker({
           workerScript,
           repoPath: options.repoPath,
@@ -536,20 +588,32 @@ export class CodebiteAgentRuntime implements IRuntime {
         tokensUsed,
       };
     } catch (err) {
-      const diagnosticsPath = resolveCodebiteDiagnosticsPath(options, 1);
-      const tracePath = resolveCodebiteTracePath(diagnosticsPath);
+      const diagnosticsPath = lastDiagnosticsPath;
+      const tracePath = lastTracePath;
+      const failureArtifacts = writeCodebiteFailureArtifacts({
+        options,
+        runtimeInfo,
+        runtimeConfig,
+        attempt: lastAttempt,
+        question: lastQuestion,
+        diagnosticsPath,
+        workerScript,
+        error: err,
+      });
       writeCodebiteDiagnosticTrace({
         diagnosticsPath,
-        tracePath,
+        tracePath: tracePath || failureArtifacts.tracePath,
         provider: runtimeConfig.provider,
         model: runtimeConfig.model,
         labelTag,
-        question: buildCodebiteQuestion(options, schemaJson),
+        question: lastQuestion,
         error: formatErrorWithCauses(err),
       });
       const message =
         `Codebite agentic review failed for ${runtimeConfig.provider}/${runtimeConfig.model}: ${formatErrorWithCauses(err)}`;
-      throw new Error(message, { cause: err });
+      const wrappedError = new Error(message, { cause: err }) as CodebiteRuntimeError;
+      wrappedError.codebiteArtifactPaths = Object.values(failureArtifacts).filter((value): value is string => typeof value === 'string');
+      throw wrappedError;
     } finally {
       try {
         fs.rmSync(tempDir, { recursive: true, force: true });
@@ -715,6 +779,22 @@ function resolveCodebiteTracePath(contextDiagnosisPath: string | undefined): str
   return contextDiagnosisPath.replace(/\.jsonl$/i, '.trace.md');
 }
 
+function resolveCodebiteFailureArtifactPaths(
+  options: AgenticRepositoryReviewOptions,
+  attempt: number,
+): CodebiteFailureArtifactPaths {
+  const diagnosticDir = resolveCodebiteDiagnosticsDir(options, true) as string;
+  const safeLabel = resolveCodebiteSafeLabel(options);
+  const suffix = attempt > 1 ? `.attempt-${attempt}` : '';
+
+  return {
+    summaryPath: path.join(diagnosticDir, `${safeLabel}${suffix}.codebite.failure.summary.json`),
+    tracePath: path.join(diagnosticDir, `${safeLabel}${suffix}.codebite.failure.trace.md`),
+    stdoutPath: path.join(diagnosticDir, `${safeLabel}${suffix}.codebite.failure.stdout.txt`),
+    stderrPath: path.join(diagnosticDir, `${safeLabel}${suffix}.codebite.failure.stderr.txt`),
+  };
+}
+
 async function runCodebiteWorker(args: {
   workerScript: string;
   repoPath: string;
@@ -815,6 +895,163 @@ function summarizeCodebiteWorkerStream(value: string | undefined): string {
 
   const compact = normalized.replace(/\s+/g, ' ');
   return compact.length > 400 ? `${compact.slice(0, 397)}...` : compact;
+}
+
+function writeCodebiteFailureArtifacts(args: {
+  options: AgenticRepositoryReviewOptions;
+  runtimeInfo: CodebiteRuntimeInfo;
+  runtimeConfig: CodebiteRuntimeConfig;
+  attempt: number;
+  question: string;
+  diagnosticsPath?: string;
+  workerScript: string;
+  error: unknown;
+}): CodebiteFailureArtifactPaths {
+  const paths = resolveCodebiteFailureArtifactPaths(args.options, args.attempt);
+  try {
+    fs.mkdirSync(path.dirname(paths.summaryPath), { recursive: true });
+
+    const candidate = args.error as { stdout?: string; stderr?: string; stack?: string } | null;
+    const stdout = typeof candidate?.stdout === 'string' ? candidate.stdout.trim() : '';
+    const stderr = typeof candidate?.stderr === 'string' ? candidate.stderr.trim() : '';
+
+    if (stdout) {
+      fs.writeFileSync(paths.stdoutPath as string, stdout, 'utf-8');
+    } else {
+      delete paths.stdoutPath;
+    }
+
+    if (stderr) {
+      fs.writeFileSync(paths.stderrPath as string, stderr, 'utf-8');
+    } else {
+      delete paths.stderrPath;
+    }
+
+    const summary = {
+      label: args.options.callLabel || 'agentic-review',
+      provider: args.runtimeConfig.provider,
+      model: args.runtimeConfig.model,
+      baseURL: args.runtimeConfig.baseURL,
+      maxSteps: args.runtimeConfig.maxSteps,
+      deepMode: args.runtimeConfig.deepMode,
+      disableSubagents: args.runtimeConfig.disableSubagents,
+      attempt: args.attempt,
+      timeoutMs: args.options.timeoutMs ?? DEFAULT_AGENTIC_TIMEOUT_MS,
+      runtimeInfo: {
+        version: args.runtimeInfo.version,
+        packageJsonPath: args.runtimeInfo.packageJsonPath,
+      },
+      environment: {
+        nodeVersion: process.version,
+        execPath: process.execPath,
+        platform: process.platform,
+        arch: process.arch,
+        cwd: args.options.repoPath,
+        diagnosticsPath: args.diagnosticsPath,
+        diagnosticModeEnabled: process.env.BATEYE_DIAGNOSTIC === '1',
+      },
+      questionPreview: summarizeCodebiteWorkerStream(args.question),
+      initialFiles: args.options.initialFiles?.slice(0, 25) || [],
+      initialFileCount: args.options.initialFiles?.length || 0,
+      workerScriptPreview: summarizeCodebiteWorkerStream(args.workerScript),
+      error: {
+        message: formatErrorWithCauses(args.error),
+        stack: typeof candidate?.stack === 'string' ? candidate.stack : undefined,
+      },
+      artifactPaths: paths,
+    };
+
+    fs.writeFileSync(paths.summaryPath, JSON.stringify(summary, null, 2), 'utf-8');
+    fs.writeFileSync(paths.tracePath, renderCodebiteFailureTrace({
+      attempt: args.attempt,
+      provider: args.runtimeConfig.provider,
+      model: args.runtimeConfig.model,
+      question: args.question,
+      diagnosticsPath: args.diagnosticsPath,
+      error: args.error,
+      workerStdout: stdout,
+      workerStderr: stderr,
+      summaryPath: paths.summaryPath,
+      runtimeInfo: args.runtimeInfo,
+      runtimeConfig: args.runtimeConfig,
+    }), 'utf-8');
+  } catch (artifactErr) {
+    const labelTag = args.options.callLabel ? ` [${args.options.callLabel}]` : '';
+    logRuntimeDebug(
+      `[codebite]${labelTag} Failed to write runtime failure artifacts: ${formatErrorWithCauses(artifactErr)}`,
+    );
+  }
+
+  return paths;
+}
+
+function renderCodebiteFailureTrace(args: {
+  attempt: number;
+  provider: string;
+  model: string;
+  question: string;
+  diagnosticsPath?: string;
+  error: unknown;
+  workerStdout?: string;
+  workerStderr?: string;
+  summaryPath: string;
+  runtimeInfo: CodebiteRuntimeInfo;
+  runtimeConfig: CodebiteRuntimeConfig;
+}): string {
+  const lines: string[] = [];
+
+  lines.push('# Codebite Runtime Failure');
+  lines.push('');
+  lines.push(`- Attempt: ${args.attempt}`);
+  lines.push(`- Provider: ${args.provider}`);
+  lines.push(`- Model: ${args.model}`);
+  lines.push(`- Codebite version: ${args.runtimeInfo.version}`);
+  lines.push(`- Package: ${args.runtimeInfo.packageJsonPath}`);
+  if (args.runtimeConfig.baseURL) {
+    lines.push(`- Base URL: ${args.runtimeConfig.baseURL}`);
+  }
+  lines.push(`- Max steps: ${args.runtimeConfig.maxSteps}`);
+  lines.push(`- Deep mode: ${args.runtimeConfig.deepMode ? 'true' : 'false'}`);
+  lines.push(`- Disable subagents: ${args.runtimeConfig.disableSubagents ? 'true' : 'false'}`);
+  if (args.diagnosticsPath) {
+    lines.push(`- Diagnostics JSONL: ${args.diagnosticsPath}`);
+  }
+  lines.push(`- Summary JSON: ${args.summaryPath}`);
+  lines.push('');
+
+  lines.push('## Error');
+  lines.push('');
+  lines.push('```text');
+  lines.push(formatErrorWithCauses(args.error));
+  lines.push('```');
+  lines.push('');
+
+  lines.push('## Question');
+  lines.push('');
+  lines.push('```text');
+  lines.push(args.question);
+  lines.push('```');
+  lines.push('');
+
+  if (args.workerStdout) {
+    lines.push('## Worker Stdout');
+    lines.push('');
+    lines.push('```text');
+    lines.push(args.workerStdout);
+    lines.push('```');
+    lines.push('');
+  }
+
+  if (args.workerStderr) {
+    lines.push('## Worker Stderr');
+    lines.push('');
+    lines.push('```text');
+    lines.push(args.workerStderr);
+    lines.push('```');
+    lines.push('');
+  }
+
+  return lines.join('\n');
 }
 
 function shouldRetryStructuredOutputAttempt(error: unknown): boolean {

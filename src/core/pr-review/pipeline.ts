@@ -15,6 +15,7 @@ import {
 import { getGitDiff, getChangedFiles, getCommitSummaries, getRepoOwnerAndName, CommitSummary } from '../git/index';
 import { selectReviewers } from './orchestrator';
 import { writePRReviewResult, ensureDir } from '../output/writer';
+import { resolveDiagnosticDir } from '../output/diagnostics';
 import {
   MAX_CONCURRENT_PR_REVIEWERS,
   MAX_PR_CURRENT_CONTEXT_CHARS,
@@ -42,7 +43,7 @@ import { addTokens, formatTokenSummary } from '../runtime/token-utils';
 import { runReviewerTool } from '../tools/runner';
 import { formatToolContext } from '../tools/format';
 import { logPrompt } from '../output/prompt-logger';
-import { validateCodebiteAgenticModels } from '../runtime/codebite/index';
+import { extractCodebiteArtifactPaths, validateCodebiteAgenticModels } from '../runtime/codebite/index';
 import { formatDedupArbiterError, runPRDedupArbiter } from './dedup-arbiter';
 
 export interface PRReviewPipelineOptions {
@@ -362,6 +363,10 @@ export async function runPRReviewPipeline(options: PRReviewPipelineOptions): Pro
   log('Loading configuration...');
   const config = resolveConfig(repoPath);
   const apiKey = resolveApiKey(config, repoPath);
+  const diagnosticDir = resolveDiagnosticDir(repoPath);
+  if (diagnosticDir) {
+    log(`Diagnostics enabled. Writing PR review traces to ${diagnosticDir}`);
+  }
   const baseRef = options.baseRef || 'origin/main';
   const headRef = options.headRef || 'HEAD';
 
@@ -1016,6 +1021,10 @@ async function runPRReviewer(
     const msg = formatErrorWithCauses(err);
     const isTimeout = /timed out after/i.test(msg);
     log(`  ✗ ${reviewer.name} failed: ${msg}`);
+    const artifactPaths = extractCodebiteArtifactPaths(err);
+    if (artifactPaths.length > 0) {
+      log(`  - ${reviewer.name} diagnostics: ${artifactPaths.join(', ')}`);
+    }
     issues.push({
       severity: isTimeout ? 'warning' : 'warning',
       code: isTimeout ? 'pr-reviewer-timeout' : 'pr-reviewer-failed',

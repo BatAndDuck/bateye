@@ -5,6 +5,7 @@ import { buildPRPlannerSystemPrompt, buildPRPlannerUserMessage } from '../prompt
 import { CommitSummary } from '../git/index';
 import { formatErrorWithCauses } from '../runtime/error-format';
 import { logPrompt } from '../output/prompt-logger';
+import { extractCodebiteArtifactPaths } from '../runtime/codebite/index';
 import {
   MAX_PR_PLANNER_TIMEOUT_MS,
   PR_PLANNER_MAX_STEPS,
@@ -130,6 +131,10 @@ export async function selectReviewers(
     } catch (err) {
       lastError = err;
       onLog?.(`  - Planner attempt ${attempt}/${MAX_ORCHESTRATOR_ATTEMPTS} failed: ${(err as Error).message?.slice(0, 120)}`);
+      const artifactPaths = extractCodebiteArtifactPaths(err);
+      if (artifactPaths.length > 0) {
+        onLog?.(`  - Planner diagnostics: ${artifactPaths.join(', ')}`);
+      }
       if (attempt < MAX_ORCHESTRATOR_ATTEMPTS) {
         await new Promise(resolve => setTimeout(resolve, 500 * attempt));
       }
