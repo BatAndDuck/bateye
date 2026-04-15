@@ -56,6 +56,10 @@ bateye audit --output ./report.json
 
 Diff-focused review for the changes you are actually about to merge.
 
+`pr-review` now runs in two stages:
+- one deep Codebite planner run (`codebite@0.5.0`, deep mode, `maxSteps=150`) that investigates the full change context and prepares reviewer-specific briefings
+- bounded reviewer runs (`maxSteps=20`, non-deep) that start from those briefings instead of rediscovering the repo from scratch
+
 ```bash
 bateye pr-review
 bateye pr-review --base main --head HEAD
@@ -90,6 +94,7 @@ Start here if you want specifics instead of vibes:
 | Pick a model or provider | [Providers](./docs/providers.md) |
 | Configure BatEye | [Configuration](./docs/configuration.md) |
 | Run PR review in CI | [GitHub Actions](./docs/github-actions.md) |
+| Benchmark planner-backed PR review | [Benchmark README](./.bateye/benchmark/README.md) |
 | See built-in reviewers or write my own | [Reviewers](./docs/reviewers.md) |
 | Fix a broken setup | [Troubleshooting](./docs/troubleshooting.md) |
 | Browse the docs map | [Docs index](./docs/README.md) |

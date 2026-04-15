@@ -102,6 +102,15 @@ If you want BatEye to read credentials from a gitignored file instead of environ
 | `prReview.autoApprove.enabled` | boolean | `false` | Auto-approve PRs with no high-severity findings |
 | `prReview.autoApprove.maxSeverity` | `"info"` \| `"low"` \| `"medium"` | `"low"` | Highest severity allowed for auto-approve |
 
+### Internal PR-review runtime budgets
+
+`bateye pr-review` now uses a fixed two-stage Codebite flow:
+
+- planner: deep mode enabled, `maxSteps=150`
+- reviewers: deep mode disabled, `maxSteps=20`
+
+These are internal defaults in this change. There are no new config knobs for them yet.
+
 ### Model format
 
 Models are specified as `provider/model-id`. The provider prefix determines which API endpoint and authentication method BatEye uses. Run `bateye models <provider>` to list available model IDs for a provider.
@@ -169,7 +178,7 @@ export VERCEL_OIDC_TOKEN=your-vercel-oidc-token
 
 ### Reasoning effort
 
-The `reasoningEffort` field controls how much thinking/reasoning a model performs before producing its response. It applies to orchestrator, reviewer, and semantic-verification calls in both `audit` and `pr-review` modes.
+The `reasoningEffort` field controls how much thinking/reasoning a model performs before producing its response. It applies to audit reviewers, the deep PR planner, and PR reviewer runs.
 
 ```json
 {
@@ -221,6 +230,8 @@ Omitting `reasoningEffort` (the default) preserves the current behaviour.
 | `BATEYE_VERBOSE` | Enables verbose runtime diagnostics; set automatically by the `--verbose` CLI flag |
 | `BATEYE_DIAGNOSTIC` | Enables diagnostic capture mode; set automatically by the `--diagnostic` CLI flag |
 | `BATEYE_DIAGNOSTIC_DIR` | Output directory for diagnostic logs and captured prompts; defaults to `.bateye/out/diagnostics` when `--diagnostic` is enabled |
+
+When diagnostics are enabled for `pr-review`, BatEye writes the Codebite JSONL event stream plus a rendered Markdown trace for planner and reviewer runs. The benchmark script also supports `--diagnostics` and redirects those files to `.bateye/benchmark/diagnostics/`.
 
 PowerShell equivalents:
 

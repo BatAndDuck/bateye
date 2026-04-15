@@ -78,13 +78,38 @@ export const reviewerResultSchema = z.object({
   }),
 });
 
+export const reviewerPlanSelectionSchema = z.object({
+  reviewerId: z.string(),
+  reason: z.string(),
+  confidence: z.number().min(0).max(1),
+  briefing: z.string().optional(),
+  contextPaths: z.array(z.string()).optional(),
+  verticalFlows: z.array(z.string()).optional(),
+  businessContext: z.array(z.string()).optional(),
+  consistencyReferences: z.array(z.string()).optional(),
+  testLocations: z.array(z.string()).optional(),
+  issueHints: z.array(z.string()).optional(),
+});
+
 export const orchestratorResultSchema = z.object({
+  selectedReviewers: z.array(reviewerPlanSelectionSchema),
+  intentSummary: z.string(),
+});
+
+export const prReviewPlannerResultSchema = z.object({
+  intentSummary: z.string().min(1),
   selectedReviewers: z.array(z.object({
     reviewerId: z.string(),
-    reason: z.string(),
+    reason: z.string().min(1),
     confidence: z.number().min(0).max(1),
+    briefing: z.string().min(1),
+    contextPaths: z.array(z.string()).default([]),
+    verticalFlows: z.array(z.string()).default([]),
+    businessContext: z.array(z.string()).default([]),
+    consistencyReferences: z.array(z.string()).default([]),
+    testLocations: z.array(z.string()).default([]),
+    issueHints: z.array(z.string()).default([]),
   })),
-  intentSummary: z.string(),
 });
 
 export const reviewerAnalysisSchema = z.object({
@@ -114,8 +139,20 @@ export const prFindingBatchVerificationSchema = z.object({
   })),
 });
 
+export const prFindingDedupDecisionBatchSchema = z.object({
+  decisions: z.array(z.object({
+    aId: z.string(),
+    bId: z.string(),
+    verdict: z.enum(['duplicate', 'distinct', 'unsure']),
+    confidence: z.number().min(0).max(1),
+    rationale: z.string().min(1),
+  })),
+});
+
 export type ReviewerAnalysis = z.infer<typeof reviewerAnalysisSchema>;
 export type PRReviewerAnalysis = z.infer<typeof prReviewerAnalysisSchema>;
 export type PRFindingVerification = z.infer<typeof prFindingVerificationSchema>;
 export type PRFindingBatchVerification = z.infer<typeof prFindingBatchVerificationSchema>;
+export type PRFindingDedupDecisionBatch = z.infer<typeof prFindingDedupDecisionBatchSchema>;
 export type OrchestratorAnalysis = z.infer<typeof orchestratorResultSchema>;
+export type PRReviewPlannerAnalysis = z.infer<typeof prReviewPlannerResultSchema>;

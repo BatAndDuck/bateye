@@ -5,6 +5,8 @@ const {
   prioritySchema,
   reviewerAnalysisSchema,
   orchestratorResultSchema,
+  prReviewPlannerResultSchema,
+  prFindingDedupDecisionBatchSchema,
 } = require('../../dist/core/validation/schemas');
 
 // prioritySchema
@@ -27,7 +29,13 @@ test('orchestratorResultSchema accepts valid data with reviewers', () => {
   const result = orchestratorResultSchema.safeParse({
     intentSummary: 'The PR updates application logic and intentionally changes reviewer routing behavior.',
     selectedReviewers: [
-      { reviewerId: 'code-quality', reason: 'Relevant for this PR', confidence: 0.95 },
+      {
+        reviewerId: 'code-quality',
+        reason: 'Relevant for this PR',
+        confidence: 0.95,
+        briefing: 'Start at src/app.ts and compare against src/shared/app.ts.',
+        contextPaths: ['src/app.ts'],
+      },
       { reviewerId: 'security-api', reason: 'API changes detected', confidence: 0.8 },
     ],
   });
@@ -47,6 +55,43 @@ test('orchestratorResultSchema rejects missing selectedReviewers or intentSummar
   assert.ok(!result.success);
   assert.equal(result.error.issues.some(issue => issue.path.join('.') === 'selectedReviewers'), true);
   assert.equal(result.error.issues.some(issue => issue.path.join('.') === 'intentSummary'), true);
+});
+
+test('prReviewPlannerResultSchema accepts expanded reviewer planner payload', () => {
+  const result = prReviewPlannerResultSchema.safeParse({
+    intentSummary: 'The PR updates the request flow intentionally and needs security plus QA review.',
+    selectedReviewers: [
+      {
+        reviewerId: 'security-api',
+        reason: 'Auth flow changed.',
+        confidence: 0.94,
+        briefing: 'Start at src/auth/command.ts and trace into the persistence adapter.',
+        contextPaths: ['src/auth/command.ts', 'src/auth'],
+        verticalFlows: ['HTTP -> controller -> command -> service -> repository'],
+        businessContext: ['Token metadata is user-visible.'],
+        consistencyReferences: ['src/auth/refresh-token.ts'],
+        testLocations: ['test/auth/command.test.ts'],
+        issueHints: ['Validation helper may be bypassed.'],
+      },
+    ],
+  });
+  assert.ok(result.success);
+});
+
+test('prFindingDedupDecisionBatchSchema accepts pairwise duplicate arbiter output', () => {
+  const result = prFindingDedupDecisionBatchSchema.safeParse({
+    decisions: [
+      {
+        aId: 'F1',
+        bId: 'F2',
+        verdict: 'distinct',
+        confidence: 0.88,
+        rationale: 'Same line, but different reviewer concerns and different fixes.',
+      },
+    ],
+  });
+
+  assert.ok(result.success);
 });
 
 // reviewerAnalysisSchema

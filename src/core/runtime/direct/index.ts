@@ -10,7 +10,7 @@ import { createMistral } from '@ai-sdk/mistral';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createTogetherAI } from '@ai-sdk/togetherai';
 import { createXai } from '@ai-sdk/xai';
-import { createGateway, generateObject, generateText, type LanguageModel } from 'ai';
+import { generateObject, generateText, type LanguageModel } from 'ai';
 import { z } from 'zod';
 import { MAX_ORCHESTRATOR_TIMEOUT_MS } from '../../config/defaults';
 import { logRuntimeDebug } from '../debug';
@@ -45,6 +45,7 @@ import {
   normalizeCodebiteProvider,
   type CodebiteProvider,
 } from '../codebite/models';
+import { createBateyeGateway } from '../vercel-gateway';
 
 type PreparedModel = {
   model: LanguageModel;
@@ -550,9 +551,10 @@ export function prepareModel(options: RunOptions): PreparedModel {
         );
       }
 
-      const gateway = createGateway({
+      const gateway = createBateyeGateway({
         apiKey,
         ...(explicitApiBaseUrl ? { baseURL: explicitApiBaseUrl } : {}),
+        timeoutMs: options.timeoutMs,
       });
 
       return {

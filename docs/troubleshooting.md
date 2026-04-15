@@ -129,6 +129,40 @@ bateye doctor
 
 BatEye bundles the Codebite runtime through its normal dependencies. There is no separate global agent CLI to install.
 
+Current PR review uses `codebite@0.5.0`, including deep-mode planner runs and Codebite diagnostics.
+
+---
+
+## PR review finished as DEGRADED with planner-context warnings
+
+**Symptom:** `bateye pr-review` completes, but `.bateye/out/pr-review.json` contains warnings such as `pr-reviewer-planner-context-fallback`
+
+**Meaning:** The deep planner selected a reviewer, but the planner's focused paths were missing, invalid, or too sparse for that reviewer. BatEye fell back to the broader PR context for that reviewer instead of aborting the whole run.
+
+**Fix / next checks:**
+1. Re-run with diagnostics enabled:
+   ```bash
+   bateye --diagnostic pr-review
+   ```
+2. Inspect `.bateye/out/diagnostics/` for the planner JSONL and rendered `.trace.md` files.
+3. Check whether the PR changes moved or renamed files after the planner investigated them.
+4. If you use custom reviewers, confirm their `selectWhen` rules are not selecting a domain with no useful nearby paths.
+
+This warning means review coverage degraded for that reviewer, not that BatEye skipped the review entirely.
+
+---
+
+## Benchmark diagnostics are missing
+
+**Symptom:** `scripts/benchmark.ts` ran, but you expected planner/reviewer diagnostics and no diagnostics directory was produced
+
+**Fix:**
+```bash
+npx ts-node scripts/benchmark.ts --model "openai/gpt-5.4-nano" --pr "https://github.com/BatAndDuck/bateye/pull/20" --diagnostics
+```
+
+With `--diagnostics`, the benchmark prints both the benchmark markdown path and the diagnostics directory path. The diagnostics files are written under `.bateye/benchmark/diagnostics/`.
+
 ---
 
 ## Config validation errors

@@ -29,12 +29,18 @@ export interface AgenticPRReviewOptions extends RunOptions {
   repoPath: string;
   changedFiles: string[];
   timeoutMs?: number;
+  maxSteps?: number;
+  deepMode?: boolean;
+  disableSubagents?: boolean;
 }
 
 export interface AgenticRepositoryReviewOptions extends RunOptions {
   repoPath: string;
   initialFiles?: string[];
   timeoutMs?: number;
+  maxSteps?: number;
+  deepMode?: boolean;
+  disableSubagents?: boolean;
 }
 
 /** Token usage for a single LLM call */

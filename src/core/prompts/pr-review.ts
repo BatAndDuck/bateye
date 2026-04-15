@@ -1,11 +1,25 @@
 import { BATEYE_SUMMARY_MARKER } from '../config/defaults';
-import { PRFinding, ReviewIssue, ReviewRunStatus } from '../../types/index';
+import { PRFinding, ReviewIssue, ReviewRunStatus, ReviewerPlanSelection } from '../../types/index';
 import { CommitSummary } from '../git/index';
 import { RepoProfile } from './audit';
+import type { PRFindingDuplicateCandidate } from '../pr-review/deduplicator';
 
-const DIFF_PREVIEW_MAX_CHARS = 16_000;
+const PLANNER_DIFF_PREVIEW_MAX_CHARS = 24_000;
 
-export function buildOrchestratorSystemPrompt(availableReviewers: { id: string; name: string; description?: string; selectWhen?: string }[]): string {
+function truncateDedupField(text: string | undefined, limit: number): string {
+  if (!text) {
+    return '';
+  }
+
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (normalized.length <= limit) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, limit - 3)}...`;
+}
+
+export function buildPRPlannerSystemPrompt(availableReviewers: { id: string; name: string; description?: string; selectWhen?: string }[]): string {
   const reviewerList = availableReviewers
     .map(r => {
       let line = `- id: "${r.id}", name: "${r.name}"`;
@@ -15,10 +29,20 @@ export function buildOrchestratorSystemPrompt(availableReviewers: { id: string; 
     })
     .join('\n');
 
-  return `You are a PR review orchestrator. Given a pull request diff, changed files, and commit history, select ALL reviewers that are relevant to this PR.
+  return `You are BatEye's deep PR review planner. This is the expensive one-time investigation stage that must fully understand the pull request before bounded reviewers run.
 
 ## Available Reviewers
 ${reviewerList}
+
+## Investigation Responsibilities
+
+- Use the repository tools aggressively. Deep mode and subagents are enabled for this run, with a budget of up to 150 steps.
+- Investigate the changed files, surrounding folders, neighboring modules, imports, exports, callers, callees, indirect dependencies, docs, configs, fixtures, examples, and existing tests.
+- Derive business context only from repository evidence such as names, docs, tests, comments, commit history, and nearby modules.
+- Trace full vertical flows for every changed concern. For CQRS-style changes, trace both what invokes the command/handler and what the command/handler invokes next.
+- If the PR changes multiple commands, handlers, services, or flows, cover each of them explicitly. Do not collapse unrelated changes into one generic summary.
+- Partition reviewer responsibilities so reviewers do not redundantly rediscover the same context.
+- Besides reviewer selection, proactively note likely issue leads discovered during planning. These are hints for reviewers, not final findings.
 
 ## Output Requirements
 
@@ -26,17 +50,35 @@ CRITICAL OUTPUT RULE: Your ENTIRE response must be valid JSON. Start your respon
 
 Your response must look exactly like this (replace the example values):
 {
-  "intentSummary": "This PR introduces prompt logging to CI artifacts (all LLM calls written to .bateye/out/prompts/) and raises the built-in reviewer cap to 20. The removal of the fallback reviewer list is deliberate - errors now propagate to surface real problems rather than silently substituting defaults.",
+  "intentSummary": "This PR introduces a new token description flow and updates the command path that persists and surfaces it. The broader migration to planner-led PR review is intentional, so downstream reviewers should not flag the new planner/reviewer split itself as accidental.",
   "selectedReviewers": [
     {
-      "reviewerId": "code-quality",
-      "reason": "The diff modifies TypeScript functions and introduces new logic paths that should be reviewed for quality.",
+      "reviewerId": "security-api",
+      "reason": "Authentication- and token-related behavior changed across command, service, and transport layers.",
       "confidence": 0.95
-    },
-    {
-      "reviewerId": "error-handling",
-      "reason": "The diff introduces async functions and promise chains without consistent error handling.",
-      "confidence": 0.85
+      "briefing": "Start at src/auth/describe-token.ts and src/api/token-controller.ts. Trace the full token-description flow from HTTP entrypoint -> command dispatch -> token metadata service -> persistence adapter. Compare against src/auth/refresh-token.ts for consistency. Security docs are in docs/security/tokens.md and tests are in test/auth/token-controller.test.ts. I already noticed likely issues worth checking: token description appears to bypass the shared validation helper, and the persistence adapter path differs from the existing refresh-token flow.",
+      "contextPaths": ["src/auth/describe-token.ts", "src/api/token-controller.ts", "src/auth", "docs/security/tokens.md", "test/auth"],
+      "verticalFlows": [
+        "HTTP token description request -> controller -> CQRS command -> token metadata service -> persistence adapter",
+        "Existing token refresh flow in src/auth/refresh-token.ts -> shared validator -> persistence adapter"
+      ],
+      "businessContext": [
+        "Token descriptions appear to be user-visible metadata surfaced through the API.",
+        "Tests and docs suggest token metadata should follow the same validation and audit path as refresh tokens."
+      ],
+      "consistencyReferences": [
+        "src/auth/refresh-token.ts",
+        "src/auth/shared/token-validator.ts"
+      ],
+      "testLocations": [
+        "test/auth/token-controller.test.ts",
+        "test/auth/refresh-token.test.ts",
+        "test/integration/auth"
+      ],
+      "issueHints": [
+        "Changed token description path may bypass the shared validator used by refresh-token flow.",
+        "Controller/service/persistence naming suggests an audit trail update may be missing."
+      ]
     }
   ]
 }
@@ -45,26 +87,34 @@ Your response must look exactly like this (replace the example values):
 
 Before selecting reviewers, write a concise (2-4 sentence) \`intentSummary\` that captures:
 1. What this PR is trying to accomplish (the primary goal).
-2. Which changes look deliberate / intentional - e.g., "logging is intentionally verbose for CI diagnostics", "fallback removed on purpose to surface errors", "API signature changed as part of a planned migration".
+2. Which changes look deliberate / intentional - e.g., "planner/reviewer split is intentional", "API signature changed as part of a planned migration", "diagnostics are intentionally verbose".
 
 Reviewers will receive this summary so they can skip findings about deliberate design decisions.
 
-## Selection Rules
+## Reviewer Planning Rules
 
 - **Select all reviewers that are relevant** - there is no target number. A PR touching many concerns should have many reviewers; a trivial change may need only one.
 - **Use the selectWhen field** on each reviewer as the primary guide for whether to include it. If the PR content matches a reviewer's selectWhen condition, include that reviewer.
 - For reviewers without a selectWhen field, use their name and description to judge relevance against the changed files and diff content.
-- **Err toward inclusion** when in doubt. A reviewer that produces zero findings is harmless; a missed reviewer means missed issues.
+- **Err toward inclusion** when in doubt, but partition context so reviewers overlap as little as possible.
 - Include reviewers for every concern visible in the diff: code quality, security, error handling, documentation, resilience, logging, tests, CI/CD, etc.
 - Exclude a reviewer only when the diff clearly has no overlap with the reviewer's domain (e.g., do not include a database reviewer for a pure UI change).
 - Never return an empty array unless the diff contains zero code changes.
 - **confidence** (0–1): rate your certainty that this reviewer is relevant. Use ≥ 0.9 when the match is obvious, 0.7–0.89 when probable, 0.5–0.69 when possible. Only include reviewers with confidence ≥ 0.5.
+- **briefing**: write a compact reviewer-facing message that tells the reviewer where to start, what changed in their domain, which flow to trace, which docs/config/tests matter, which nearby folders may contain indirect effects, and which likely issue leads you already noticed.
+- **contextPaths**: list focused starting files or folders. Prefer concise, high-signal paths.
+- **verticalFlows**: list the end-to-end flows this reviewer should trace.
+- **businessContext**: include only repo-evidenced domain context that materially helps this reviewer.
+- **consistencyReferences**: include only genuinely useful comparison points elsewhere in the repo.
+- **testLocations**: list exact relevant test files or test directories, and include nearby gaps if changed behavior appears untested.
+- **issueHints**: include 0-5 short, repo-evidenced leads about where issues may exist. These are hints, not final verdicts.
+- Keep the output compact enough that reviewer prompts shrink overall token usage rather than grow.
 
 - Return ONLY the JSON`;
 }
 
-export function buildOrchestratorUserMessage(changedFiles: string[], diff: string, commits: CommitSummary[]): string {
-  const diffPreview = diff.length > DIFF_PREVIEW_MAX_CHARS ? diff.slice(0, DIFF_PREVIEW_MAX_CHARS) + '\n\n[...diff truncated...]' : diff;
+export function buildPRPlannerUserMessage(changedFiles: string[], diff: string, commits: CommitSummary[]): string {
+  const diffPreview = diff.length > PLANNER_DIFF_PREVIEW_MAX_CHARS ? diff.slice(0, PLANNER_DIFF_PREVIEW_MAX_CHARS) + '\n\n[...diff truncated - investigate the repository directly for the rest...]' : diff;
   const commitSection = commits.length === 0
     ? '- No additional commits detected between base and head'
     : commits.map(commit => `- ${commit.sha.slice(0, 12)} ${commit.subject}`).join('\n');
@@ -80,7 +130,85 @@ ${commitSection}
 ${diffPreview}
 \`\`\`
 
-Which reviewers should analyze this PR?`;
+  Plan the reviewer set and prepare reviewer-specific briefings. Use the repo tools to investigate deeply before answering.`;
+}
+
+export function buildPRDedupArbiterSystemPrompt(): string {
+  return `You are BatEye's PR deduplication arbiter.
+
+Your job is to decide whether PAIRS of findings describe the same underlying defect.
+
+Return "duplicate" ONLY when both findings point to the same root cause in the same code location or tiny code block, with substantially the same evidence and substantially the same fix.
+
+Return "distinct" when the findings may share a file, line, or code quote but describe different failure modes, different risks, different recommendations, or different reviewer concerns.
+
+Examples of DISTINCT pairs:
+- "logs part of auth token" vs "missing retry on transient API error"
+- "missing validation" vs "poor naming"
+- "security leak" vs "documentation gap"
+
+Return "unsure" when the pair might overlap but you cannot confidently call it the same defect.
+
+Critical rules:
+- Default to keeping both findings when uncertain.
+- Do not merge findings just because they share a line number.
+- Do not merge findings just because they are from different reviewers discussing the same general area.
+- Do not use reviewer priority as a reason to merge.
+- You must return a decision for every pair listed in the user message.
+
+Return ONLY valid JSON with this shape:
+{
+  "decisions": [
+    {
+      "aId": "F1",
+      "bId": "F2",
+      "verdict": "duplicate",
+      "confidence": 0.91,
+      "rationale": "Both findings describe the same missing validation step in the same changed block."
+    }
+  ]
+}`;
+}
+
+export function buildPRDedupArbiterUserMessage(candidates: PRFindingDuplicateCandidate[]): string {
+  const pairSections = candidates.map((candidate, index) => {
+    const a = candidate.a;
+    const b = candidate.b;
+
+    return [
+      `### Pair ${index + 1}`,
+      `aId: ${a.id}`,
+      `bId: ${b.id}`,
+      `sameAnchor: ${candidate.sameAnchor ? 'true' : 'false'}`,
+      `linesClose: ${candidate.linesClose ? 'true' : 'false'}`,
+      `codeQuoteOverlap: ${candidate.codeQuoteOverlap ? 'true' : 'false'}`,
+      `lineOverlapFraction: ${candidate.lineOverlapFraction.toFixed(2)}`,
+      `titleSimilarity: ${candidate.titleSimilarity.toFixed(2)}`,
+      '',
+      'Finding A',
+      `- reviewer: ${a.reviewerName}`,
+      `- priority: ${a.priority}`,
+      `- file: ${a.filePath}:${a.startLine}-${a.endLine}`,
+      `- title: ${truncateDedupField(a.title, 180)}`,
+      `- description: ${truncateDedupField(a.description, 320)}`,
+      `- codeQuote: ${truncateDedupField(a.codeQuote, 240)}`,
+      `- recommendation: ${truncateDedupField(a.recommendation, 200)}`,
+      '',
+      'Finding B',
+      `- reviewer: ${b.reviewerName}`,
+      `- priority: ${b.priority}`,
+      `- file: ${b.filePath}:${b.startLine}-${b.endLine}`,
+      `- title: ${truncateDedupField(b.title, 180)}`,
+      `- description: ${truncateDedupField(b.description, 320)}`,
+      `- codeQuote: ${truncateDedupField(b.codeQuote, 240)}`,
+      `- recommendation: ${truncateDedupField(b.recommendation, 200)}`,
+    ].join('\n');
+  });
+
+  return `Decide whether each pair below is "duplicate", "distinct", or "unsure".
+You must return one decision per pair.
+
+${pairSections.join('\n\n')}`;
 }
 
 function buildPRRepoProfileSummary(profile: RepoProfile): string {
@@ -108,6 +236,8 @@ function buildPRModeOverlay(reviewerId: string): string {
   const commonOverlay = `## PR MODE OVERRIDES
 
 - You are reviewing a pull request, not performing a repo-wide audit.
+- The planner already did the expensive global investigation. Use its briefing as your starting point instead of rediscovering the entire repository.
+- Your runtime budget is intentionally bounded. Choose each step deliberately and avoid redundant exploration.
 - Investigate the current repository state before reporting anything.
 - Always inspect the changed file in its current post-change state.
 - Inspect neighboring files or referenced modules when a claim depends on behavior outside the diff.
@@ -214,13 +344,29 @@ Return ONLY this JSON:
 }
 
 export function buildPRReviewUserMessage(
-  structuredDiff: string,
-  changedFiles: string[],
-  currentFileContext: string,
-  additionalContext?: string,
-  commits?: CommitSummary[],
-  intentSummary?: string,
+  options: {
+    structuredDiff: string;
+    changedFiles: string[];
+    currentFileContext: string;
+    toolContext?: string;
+    commits?: CommitSummary[];
+    intentSummary?: string;
+    plannerSelection?: ReviewerPlanSelection;
+    usingPlannerContext?: boolean;
+    plannerFallbackReason?: string;
+  },
 ): string {
+  const {
+    structuredDiff,
+    changedFiles,
+    currentFileContext,
+    toolContext,
+    commits,
+    intentSummary,
+    plannerSelection,
+    usingPlannerContext,
+    plannerFallbackReason,
+  } = options;
   const maxLen = 24000;
   const diffContent = structuredDiff.length > maxLen
     ? structuredDiff.slice(0, maxLen) + '\n\n[...diff truncated...]'
@@ -234,19 +380,46 @@ export function buildPRReviewUserMessage(
     ? `\n## ⚠ PR INTENT - READ BEFORE REPORTING ANYTHING\n\n${intentSummary}\n\nMANDATORY CHECK: Before writing any finding, ask: "Is this already described as deliberate in the PR Intent above?" If YES - skip it entirely. Do not mention it, do not soften it into a suggestion, do not report it as a risk. Silence is the correct output for intentional changes.\n`
     : '';
 
+  const plannerBriefingSection = plannerSelection
+    ? `\n## Planner Briefing\n\n${plannerSelection.briefing || 'No planner briefing was provided.'}\n`
+    : '';
+  const plannerPathsSection = plannerSelection?.contextPaths?.length
+    ? `\n## Planner Starting Paths\n${plannerSelection.contextPaths.map(item => `- ${item}`).join('\n')}\n`
+    : '';
+  const plannerFlowsSection = plannerSelection?.verticalFlows?.length
+    ? `\n## Planner Flow Notes\n${plannerSelection.verticalFlows.map(item => `- ${item}`).join('\n')}\n`
+    : '';
+  const plannerBusinessSection = plannerSelection?.businessContext?.length
+    ? `\n## Planner Business Context\n${plannerSelection.businessContext.map(item => `- ${item}`).join('\n')}\n`
+    : '';
+  const plannerConsistencySection = plannerSelection?.consistencyReferences?.length
+    ? `\n## Planner Consistency References\n${plannerSelection.consistencyReferences.map(item => `- ${item}`).join('\n')}\n`
+    : '';
+  const plannerTestsSection = plannerSelection?.testLocations?.length
+    ? `\n## Planner Test Locations\n${plannerSelection.testLocations.map(item => `- ${item}`).join('\n')}\n`
+    : '';
+  const plannerIssueHintsSection = plannerSelection?.issueHints?.length
+    ? `\n## Planner Issue Hints\n${plannerSelection.issueHints.map(item => `- ${item}`).join('\n')}\n`
+    : '';
+  const plannerScopeSection = plannerSelection
+    ? usingPlannerContext
+      ? '\n## Reviewer Scope\nThe diff and file context below were narrowed by the planner for your domain. Start here and broaden only if the evidence demands it.\n'
+      : `\n## Reviewer Scope\nPlanner metadata existed for this reviewer, but BatEye had to fall back to the broader PR context for execution.\nReason: ${plannerFallbackReason || 'Planner paths were missing or too sparse.'}\n`
+    : '\n## Reviewer Scope\nBatEye is providing the broader PR context because no planner-specific slice was available for this reviewer.\n';
+
   return `## Files Changed in This PR
 ${changedFiles.map(f => `- ${f}`).join('\n')}
-${intentSection}${commitSection}
+${intentSection}${commitSection}${plannerBriefingSection}${plannerPathsSection}${plannerFlowsSection}${plannerBusinessSection}${plannerConsistencySection}${plannerTestsSection}${plannerIssueHintsSection}${plannerScopeSection}
 ## Code Changes
 
-Below are the exact changes in this PR. Each line is labeled with [Line N] showing its line number in the new file.
+Below are the exact changes BatEye is asking you to inspect for this review. Each line is labeled with [Line N] showing its line number in the new file.
 Lines marked with + are additions. Lines marked with - are removals. Other lines are context.
 
 ${diffContent}
 
 ## Current Changed File Contents
 ${currentFileContext}
-${additionalContext ? '\n## Additional Context\n' + additionalContext : ''}
+${toolContext ? '\n## Additional Context\n' + toolContext : ''}
 
 Investigate the repository before reporting any finding. Return the JSON result. If no issues found, return an empty findings array.`;
 }

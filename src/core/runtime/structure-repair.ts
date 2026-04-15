@@ -1,5 +1,85 @@
 import { z } from 'zod';
 
+const JSON_ESCAPE_RECOVERY_ERROR_RE = /bad escaped character|bad unicode escape|unexpected end of json input/i;
+
+export function repairMalformedJsonEscapes(jsonStr: string): string {
+  let result = '';
+  let inString = false;
+
+  for (let i = 0; i < jsonStr.length; i++) {
+    const ch = jsonStr[i];
+
+    if (!inString) {
+      result += ch;
+      if (ch === '"') {
+        inString = true;
+      }
+      continue;
+    }
+
+    if (ch === '\\') {
+      const next = jsonStr[i + 1];
+
+      if (next === undefined) {
+        result += '\\\\';
+        continue;
+      }
+
+      if (next === 'u') {
+        const unicode = jsonStr.slice(i + 2, i + 6);
+        if (/^[0-9a-fA-F]{4}$/.test(unicode)) {
+          result += `\\u${unicode}`;
+          i += 5;
+          continue;
+        }
+
+        result += '\\\\u';
+        i += 1;
+        continue;
+      }
+
+      if (/["\\/bfnrt]/.test(next)) {
+        result += `\\${next}`;
+        i += 1;
+        continue;
+      }
+
+      result += `\\\\${next}`;
+      i += 1;
+      continue;
+    }
+
+    if (ch === '"') {
+      result += ch;
+      inString = false;
+      continue;
+    }
+
+    if (ch === '\n') {
+      result += '\\n';
+      continue;
+    }
+
+    if (ch === '\r') {
+      result += '\\r';
+      continue;
+    }
+
+    if (ch === '\t') {
+      result += '\\t';
+      continue;
+    }
+
+    result += ch;
+  }
+
+  return result;
+}
+
+function canAttemptEscapeRecovery(err: unknown): boolean {
+  return err instanceof SyntaxError && JSON_ESCAPE_RECOVERY_ERROR_RE.test(err.message);
+}
+
 /**
  * Builds a concise prompt for AI-powered structure repair.
  * Given a malformed JSON string and validation errors, asks the model to fix
@@ -78,6 +158,17 @@ export function tryParseAndValidate<T>(
     const validated = schema.parse(parsed);
     return { data: validated };
   } catch (err) {
+    if (canAttemptEscapeRecovery(err)) {
+      try {
+        const repairedJson = repairMalformedJsonEscapes(jsonStr);
+        const repairedParsed = JSON.parse(repairedJson);
+        const repairedValidated = schema.parse(repairedParsed);
+        return { data: repairedValidated };
+      } catch (repairedErr) {
+        return { error: repairedErr as Error };
+      }
+    }
+
     return { error: err as Error };
   }
 }

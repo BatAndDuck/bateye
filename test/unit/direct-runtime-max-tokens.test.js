@@ -73,13 +73,16 @@ function loadRuntimeWithMocks() {
   };
 
   const runtimeKey = require.resolve('../../dist/core/runtime/direct/index');
+  const gatewayHelperKey = require.resolve('../../dist/core/runtime/vercel-gateway');
   delete require.cache[runtimeKey];
+  delete require.cache[gatewayHelperKey];
 
   return {
     calls,
     restore() {
       Module._load = originalLoad;
       delete require.cache[runtimeKey];
+      delete require.cache[gatewayHelperKey];
     },
     runtimeModule: require('../../dist/core/runtime/direct/index'),
   };
@@ -211,9 +214,10 @@ test('DirectAIRuntime.run resolves Vercel AI Gateway credentials from .env when 
     );
 
     assert.deepEqual(result.data, { ok: true });
-    assert.equal(fixture.calls.gatewayProviderOptions.length, 1);
-    assert.equal(fixture.calls.gatewayProviderOptions[0].apiKey, 'env-gateway-key');
-    assert.equal(fixture.calls.generateObjectCalls[0].model.provider, 'vercel');
+  assert.equal(fixture.calls.gatewayProviderOptions.length, 1);
+  assert.equal(fixture.calls.gatewayProviderOptions[0].apiKey, 'env-gateway-key');
+  assert.equal(typeof fixture.calls.gatewayProviderOptions[0].fetch, 'function');
+  assert.equal(fixture.calls.generateObjectCalls[0].model.provider, 'vercel');
     assert.equal(fixture.calls.generateObjectCalls[0].model.modelId, 'anthropic/claude-sonnet-4-5');
   } finally {
     fixture.restore();

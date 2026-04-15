@@ -7,6 +7,7 @@ const path = require('node:path');
 require('ts-node/register/transpile-only');
 
 const {
+  parseBenchmarkCliArgs,
   resolveBenchmarkGitHubToken,
   resolveBenchmarkLlmApiKey,
 } = require('../../scripts/benchmark.ts');
@@ -92,4 +93,18 @@ test('resolveBenchmarkLlmApiKey uses local apiKey for the Vercel-routed benchmar
     if (originalOidcToken === undefined) delete process.env.VERCEL_OIDC_TOKEN;
     else process.env.VERCEL_OIDC_TOKEN = originalOidcToken;
   }
+});
+
+test('parseBenchmarkCliArgs recognizes --diagnostics', () => {
+  const parsed = parseBenchmarkCliArgs([
+    '--model',
+    'openai/gpt-5.4-nano',
+    '--pr',
+    'https://github.com/BatAndDuck/bateye/pull/20',
+    '--diagnostics',
+  ]);
+
+  assert.equal(parsed.model, 'openai/gpt-5.4-nano');
+  assert.equal(parsed.prUrl, 'https://github.com/BatAndDuck/bateye/pull/20');
+  assert.equal(parsed.diagnostics, true);
 });

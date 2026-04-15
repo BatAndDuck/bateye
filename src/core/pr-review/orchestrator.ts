@@ -1,10 +1,14 @@
 import { Reviewer, OrchestratorResult, ReviewIssue, TokenUsageSummary } from '../../types/index';
-import { getStructuredRuntime } from '../runtime/factory';
-import { orchestratorResultSchema } from '../validation/schemas';
-import { buildOrchestratorSystemPrompt, buildOrchestratorUserMessage } from '../prompts/pr-review';
+import { getPRReviewRuntime } from '../runtime/factory';
+import { PRReviewPlannerAnalysis, prReviewPlannerResultSchema } from '../validation/schemas';
+import { buildPRPlannerSystemPrompt, buildPRPlannerUserMessage } from '../prompts/pr-review';
 import { CommitSummary } from '../git/index';
 import { formatErrorWithCauses } from '../runtime/error-format';
 import { logPrompt } from '../output/prompt-logger';
+import {
+  MAX_PR_PLANNER_TIMEOUT_MS,
+  PR_PLANNER_MAX_STEPS,
+} from '../config/defaults';
 
 /** Absolute hard cap on built-in reviewer count - prevents runaway costs if orchestrator over-selects */
 const ABSOLUTE_MAX_PR_REVIEWERS = 20;
@@ -23,14 +27,20 @@ function trimByConfidence(
 ): OrchestratorResult['selectedReviewers'] {
   const isBuiltInMap = new Map(availableReviewers.map(r => [r.id, r.isBuiltIn]));
 
-  const custom = selection.filter(s => isBuiltInMap.get(s.reviewerId) === false);
   const builtIn = selection.filter(s => isBuiltInMap.get(s.reviewerId) === true);
 
-  const cappedBuiltIn = builtIn.length <= limit
-    ? builtIn
-    : [...builtIn].sort((a, b) => b.confidence - a.confidence).slice(0, limit);
+  if (builtIn.length <= limit) {
+    return selection;
+  }
 
-  return [...custom, ...cappedBuiltIn];
+  const allowedBuiltInIds = new Set(
+    [...builtIn]
+      .sort((a, b) => b.confidence - a.confidence)
+      .slice(0, limit)
+      .map(item => item.reviewerId),
+  );
+
+  return selection.filter(item => isBuiltInMap.get(item.reviewerId) === false || allowedBuiltInIds.has(item.reviewerId));
 }
 
 export interface ReviewerSelectionResult extends OrchestratorResult {
@@ -39,6 +49,7 @@ export interface ReviewerSelectionResult extends OrchestratorResult {
 }
 
 export async function selectReviewers(
+  repoPath: string,
   changedFiles: string[],
   diff: string,
   commits: CommitSummary[],
@@ -53,7 +64,7 @@ export async function selectReviewers(
   reasoningEffort?: string,
   reasoningOverrides?: Array<{ model: string; reasoningEffort: string }>,
 ): Promise<ReviewerSelectionResult> {
-  const runtime = await getStructuredRuntime();
+  const runtime = await getPRReviewRuntime();
 
   const reviewerDescriptions = availableReviewers.map(r => ({
     id: r.id,
@@ -62,40 +73,46 @@ export async function selectReviewers(
     selectWhen: r.selectWhen,
   }));
 
-  const systemPrompt = buildOrchestratorSystemPrompt(reviewerDescriptions);
-  const userMessage = buildOrchestratorUserMessage(changedFiles, diff, commits);
+  const systemPrompt = buildPRPlannerSystemPrompt(reviewerDescriptions);
+  const userMessage = buildPRPlannerUserMessage(changedFiles, diff, commits);
 
   const effectiveLimit = maxReviewers ?? ABSOLUTE_MAX_PR_REVIEWERS;
   const availableIds = new Set(availableReviewers.map(r => r.id));
 
   if (promptLogDir) {
-    logPrompt(promptLogDir, 'orchestrator', systemPrompt, userMessage);
+    logPrompt(promptLogDir, 'pr-planner', systemPrompt, userMessage);
   }
 
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= MAX_ORCHESTRATOR_ATTEMPTS; attempt++) {
     if (attempt > 1) {
-      onLog?.(`  - Orchestrator attempt ${attempt}/${MAX_ORCHESTRATOR_ATTEMPTS} (retrying after error)...`);
+      onLog?.(`  - Planner attempt ${attempt}/${MAX_ORCHESTRATOR_ATTEMPTS} (retrying after error)...`);
     } else {
-      onLog?.(`  - Sending orchestrator request to model...`);
+      onLog?.('  - Sending deep planner request to Codebite...');
     }
     try {
-      const result = await runtime.run<OrchestratorResult>(
+      const result = await runtime.runAgenticReview<PRReviewPlannerAnalysis>(
         {
           systemPrompt,
           userMessage,
           model,
           apiKey,
+          repoPath,
+          initialFiles: changedFiles,
           transport,
           apiBaseUrl,
-          maxTokens: 4096,
+          maxTokens: 8192,
           temperature: 0,
-          callLabel: 'orchestrator',
+          timeoutMs: MAX_PR_PLANNER_TIMEOUT_MS,
+          maxSteps: PR_PLANNER_MAX_STEPS,
+          deepMode: true,
+          disableSubagents: false,
+          callLabel: 'pr-planner',
           reasoningEffort,
           reasoningOverrides,
         },
-        orchestratorResultSchema,
+        prReviewPlannerResultSchema,
       );
 
       // Filter to reviewers that actually exist in the available set
@@ -112,7 +129,7 @@ export async function selectReviewers(
       };
     } catch (err) {
       lastError = err;
-      onLog?.(`  - Orchestrator attempt ${attempt}/${MAX_ORCHESTRATOR_ATTEMPTS} failed: ${(err as Error).message?.slice(0, 120)}`);
+      onLog?.(`  - Planner attempt ${attempt}/${MAX_ORCHESTRATOR_ATTEMPTS} failed: ${(err as Error).message?.slice(0, 120)}`);
       if (attempt < MAX_ORCHESTRATOR_ATTEMPTS) {
         await new Promise(resolve => setTimeout(resolve, 500 * attempt));
       }
@@ -124,6 +141,6 @@ export async function selectReviewers(
   // incomplete coverage without surfacing the underlying problem to the user.
   // Callers should let this propagate so CI pipelines catch the failure visibly.
   throw new Error(
-    `PR reviewer orchestrator failed after ${MAX_ORCHESTRATOR_ATTEMPTS} attempts: ${formatErrorWithCauses(lastError)}`,
+    `PR review planner failed after ${MAX_ORCHESTRATOR_ATTEMPTS} attempts: ${formatErrorWithCauses(lastError)}`,
   );
 }

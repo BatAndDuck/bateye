@@ -25,14 +25,25 @@ import {
   resolveGitHubToken,
 } from '../src/features/config/application/config-service';
 
-// ---------------------------------------------------------------------------
-// Arg parsing
-// ---------------------------------------------------------------------------
+function hasFlag(flag: string, args: string[] = process.argv.slice(2)): boolean {
+  return args.includes(flag);
+}
 
-function getArg(flag: string): string | undefined {
-  const args = process.argv.slice(2);
-  const idx = args.indexOf(flag);
-  return idx !== -1 ? args[idx + 1] : undefined;
+export function parseBenchmarkCliArgs(args: string[] = process.argv.slice(2)): {
+  model?: string;
+  prUrl?: string;
+  diagnostics: boolean;
+} {
+  const readArg = (flag: string) => {
+    const idx = args.indexOf(flag);
+    return idx !== -1 ? args[idx + 1] : undefined;
+  };
+
+  return {
+    model: readArg('--model'),
+    prUrl: readArg('--pr'),
+    diagnostics: hasFlag('--diagnostics', args),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -205,13 +216,34 @@ function formatMarkdown(result: PRReviewResult, mdModel: string, mdPrUrl: string
   if (result.selectedReviewers && result.selectedReviewers.length > 0) {
     lines.push('## Selected Reviewers');
     lines.push('');
-    lines.push('| Reviewer | Confidence | Reason |');
-    lines.push('|----------|------------|--------|');
     for (const r of result.selectedReviewers) {
-      const reason = (r.reason ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
-      lines.push(`| ${r.reviewerId} | ${(r.confidence * 100).toFixed(0)}% | ${reason} |`);
+      lines.push(`### ${r.reviewerId}`);
+      lines.push('');
+      lines.push(`- Confidence: ${(r.confidence * 100).toFixed(0)}%`);
+      lines.push(`- Reason: ${r.reason || '_none_'}`);
+      if (r.briefing) {
+        lines.push(`- Planner briefing: ${r.briefing.replace(/\n/g, ' ')}`);
+      }
+      if (r.contextPaths?.length) {
+        lines.push(`- Focused paths: ${r.contextPaths.join(', ')}`);
+      }
+      if (r.verticalFlows?.length) {
+        lines.push(`- Referenced flows: ${r.verticalFlows.join(' | ')}`);
+      }
+      if (r.testLocations?.length) {
+        lines.push(`- Referenced tests: ${r.testLocations.join(', ')}`);
+      }
+      if (r.issueHints?.length) {
+        lines.push(`- Planner issue hints: ${r.issueHints.join(' | ')}`);
+      }
+      if (r.businessContext?.length) {
+        lines.push(`- Business context: ${r.businessContext.join(' | ')}`);
+      }
+      if (r.consistencyReferences?.length) {
+        lines.push(`- Consistency references: ${r.consistencyReferences.join(', ')}`);
+      }
+      lines.push('');
     }
-    lines.push('');
   }
 
   // Verification stats
@@ -259,17 +291,18 @@ function formatMarkdown(result: PRReviewResult, mdModel: string, mdPrUrl: string
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  const model = getArg('--model');
-  const prUrl = getArg('--pr');
+  const { model, prUrl, diagnostics } = parseBenchmarkCliArgs();
 
   if (!model || !prUrl) {
-    throw new Error('Usage: npx ts-node scripts/benchmark.ts --model <model> --pr <pr-url>');
+    throw new Error('Usage: npx ts-node scripts/benchmark.ts --model <model> --pr <pr-url> [--diagnostics]');
   }
 
   const repoPath = process.cwd();
   const ghToken = resolveBenchmarkGitHubToken(repoPath);
   const llmApiKey = resolveBenchmarkLlmApiKey(repoPath, model);
   const { owner, repo, prNumber } = parsePrUrl(prUrl);
+  const sanitized = sanitizeModel(model);
+  const date = new Date().toISOString().split('T')[0];
 
   console.log(`\nBenchmark: ${model}`);
   console.log(`PR: ${prUrl}\n`);
@@ -280,6 +313,18 @@ async function main(): Promise<void> {
 
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'codeowl-benchmark-'));
   console.log(`  Temp dir: ${tmpDir}`);
+
+  const benchmarkDir = path.join(process.cwd(), '.bateye', 'benchmark');
+  await fs.mkdir(benchmarkDir, { recursive: true });
+  const diagnosticsDir = diagnostics
+    ? path.join(benchmarkDir, 'diagnostics', `${sanitized}_${date}_${Date.now()}`)
+    : undefined;
+  if (diagnosticsDir) {
+    await fs.mkdir(diagnosticsDir, { recursive: true });
+  }
+
+  const previousDiagnosticFlag = process.env.BATEYE_DIAGNOSTIC;
+  const previousDiagnosticDir = process.env.BATEYE_DIAGNOSTIC_DIR;
 
   try {
     // Clone and checkout PR branch — token passed via GIT_CONFIG env vars, never in the URL or args
@@ -299,6 +344,10 @@ async function main(): Promise<void> {
 
     // Ensure API key is set in the process environment
     process.env.BATEYE_LLM_MODEL_API_KEY = llmApiKey;
+    if (diagnosticsDir) {
+      process.env.BATEYE_DIAGNOSTIC = '1';
+      process.env.BATEYE_DIAGNOSTIC_DIR = diagnosticsDir;
+    }
 
     // Run PR review
     console.log('\nRunning PR review…');
@@ -311,10 +360,6 @@ async function main(): Promise<void> {
     });
 
     // Format and save output
-    const sanitized = sanitizeModel(model);
-    const date = new Date().toISOString().split('T')[0];
-    const benchmarkDir = path.join(process.cwd(), '.bateye', 'benchmark');
-    await fs.mkdir(benchmarkDir, { recursive: true });
     const outputFile = path.join(benchmarkDir, `${sanitized}_${date}_benchmark.md`);
 
     const markdown = formatMarkdown(result, model, prUrl);
@@ -324,7 +369,16 @@ async function main(): Promise<void> {
     console.log(`  Findings: ${result.findings?.length ?? 0}`);
     console.log(`  Status: ${result.status}`);
     console.log(`  Output: ${outputFile}\n`);
+    if (diagnosticsDir) {
+      console.log(`  Diagnostics: ${diagnosticsDir}`);
+    }
   } finally {
+    if (previousDiagnosticFlag === undefined) delete process.env.BATEYE_DIAGNOSTIC;
+    else process.env.BATEYE_DIAGNOSTIC = previousDiagnosticFlag;
+
+    if (previousDiagnosticDir === undefined) delete process.env.BATEYE_DIAGNOSTIC_DIR;
+    else process.env.BATEYE_DIAGNOSTIC_DIR = previousDiagnosticDir;
+
     // Swallow cleanup errors — Windows may hold file locks briefly after git operations
     await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {
       console.warn(`  Warning: could not fully clean up temp dir: ${tmpDir}`);

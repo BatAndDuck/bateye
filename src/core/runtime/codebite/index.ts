@@ -32,6 +32,7 @@ import {
 
 const DEFAULT_CODEBITE_MAX_STEPS = 30;
 const DEFAULT_AGENTIC_TIMEOUT_MS = 1_200_000;
+const MAX_CODEBITE_STRUCTURED_OUTPUT_ATTEMPTS = 2;
 const zodToJsonSchemaUntyped = zodToJsonSchema as unknown as (
   schema: z.ZodTypeAny,
   name: string,
@@ -44,6 +45,7 @@ export type CodebiteRuntimeConfig = {
   baseURL?: string;
   maxSteps: number;
   deepMode: boolean;
+  disableSubagents: boolean;
   tools: {
     tavilyApiKey?: string;
     context7ApiKey?: string;
@@ -63,15 +65,30 @@ type CodebiteWorkerOutput = {
   };
 };
 
+type CodebiteWorkerRunResult = {
+  workerOutput: CodebiteWorkerOutput;
+  rawText: string;
+  stdout: string;
+  stderr: string;
+};
+
 type CodebiteDiagnosisRecord = {
   type?: string;
   timestamp?: string;
   stepNumber?: number;
+  durationMs?: number;
   finishReason?: string;
   question?: string;
   executionPrompt?: string;
   systemPrompt?: string;
   repositoryStructure?: string;
+  config?: {
+    provider?: string;
+    model?: string;
+    maxSteps?: number;
+    deepMode?: boolean;
+    disableSubagents?: boolean;
+  };
   initialMessages?: Array<{ role?: string; content?: unknown }>;
   inputContext?: {
     startedAt?: string;
@@ -80,6 +97,9 @@ type CodebiteDiagnosisRecord = {
     activeTools?: string[];
     toolChoice?: unknown;
   };
+  text?: string;
+  toolCalls?: Array<{ toolName?: string; input?: unknown; args?: unknown }>;
+  toolResults?: Array<{ toolCallId?: string; output?: unknown; error?: unknown }>;
   output?: {
     text?: string;
     toolCalls?: Array<{ toolName?: string; input?: unknown }>;
@@ -99,6 +119,33 @@ type CodebiteDiagnosisRecord = {
   stepCount?: number;
   finalText?: string;
 };
+
+class CodebiteStructuredOutputError extends Error {
+  rawResponse: string;
+  extractedJson: string;
+  initialError: Error;
+  finalError: Error;
+  repairResponse?: string;
+  repairTokensUsed?: TokenUsage;
+
+  constructor(args: {
+    rawResponse: string;
+    extractedJson: string;
+    initialError: Error;
+    finalError: Error;
+    repairResponse?: string;
+    repairTokensUsed?: TokenUsage;
+  }) {
+    super(formatErrorWithCauses(args.finalError));
+    this.name = 'CodebiteStructuredOutputError';
+    this.rawResponse = args.rawResponse;
+    this.extractedJson = args.extractedJson;
+    this.initialError = args.initialError;
+    this.finalError = args.finalError;
+    this.repairResponse = args.repairResponse;
+    this.repairTokensUsed = args.repairTokensUsed;
+  }
+}
 
 function resolvePackageModuleUrl(packageName: string): string {
   const packageJsonPath = require.resolve(`${packageName}/package.json`);
@@ -120,10 +167,13 @@ export function buildCodebiteWorkerScript(packageJsonPath: string): string {
   const togetheraiModuleUrl = resolvePackageModuleUrl('@ai-sdk/togetherai');
   const xaiModuleUrl = resolvePackageModuleUrl('@ai-sdk/xai');
   const bedrockModuleUrl = resolvePackageModuleUrl('@ai-sdk/amazon-bedrock');
+  const aiModuleUrl = pathToFileURL(require.resolve('ai')).href;
+  const undiciModuleUrl = pathToFileURL(require.resolve('undici')).href;
 
   return String.raw`
 import { readFile, writeFile } from 'node:fs/promises';
 import { runAgent } from ${JSON.stringify(agentModuleUrl)};
+import { createGateway } from ${JSON.stringify(aiModuleUrl)};
 import { createOpenAI } from ${JSON.stringify(openaiModuleUrl)};
 import { createAnthropic } from ${JSON.stringify(anthropicModuleUrl)};
 import { createGoogleGenerativeAI } from ${JSON.stringify(googleModuleUrl)};
@@ -136,6 +186,7 @@ import { createGroq } from ${JSON.stringify(groqModuleUrl)};
 import { createTogetherAI } from ${JSON.stringify(togetheraiModuleUrl)};
 import { createXai } from ${JSON.stringify(xaiModuleUrl)};
 import { createAmazonBedrock } from ${JSON.stringify(bedrockModuleUrl)};
+import { Agent } from ${JSON.stringify(undiciModuleUrl)};
 
 const inputPath = process.env.BATEYE_CODEBITE_INPUT;
 const outputPath = process.env.BATEYE_CODEBITE_OUTPUT;
@@ -147,12 +198,34 @@ if (!inputPath || !outputPath) {
 const payload = JSON.parse(await readFile(inputPath, 'utf8'));
 const model = resolveModel(payload.config);
 const usage = { inputTokens: 0, outputTokens: 0 };
+const gatewayRequestTimeoutMs = resolveGatewayRequestTimeoutMs(payload.timeoutMs);
+const gatewayDispatcher = new Agent({
+  headersTimeout: gatewayRequestTimeoutMs,
+  bodyTimeout: gatewayRequestTimeoutMs,
+});
+
+function resolveGatewayRequestTimeoutMs(timeoutMs) {
+  const minimumMs = 15 * 60 * 1000;
+  const bufferMs = 30_000;
+  const requestedMs =
+    typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? timeoutMs + bufferMs
+      : 0;
+
+  return Math.max(minimumMs, requestedMs);
+}
 
 function resolveModel(config) {
   switch (config.provider) {
     case 'vercel':
-      process.env.AI_GATEWAY_API_KEY = config.apiKey;
-      return config.model;
+      return createGateway({
+        apiKey: config.apiKey,
+        ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+        fetch: (url, init) => fetch(url, {
+          ...init,
+          dispatcher: gatewayDispatcher,
+        }),
+      })(config.model);
     case 'openai':
       return createOpenAI({
         apiKey: config.apiKey,
@@ -230,7 +303,7 @@ const text = await runAgent({
   model,
   question: payload.question,
   config: payload.config,
-  ...(payload.contextDiagnosisPath ? { contextDiagnosisPath: payload.contextDiagnosisPath } : {}),
+  ...(payload.diagnosticsPath ? { diagnosticsPath: payload.diagnosticsPath } : {}),
   onStep: (step) => {
     usage.inputTokens += Number(step.usage?.inputTokens ?? 0);
     usage.outputTokens += Number(step.usage?.outputTokens ?? 0);
@@ -288,6 +361,7 @@ export function assertCodebiteAgenticSupport(
     ...(baseURL ? { baseURL } : {}),
     maxSteps: DEFAULT_CODEBITE_MAX_STEPS,
     deepMode: false,
+    disableSubagents: false,
     tools: {},
   };
 }
@@ -318,54 +392,117 @@ export class CodebiteAgentRuntime implements IRuntime {
     const runtimeConfig = buildCodebiteRuntimeConfig(options);
     const workerScript = buildCodebiteWorkerScript(runtimeInfo.packageJsonPath);
     const schemaJson = zodToJsonSchemaUntyped(schema as z.ZodTypeAny, 'BatEyeResponse');
-    const question = buildCodebiteQuestion(options, schemaJson);
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-codebite-'));
     const inputPath = path.join(tempDir, 'request.json');
     const outputPath = path.join(tempDir, 'response.json');
     const labelTag = options.callLabel ? ` [${options.callLabel}]` : '';
     const timeoutMs = options.timeoutMs ?? DEFAULT_AGENTIC_TIMEOUT_MS;
 
-  const payload = {
-      config: runtimeConfig,
-      question,
-      contextDiagnosisPath: resolveCodebiteContextDiagnosisPath(options),
-    };
-    const contextDiagnosisPath = payload.contextDiagnosisPath;
-    const tracePath = resolveCodebiteTracePath(contextDiagnosisPath);
-
-    fs.writeFileSync(inputPath, JSON.stringify(payload, null, 2), 'utf-8');
-
     logRuntimeDebug(
       `[codebite]${labelTag} Starting review: provider=${runtimeConfig.provider}, model=${runtimeConfig.model}, `
-      + `questionChars=${question.length}, maxSteps=${runtimeConfig.maxSteps}, timeout=${Math.round(timeoutMs / 1000)}s`,
+      + `maxSteps=${runtimeConfig.maxSteps}, deepMode=${runtimeConfig.deepMode}, `
+      + `disableSubagents=${runtimeConfig.disableSubagents}, timeout=${Math.round(timeoutMs / 1000)}s`,
     );
 
     try {
-      const workerRun = await execa(process.execPath, ['--input-type=module', '--eval', workerScript], {
-        cwd: options.repoPath,
-        timeout: timeoutMs,
-        reject: true,
-        env: {
-          ...process.env,
-          BATEYE_CODEBITE_INPUT: inputPath,
-          BATEYE_CODEBITE_OUTPUT: outputPath,
-        },
-      });
+      let aggregatedTokensUsed: TokenUsage | undefined;
+      let parsedResult:
+        | { data: T; rawResponse: string; repairTokensUsed?: TokenUsage }
+        | undefined;
+      let successfulAttempt:
+        | { workerRun: CodebiteWorkerRunResult; question: string; diagnosticsPath?: string; tracePath?: string }
+        | undefined;
+      let lastStructuredOutputError: unknown;
 
-      const workerOutput = JSON.parse(fs.readFileSync(outputPath, 'utf-8')) as CodebiteWorkerOutput;
-      const rawText = typeof workerOutput.text === 'string' ? workerOutput.text.trim() : '';
-      if (!rawText) {
-        throw new Error('Codebite returned an empty response.');
+      for (let attempt = 1; attempt <= MAX_CODEBITE_STRUCTURED_OUTPUT_ATTEMPTS; attempt++) {
+        const question = buildCodebiteQuestion(
+          options,
+          schemaJson,
+          attempt > 1
+            ? buildCodebiteRetryNotice(lastStructuredOutputError)
+            : undefined,
+        );
+        const diagnosticsPath = resolveCodebiteDiagnosticsPath(options, attempt);
+        const tracePath = resolveCodebiteTracePath(diagnosticsPath);
+        const workerRun = await runCodebiteWorker({
+          workerScript,
+          repoPath: options.repoPath,
+          inputPath,
+          outputPath,
+          payload: {
+            config: runtimeConfig,
+            question,
+            timeoutMs,
+            diagnosticsPath,
+          },
+          timeoutMs,
+        });
+
+        try {
+          const parsed = await parseAndRepairCodebiteOutput(workerRun.rawText, options, schema, labelTag);
+          aggregatedTokensUsed = addCodebiteTokens(
+            aggregatedTokensUsed,
+            mergeCodebiteTokens(
+              workerRun.workerOutput.usage,
+              question,
+              parsed.rawResponse,
+              parsed.repairTokensUsed,
+            ),
+          );
+          parsedResult = parsed;
+          successfulAttempt = {
+            workerRun,
+            question,
+            diagnosticsPath,
+            tracePath,
+          };
+          break;
+        } catch (err) {
+          aggregatedTokensUsed = addCodebiteTokens(
+            aggregatedTokensUsed,
+            mergeCodebiteTokens(
+              workerRun.workerOutput.usage,
+              question,
+              workerRun.rawText,
+              err instanceof CodebiteStructuredOutputError ? err.repairTokensUsed : undefined,
+            ),
+          );
+
+          if (err instanceof CodebiteStructuredOutputError) {
+            writeCodebiteParseFailureArtifacts({
+              options,
+              attempt,
+              provider: runtimeConfig.provider,
+              model: runtimeConfig.model,
+              question,
+              workerStdout: workerRun.stdout,
+              workerStderr: workerRun.stderr,
+              rawResponse: workerRun.rawText,
+              extractedJson: err.extractedJson,
+              repairResponse: err.repairResponse,
+              initialError: err.initialError,
+              finalError: err.finalError,
+            });
+          }
+
+          if (attempt < MAX_CODEBITE_STRUCTURED_OUTPUT_ATTEMPTS && shouldRetryStructuredOutputAttempt(err)) {
+            lastStructuredOutputError = err;
+            logRuntimeDebug(
+              `[codebite]${labelTag} First structured output pass was not parseable, retrying Codebite once before surfacing a reviewer failure: ${formatErrorWithCauses(err)}`,
+            );
+            continue;
+          }
+
+          throw err;
+        }
       }
 
-      const parsed = await parseAndRepairCodebiteOutput(rawText, options, schema, labelTag);
+      if (!parsedResult || !successfulAttempt) {
+        throw new Error('Codebite did not produce a successful structured result.');
+      }
+
       const durationMs = Date.now() - start;
-      const tokensUsed = mergeCodebiteTokens(
-        workerOutput.usage,
-        question,
-        parsed.rawResponse,
-        parsed.repairTokensUsed,
-      );
+      const tokensUsed = aggregatedTokensUsed;
 
       if (tokensUsed) {
         const tokenSummary = tokensUsed.estimated
@@ -377,34 +514,36 @@ export class CodebiteAgentRuntime implements IRuntime {
       }
 
       writeCodebiteDiagnosticTrace({
-        contextDiagnosisPath,
-        tracePath,
+        diagnosticsPath: successfulAttempt.diagnosticsPath,
+        tracePath: successfulAttempt.tracePath,
         provider: runtimeConfig.provider,
         model: runtimeConfig.model,
         labelTag,
-        question,
-        workerStdout: workerRun.stdout,
-        workerStderr: workerRun.stderr,
-        responseText: workerOutput.text,
-        finalRawResponse: parsed.rawResponse,
+        question: successfulAttempt.question,
+        workerStdout: successfulAttempt.workerRun.stdout,
+        workerStderr: successfulAttempt.workerRun.stderr,
+        responseText: successfulAttempt.workerRun.workerOutput.text,
+        finalRawResponse: parsedResult.rawResponse,
       });
 
       return {
-        data: parsed.data,
+        data: parsedResult.data,
         model: options.model,
         runtime: 'cli',
         durationMs,
-        rawResponse: parsed.rawResponse,
+        rawResponse: parsedResult.rawResponse,
         tokensUsed,
       };
     } catch (err) {
+      const diagnosticsPath = resolveCodebiteDiagnosticsPath(options, 1);
+      const tracePath = resolveCodebiteTracePath(diagnosticsPath);
       writeCodebiteDiagnosticTrace({
-        contextDiagnosisPath,
+        diagnosticsPath,
         tracePath,
         provider: runtimeConfig.provider,
         model: runtimeConfig.model,
         labelTag,
-        question,
+        question: buildCodebiteQuestion(options, schemaJson),
         error: formatErrorWithCauses(err),
       });
       const message =
@@ -434,6 +573,9 @@ function buildCodebiteRuntimeConfig(options: AgenticRepositoryReviewOptions): Co
   return {
     ...supported,
     apiKey: options.apiKey,
+    maxSteps: options.maxSteps ?? supported.maxSteps,
+    deepMode: options.deepMode ?? supported.deepMode,
+    disableSubagents: options.disableSubagents ?? supported.disableSubagents,
     tools: buildCodebiteToolConfig(),
   };
 }
@@ -455,6 +597,7 @@ function buildCodebiteToolConfig(): CodebiteRuntimeConfig['tools'] {
 function buildCodebiteQuestion(
   options: AgenticRepositoryReviewOptions,
   schemaJson: Record<string, unknown>,
+  retryNotice?: string,
 ): string {
   const seedFiles = options.initialFiles?.length
     ? options.initialFiles.map(file => `- ${file}`).join('\n')
@@ -462,9 +605,9 @@ function buildCodebiteQuestion(
 
   return [
     'You are running inside BatEye as an autonomous repository reviewer.',
-    'Investigate the current repository state using the available tools before reporting any finding.',
-    'Report only concrete, current issues that still exist in the checked-out repository.',
-    'If a suspected issue is unsupported, uncertain, or only present in removed code, omit it.',
+    'Investigate the current repository state using the available tools before finalizing your response.',
+    'Ground your response in the checked-out repository state rather than assumptions.',
+    'If a suspected claim is unsupported, uncertain, or only present in removed code, omit it.',
     '',
     '## BatEye System Instructions',
     options.systemPrompt,
@@ -472,6 +615,13 @@ function buildCodebiteQuestion(
     '## BatEye Review Task',
     options.userMessage,
     '',
+    ...(retryNotice
+      ? [
+          '## Retry Notice',
+          retryNotice,
+          '',
+        ]
+      : []),
     '## Suggested Starting Files',
     seedFiles,
     '',
@@ -481,19 +631,61 @@ function buildCodebiteQuestion(
   ].join('\n');
 }
 
-function resolveCodebiteContextDiagnosisPath(options: AgenticRepositoryReviewOptions): string | undefined {
-  if (process.env.BATEYE_DIAGNOSTIC !== '1') {
-    return undefined;
-  }
+function buildCodebiteRetryNotice(lastError: unknown): string {
+  const errorSummary = formatErrorWithCauses(lastError);
+  return [
+    'Your previous response could not be parsed as valid JSON.',
+    `Previous parse failure: ${errorSummary}`,
+    'Retry now and return ONLY strict JSON that matches the schema.',
+    'Double-escape literal backslashes inside JSON strings.',
+    'Do not include markdown fences, prose, or commentary.',
+  ].join(' ');
+}
 
-  const diagnosticDir = process.env.BATEYE_DIAGNOSTIC_DIR?.trim()
-    ? process.env.BATEYE_DIAGNOSTIC_DIR.trim()
-    : path.join(options.repoPath, '.bateye', 'out', 'diagnostics');
-  const safeLabel = (options.callLabel || 'agentic-review')
+function resolveCodebiteSafeLabel(options: Pick<AgenticRepositoryReviewOptions, 'callLabel'>): string {
+  return (options.callLabel || 'agentic-review')
     .replace(/[^a-z0-9._-]+/gi, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 80) || 'agentic-review';
-  return path.join(diagnosticDir, `${safeLabel}.codebite.jsonl`);
+}
+
+function resolveCodebiteDiagnosticsDir(options: Pick<AgenticRepositoryReviewOptions, 'repoPath'>, force: boolean = false): string | undefined {
+  if (!force && process.env.BATEYE_DIAGNOSTIC !== '1') {
+    return undefined;
+  }
+
+  return process.env.BATEYE_DIAGNOSTIC_DIR?.trim()
+    ? process.env.BATEYE_DIAGNOSTIC_DIR.trim()
+    : path.join(options.repoPath, '.bateye', 'out', 'diagnostics');
+}
+
+function resolveCodebiteDiagnosticsPath(
+  options: AgenticRepositoryReviewOptions,
+  attempt: number = 1,
+): string | undefined {
+  const diagnosticDir = resolveCodebiteDiagnosticsDir(options);
+  if (!diagnosticDir) {
+    return undefined;
+  }
+
+  const safeLabel = resolveCodebiteSafeLabel(options);
+  const fileName = attempt > 1
+    ? `${safeLabel}.attempt-${attempt}.codebite.jsonl`
+    : `${safeLabel}.codebite.jsonl`;
+  return path.join(diagnosticDir, fileName);
+}
+
+function resolveCodebiteParseFailureArtifactPaths(
+  options: AgenticRepositoryReviewOptions,
+  attempt: number,
+): { rawPath: string; tracePath: string } {
+  const diagnosticDir = resolveCodebiteDiagnosticsDir(options, true) as string;
+  const safeLabel = resolveCodebiteSafeLabel(options);
+  const suffix = attempt > 1 ? `.attempt-${attempt}` : '';
+  return {
+    rawPath: path.join(diagnosticDir, `${safeLabel}${suffix}.codebite.parse-failure.raw.txt`),
+    tracePath: path.join(diagnosticDir, `${safeLabel}${suffix}.codebite.parse-failure.trace.md`),
+  };
 }
 
 function resolveCodebiteTracePath(contextDiagnosisPath: string | undefined): string | undefined {
@@ -504,8 +696,158 @@ function resolveCodebiteTracePath(contextDiagnosisPath: string | undefined): str
   return contextDiagnosisPath.replace(/\.jsonl$/i, '.trace.md');
 }
 
+async function runCodebiteWorker(args: {
+  workerScript: string;
+  repoPath: string;
+  inputPath: string;
+  outputPath: string;
+  payload: {
+    config: CodebiteRuntimeConfig;
+    question: string;
+    timeoutMs: number;
+    diagnosticsPath?: string;
+  };
+  timeoutMs: number;
+}): Promise<CodebiteWorkerRunResult> {
+  fs.writeFileSync(args.inputPath, JSON.stringify(args.payload, null, 2), 'utf-8');
+
+  const workerRun = await execa(process.execPath, ['--input-type=module', '--eval', args.workerScript], {
+    cwd: args.repoPath,
+    timeout: args.timeoutMs,
+    reject: true,
+    env: {
+      ...process.env,
+      BATEYE_CODEBITE_INPUT: args.inputPath,
+      BATEYE_CODEBITE_OUTPUT: args.outputPath,
+    },
+  });
+
+  const workerOutput = JSON.parse(fs.readFileSync(args.outputPath, 'utf-8')) as CodebiteWorkerOutput;
+  const rawText = typeof workerOutput.text === 'string' ? workerOutput.text.trim() : '';
+  if (!rawText) {
+    throw new Error('Codebite returned an empty response.');
+  }
+
+  return {
+    workerOutput,
+    rawText,
+    stdout: workerRun.stdout,
+    stderr: workerRun.stderr,
+  };
+}
+
+function shouldRetryStructuredOutputAttempt(error: unknown): boolean {
+  if (!(error instanceof CodebiteStructuredOutputError)) {
+    return false;
+  }
+
+  return error.initialError instanceof SyntaxError || error.finalError instanceof SyntaxError;
+}
+
+function writeCodebiteParseFailureArtifacts(args: {
+  options: AgenticRepositoryReviewOptions;
+  attempt: number;
+  provider: string;
+  model: string;
+  question: string;
+  workerStdout?: string;
+  workerStderr?: string;
+  rawResponse: string;
+  extractedJson: string;
+  repairResponse?: string;
+  initialError: Error;
+  finalError: Error;
+}): void {
+  try {
+    const paths = resolveCodebiteParseFailureArtifactPaths(args.options, args.attempt);
+    fs.mkdirSync(path.dirname(paths.rawPath), { recursive: true });
+    fs.writeFileSync(paths.rawPath, args.rawResponse, 'utf-8');
+    fs.writeFileSync(paths.tracePath, renderCodebiteParseFailureTrace(args), 'utf-8');
+  } catch (err) {
+    const labelTag = args.options.callLabel ? ` [${args.options.callLabel}]` : '';
+    logRuntimeDebug(
+      `[codebite]${labelTag} Failed to write parse-failure artifacts: ${formatErrorWithCauses(err)}`,
+    );
+  }
+}
+
+function renderCodebiteParseFailureTrace(args: {
+  attempt: number;
+  provider: string;
+  model: string;
+  question: string;
+  workerStdout?: string;
+  workerStderr?: string;
+  rawResponse: string;
+  extractedJson: string;
+  repairResponse?: string;
+  initialError: Error;
+  finalError: Error;
+}): string {
+  const lines: string[] = [];
+
+  lines.push('# Codebite Parse Failure');
+  lines.push('');
+  lines.push(`- Attempt: ${args.attempt}`);
+  lines.push(`- Provider: ${args.provider}`);
+  lines.push(`- Model: ${args.model}`);
+  lines.push(`- Initial error: ${formatErrorWithCauses(args.initialError)}`);
+  lines.push(`- Final error: ${formatErrorWithCauses(args.finalError)}`);
+  lines.push('');
+
+  lines.push('## Question');
+  lines.push('');
+  lines.push('```text');
+  lines.push(args.question);
+  lines.push('```');
+  lines.push('');
+
+  lines.push('## Raw Codebite Response');
+  lines.push('');
+  lines.push('```text');
+  lines.push(args.rawResponse);
+  lines.push('```');
+  lines.push('');
+
+  lines.push('## Extracted JSON');
+  lines.push('');
+  lines.push('```text');
+  lines.push(args.extractedJson);
+  lines.push('```');
+  lines.push('');
+
+  if (args.repairResponse) {
+    lines.push('## Repair Response');
+    lines.push('');
+    lines.push('```text');
+    lines.push(args.repairResponse);
+    lines.push('```');
+    lines.push('');
+  }
+
+  if (args.workerStdout) {
+    lines.push('## Worker Stdout');
+    lines.push('');
+    lines.push('```text');
+    lines.push(args.workerStdout);
+    lines.push('```');
+    lines.push('');
+  }
+
+  if (args.workerStderr) {
+    lines.push('## Worker Stderr');
+    lines.push('');
+    lines.push('```text');
+    lines.push(args.workerStderr);
+    lines.push('```');
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
+
 function writeCodebiteDiagnosticTrace(args: {
-  contextDiagnosisPath?: string;
+  diagnosticsPath?: string;
   tracePath?: string;
   provider: string;
   model: string;
@@ -522,7 +864,7 @@ function writeCodebiteDiagnosticTrace(args: {
   }
 
   try {
-    const records = readCodebiteDiagnosisRecords(args.contextDiagnosisPath);
+    const records = readCodebiteDiagnosisRecords(args.diagnosticsPath);
     const trace = renderCodebiteDiagnosticTrace(records, args);
     fs.mkdirSync(path.dirname(args.tracePath), { recursive: true });
     fs.writeFileSync(args.tracePath, trace, 'utf-8');
@@ -534,17 +876,33 @@ function writeCodebiteDiagnosticTrace(args: {
   }
 }
 
-function readCodebiteDiagnosisRecords(contextDiagnosisPath: string | undefined): CodebiteDiagnosisRecord[] {
-  if (!contextDiagnosisPath || !fs.existsSync(contextDiagnosisPath)) {
+function readCodebiteDiagnosisRecords(diagnosticsPath: string | undefined): CodebiteDiagnosisRecord[] {
+  if (!diagnosticsPath || !fs.existsSync(diagnosticsPath)) {
     return [];
   }
 
   return fs
-    .readFileSync(contextDiagnosisPath, 'utf-8')
+    .readFileSync(diagnosticsPath, 'utf-8')
     .split(/\r?\n/)
     .map(line => line.trim())
     .filter(Boolean)
     .map(line => JSON.parse(line) as CodebiteDiagnosisRecord);
+}
+
+function getStepOutputText(record: CodebiteDiagnosisRecord | undefined): string | undefined {
+  return record?.output?.text ?? record?.text;
+}
+
+function getStepToolCalls(record: CodebiteDiagnosisRecord | undefined): Array<{ toolName?: string; input?: unknown; args?: unknown }> {
+  return record?.output?.toolCalls ?? record?.toolCalls ?? [];
+}
+
+function getStepToolResults(record: CodebiteDiagnosisRecord | undefined): Array<{ toolCallId?: string; output?: unknown; error?: unknown }> {
+  return record?.output?.toolResults ?? record?.toolResults ?? [];
+}
+
+function getStepInputContext(record: CodebiteDiagnosisRecord | undefined): CodebiteDiagnosisRecord['inputContext'] | undefined {
+  return record?.inputContext;
 }
 
 function renderCodebiteDiagnosticTrace(
@@ -563,7 +921,29 @@ function renderCodebiteDiagnosticTrace(
   const lines: string[] = [];
   const runStart = records.find(record => record.type === 'run-start');
   const runFinish = [...records].reverse().find(record => record.type === 'run-finish');
-  const steps = records.filter(record => record.type === 'step');
+  const legacySteps = records.filter(record => record.type === 'step');
+  const stepStarts = new Map<number, CodebiteDiagnosisRecord>();
+  const stepFinishes = new Map<number, CodebiteDiagnosisRecord>();
+
+  for (const record of records) {
+    if (typeof record.stepNumber !== 'number') {
+      continue;
+    }
+
+    if (record.type === 'step-start') {
+      stepStarts.set(record.stepNumber, record);
+    } else if (record.type === 'step-finish') {
+      stepFinishes.set(record.stepNumber, record);
+    }
+  }
+
+  const numberedSteps = Array.from(new Set([
+    ...stepStarts.keys(),
+    ...stepFinishes.keys(),
+    ...legacySteps
+      .map(record => record.stepNumber)
+      .filter((stepNumber): stepNumber is number => typeof stepNumber === 'number'),
+  ])).sort((a, b) => a - b);
 
   lines.push('# Codebite Diagnostic Trace');
   lines.push('');
@@ -582,6 +962,11 @@ function renderCodebiteDiagnosticTrace(
     lines.push(`- Status: failed`);
   } else {
     lines.push(`- Status: complete`);
+  }
+  if (runStart?.config) {
+    lines.push(`- Max steps: ${runStart.config.maxSteps ?? 'unknown'}`);
+    lines.push(`- Deep mode: ${runStart.config.deepMode ? 'true' : 'false'}`);
+    lines.push(`- Disable subagents: ${runStart.config.disableSubagents ? 'true' : 'false'}`);
   }
   lines.push('');
 
@@ -619,47 +1004,67 @@ function renderCodebiteDiagnosticTrace(
     lines.push('');
   }
 
-  if (steps.length > 0) {
+  if (numberedSteps.length > 0 || legacySteps.length > 0) {
     lines.push('## Observable Steps');
     lines.push('');
-    for (const step of steps) {
-      lines.push(`### Step ${step.stepNumber ?? '?'}`);
+    const renderedStepNumbers = numberedSteps.length > 0
+      ? numberedSteps
+      : legacySteps.map(step => step.stepNumber ?? -1);
+
+    for (const stepNumber of renderedStepNumbers) {
+      const legacyStep = legacySteps.find(step => (step.stepNumber ?? -1) === stepNumber);
+      const stepStart = stepStarts.get(stepNumber);
+      const stepFinish = stepFinishes.get(stepNumber);
+      const step = stepFinish ?? legacyStep ?? stepStart;
+
+      lines.push(`### Step ${step?.stepNumber ?? '?'}`);
       lines.push('');
-      const inputTokens = step.usage?.inputTokens ?? 0;
-      const outputTokens = step.usage?.outputTokens ?? 0;
-      const finishReason = step.finishReason ?? 'unknown';
+      const inputTokens = stepFinish?.usage?.inputTokens ?? step?.usage?.inputTokens ?? 0;
+      const outputTokens = stepFinish?.usage?.outputTokens ?? step?.usage?.outputTokens ?? 0;
+      const finishReason = stepFinish?.finishReason ?? step?.finishReason ?? 'unknown';
       lines.push(`- Finish reason: ${finishReason}`);
       lines.push(`- Tokens: ${inputTokens} in / ${outputTokens} out`);
-      if (step.inputContext?.activeTools?.length) {
-        lines.push(`- Active tools: ${step.inputContext.activeTools.join(', ')}`);
+      if (typeof stepFinish?.durationMs === 'number') {
+        lines.push(`- Duration: ${stepFinish.durationMs} ms`);
+      }
+      const activeTools = getStepInputContext(stepStart)?.activeTools ?? getStepInputContext(step)?.activeTools ?? [];
+      if (activeTools.length > 0) {
+        lines.push(`- Active tools: ${activeTools.join(', ')}`);
       }
       lines.push('');
 
-      if (step.output?.text) {
+      const assistantOutput = getStepOutputText(stepFinish) ?? getStepOutputText(step);
+      if (assistantOutput) {
         lines.push('#### Assistant Output');
         lines.push('');
         lines.push('```text');
-        lines.push(step.output.text);
+        lines.push(assistantOutput);
         lines.push('```');
         lines.push('');
       }
 
-      if (step.output?.toolCalls?.length) {
+      const toolCalls = getStepToolCalls(stepFinish).length > 0
+        ? getStepToolCalls(stepFinish)
+        : getStepToolCalls(step);
+      if (toolCalls.length > 0) {
         lines.push('#### Tool Calls');
         lines.push('');
-        for (const toolCall of step.output.toolCalls) {
+        for (const toolCall of toolCalls) {
           lines.push(`- ${toolCall.toolName || 'unknown-tool'}`);
           lines.push('```json');
-          lines.push(JSON.stringify(toolCall.input ?? {}, null, 2));
+          lines.push(JSON.stringify(toolCall.input ?? toolCall.args ?? {}, null, 2));
           lines.push('```');
         }
         lines.push('');
       }
 
-      if (step.output?.toolResults?.length) {
+      const toolResults = getStepToolResults(stepFinish).length > 0
+        ? getStepToolResults(stepFinish)
+        : getStepToolResults(step);
+      if (toolResults.length > 0) {
         lines.push('#### Tool Results');
         lines.push('');
-        for (const toolResult of step.output.toolResults) {
+        for (const toolResult of toolResults) {
           lines.push(`- ${toolResult.toolCallId || 'tool-result'}`);
           lines.push('```json');
           lines.push(JSON.stringify(toolResult.error ?? toolResult.output ?? null, null, 2));
@@ -769,14 +1174,32 @@ async function parseAndRepairCodebiteOutput<T>(
   const repairedJson = extractJsonFromText(repairResult.text ?? '');
   const repaired = tryParseAndValidate(repairedJson, schema);
   if ('data' in repaired) {
+    const repairTokensUsed = buildRepairTokens(
+      repairResult.usage,
+      repair.systemPrompt,
+      repair.userMessage,
+      repairResult.text ?? '',
+    );
     return {
       data: repaired.data,
       rawResponse: repairResult.text ?? rawText,
-      repairTokensUsed: buildRepairTokens(repairResult.usage, repair.systemPrompt, repair.userMessage, repairResult.text ?? ''),
+      repairTokensUsed,
     };
   }
 
-  throw repaired.error;
+  throw new CodebiteStructuredOutputError({
+    rawResponse: rawText,
+    extractedJson,
+    initialError: parsed.error,
+    finalError: repaired.error,
+    repairResponse: repairResult.text ?? '',
+    repairTokensUsed: buildRepairTokens(
+      repairResult.usage,
+      repair.systemPrompt,
+      repair.userMessage,
+      repairResult.text ?? '',
+    ),
+  });
 }
 
 function buildRepairTokens(
@@ -830,5 +1253,24 @@ function mergeCodebiteTokens(
     inputTokens: baseUsage.inputTokens + repairTokensUsed.inputTokens,
     outputTokens: baseUsage.outputTokens + repairTokensUsed.outputTokens,
     estimated: baseUsage.estimated || repairTokensUsed.estimated,
+  };
+}
+
+function addCodebiteTokens(
+  total: TokenUsage | undefined,
+  addition: TokenUsage | undefined,
+): TokenUsage | undefined {
+  if (!total) {
+    return addition;
+  }
+
+  if (!addition) {
+    return total;
+  }
+
+  return {
+    inputTokens: total.inputTokens + addition.inputTokens,
+    outputTokens: total.outputTokens + addition.outputTokens,
+    estimated: total.estimated || addition.estimated,
   };
 }

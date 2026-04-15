@@ -38,8 +38,22 @@ export const MAX_CONCURRENT_AUDIT_REVIEWERS = 10;
 export const MAX_AUDIT_REVIEWER_TOKENS = 8096;
 /** Maximum wall clock time for one agentic audit reviewer investigation (ms). */
 export const MAX_AUDIT_REVIEWER_TIMEOUT_MS = 1_200_000;
+/** Maximum wall clock time for the deep PR planner run (ms). */
+export const MAX_PR_PLANNER_TIMEOUT_MS = 1_800_000;
 /** Maximum wall clock time for one agentic PR reviewer investigation (ms). */
 export const MAX_PR_REVIEWER_TIMEOUT_MS = 1_200_000;
+/** Fixed Codebite budget for the deep PR planner stage. */
+export const PR_PLANNER_MAX_STEPS = 150;
+/** Fixed Codebite budget for each bounded PR reviewer stage. */
+export const PR_REVIEWER_MAX_STEPS = 20;
+/** Maximum candidate pairs sent to the structured PR dedup arbiter. */
+export const MAX_PR_DEDUP_CANDIDATE_PAIRS = 40;
+/** Maximum candidate pairs per structured PR dedup arbiter batch. */
+export const MAX_PR_DEDUP_BATCH_SIZE = 12;
+/** Maximum wall clock time for a single structured PR dedup arbiter call (ms). */
+export const MAX_PR_DEDUP_TIMEOUT_MS = 120_000;
+/** Maximum token budget for a single structured PR dedup arbiter response. */
+export const MAX_PR_DEDUP_TOKENS = 2048;
 /**
  * Maximum wall clock time for a single DirectAI orchestrator call (ms).
  * Slow gateway-routed models can take 8-10 min per response.
