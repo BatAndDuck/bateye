@@ -43,7 +43,7 @@ import { addTokens, formatTokenSummary } from '../runtime/token-utils';
 import { runReviewerTool } from '../tools/runner';
 import { formatToolContext } from '../tools/format';
 import { logPrompt } from '../output/prompt-logger';
-import { extractCodebiteArtifactPaths, validateCodebiteAgenticModels } from '../runtime/codebite/index';
+import { extractCodebiteArtifactPaths, extractCodebiteFailureDetail, validateCodebiteAgenticModels } from '../runtime/codebite/index';
 import { formatDedupArbiterError, runPRDedupArbiter } from './dedup-arbiter';
 
 export interface PRReviewPipelineOptions {
@@ -1021,6 +1021,10 @@ async function runPRReviewer(
     const msg = formatErrorWithCauses(err);
     const isTimeout = /timed out after/i.test(msg);
     log(`  ✗ ${reviewer.name} failed: ${msg}`);
+    const failureDetail = extractCodebiteFailureDetail(err);
+    if (failureDetail) {
+      log(`  - ${reviewer.name} failure detail: ${failureDetail}`);
+    }
     const artifactPaths = extractCodebiteArtifactPaths(err);
     if (artifactPaths.length > 0) {
       log(`  - ${reviewer.name} diagnostics: ${artifactPaths.join(', ')}`);

@@ -133,6 +133,21 @@ type CodebiteFailureArtifactPaths = {
   rawResponsePath?: string;
 };
 
+type CodebiteFailureSummary = {
+  label?: string;
+  provider?: string;
+  model?: string;
+  error?: {
+    message?: string;
+    stack?: string;
+  };
+  worker?: {
+    stdoutPreview?: string;
+    stderrPreview?: string;
+  };
+  artifactPaths?: CodebiteFailureArtifactPaths;
+};
+
 class CodebiteStructuredOutputError extends Error {
   rawResponse: string;
   extractedJson: string;
@@ -357,6 +372,28 @@ export function extractCodebiteArtifactPaths(error: unknown): string[] {
 
   visit(error);
   return paths;
+}
+
+export function extractCodebiteFailureDetail(error: unknown): string | undefined {
+  for (const artifactPath of extractCodebiteArtifactPaths(error)) {
+    if (!artifactPath.endsWith('.codebite.failure.summary.json')) {
+      continue;
+    }
+
+    try {
+      const summary = JSON.parse(fs.readFileSync(artifactPath, 'utf-8')) as CodebiteFailureSummary;
+      const detail = summary.worker?.stderrPreview?.trim()
+        || summary.worker?.stdoutPreview?.trim()
+        || summary.error?.message?.trim();
+      if (detail) {
+        return detail;
+      }
+    } catch {
+      // Best-effort only. Fall back to generic error formatting.
+    }
+  }
+
+  return undefined;
 }
 
 export function resolveCodebiteRuntimeInfo(): CodebiteRuntimeInfo | null {
@@ -957,6 +994,10 @@ function writeCodebiteFailureArtifacts(args: {
       error: {
         message: formatErrorWithCauses(args.error),
         stack: typeof candidate?.stack === 'string' ? candidate.stack : undefined,
+      },
+      worker: {
+        stdoutPreview: stdout ? summarizeCodebiteWorkerStream(stdout) : undefined,
+        stderrPreview: stderr ? summarizeCodebiteWorkerStream(stderr) : undefined,
       },
       artifactPaths: paths,
     };

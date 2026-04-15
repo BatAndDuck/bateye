@@ -1,5 +1,6 @@
 import { formatErrorWithCauses } from '../runtime/error-format';
 import { isRuntimeDebugEnabled } from '../runtime/debug';
+import { extractCodebiteFailureDetail } from '../runtime/codebite/index';
 
 export const ISSUE_TRACKER_URL = 'https://github.com/BatAndDuck/bateye/issues';
 
@@ -109,6 +110,14 @@ function hasAuthFailureSignal(msg: string): boolean {
 export function briefError(err: unknown): string {
   const full = formatErrorWithCauses(err instanceof Error ? err : new Error(String(err)));
   if (isRuntimeDebugEnabled()) return full;
+
+  const codebiteDetail = extractCodebiteFailureDetail(err);
+  if (codebiteDetail) {
+    const conciseDetail = codebiteDetail.length > 220
+      ? `${codebiteDetail.slice(0, 217)}...`
+      : codebiteDetail;
+    return `Codebite worker failed: ${conciseDetail}`;
+  }
 
   const { brief, hint } = categorizeError(full);
   const hintSuffix = hint ? ` — ${hint}` : '';

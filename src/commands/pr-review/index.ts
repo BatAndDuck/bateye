@@ -5,7 +5,7 @@ import { PRReviewResult } from '../../types/index';
 import { briefError, categorizeError, ISSUE_TRACKER_URL } from '../../core/output/user-error';
 import { formatErrorWithCauses } from '../../core/runtime/error-format';
 import { isRuntimeDebugEnabled } from '../../core/runtime/debug';
-import { extractCodebiteArtifactPaths } from '../../core/runtime/codebite/index';
+import { extractCodebiteArtifactPaths, extractCodebiteFailureDetail } from '../../core/runtime/codebite/index';
 
 export interface PRReviewCommandOptions {
   base?: string;
@@ -75,10 +75,14 @@ export async function runPRReviewCommand(repoPath: string, options: PRReviewComm
     const fullMsg = formatErrorWithCauses(err instanceof Error ? err : new Error(String(err)));
     const displayMsg = verbose ? fullMsg : briefError(err);
     const artifactPaths = extractCodebiteArtifactPaths(err);
+    const failureDetail = extractCodebiteFailureDetail(err);
     if (spinner) {
       spinner.fail(chalk.red(`PR review failed: ${displayMsg}`));
     } else {
       console.error(chalk.red(`✖ PR review failed: ${displayMsg}`));
+    }
+    if (failureDetail) {
+      console.log(chalk.gray(`  Failure detail: ${failureDetail}`));
     }
     if (artifactPaths.length > 0) {
       console.log(chalk.gray(`  Diagnostics: ${artifactPaths.join(', ')}`));
