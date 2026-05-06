@@ -111,7 +111,7 @@ jobs:
           # COMMENT_ID lets BatEye add eyes reaction to /review trigger comments
           COMMENT_ID: ${{ steps.pr.outputs.comment-id }}
         run: |
-          bateye --diagnostic pr-review \
+          bateye --diagnostic .bateye/out/diagnostics pr-review \
             --base ${{ steps.pr.outputs.base-sha }} \
             --github \
             --pr-number ${{ steps.pr.outputs.pr-number }}
