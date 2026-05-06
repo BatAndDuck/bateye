@@ -1,11 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.1.11
 
 ### Changed
 - Replaced the previous bundled agentic review runtime with Codebite for `audit` and `pr-review`.
-- Agentic review now supports only `openai`, `anthropic`, `google`, `mistral`, and `vercel`, with this repo defaulting to `vercel/openai/gpt-5.4-nano`.
+- Agentic review now supports the full Codebite provider set, including LiteLLM through the `litellm/...` model prefix.
 - Added committed `.codebite.json` repo defaults and updated docs, doctor output, model listing, and CI workflow language to match the Codebite runtime.
+
+### Fixed
+- LiteLLM-backed agentic review now works without a custom `apiBaseUrl`, defaulting to `http://localhost:4000` while still preserving explicit proxy URLs.
 
 ## 0.1.9
 

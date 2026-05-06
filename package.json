@@ -1,6 +1,6 @@
 {
   "name": "bateye",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "AI code review CLI for pull requests and repository audits with your choice of LLM",
   "license": "AGPL-3.0",
   "repository": {
