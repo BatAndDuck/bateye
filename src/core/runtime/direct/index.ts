@@ -300,7 +300,9 @@ function resolveDirectProvider(options: RunOptions): {
   const normalizedTransport = normalizeTransport(target.transport);
   const provider = normalizeCodebiteProvider(normalizedTransport);
 
-  if (options.model.includes('/') && !parsedProvider) {
+  // Only reject an unknown model prefix when the final transport is NOT vercel,
+  // because vercel can route any provider prefix through its gateway.
+  if (options.model.includes('/') && !parsedProvider && provider !== 'vercel') {
     throw new Error(
       `Model prefix "${parsed.provider}" is not supported. `
       + `Supported providers: ${formatSupportedCodebiteProviders()}.`
@@ -331,7 +333,9 @@ function resolveDirectProvider(options: RunOptions): {
   if (provider === 'vercel') {
     const gatewayTarget = parseProviderAndModel(target.modelId);
     const gatewayProvider = normalizeCodebiteProvider(gatewayTarget.provider);
-    if (!gatewayProvider || gatewayProvider === 'vercel') {
+    // Reject only if the nested prefix is itself "vercel" (double-nesting).
+    // Unknown prefixes (e.g. "minimax", "meta-llama") are fine — vercel routes them.
+    if (gatewayProvider === 'vercel') {
       throw new Error(
         `Vercel transport only supports routed models from ${formatSupportedCodebiteProviders().replace(', vercel', '')}.`
       );

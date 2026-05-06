@@ -88,6 +88,7 @@ function canAttemptEscapeRecovery(err: unknown): boolean {
 export function buildStructureRepairPrompt(
   malformedJson: string,
   validationErrors: string,
+  schemaHint?: string,
 ): { systemPrompt: string; userMessage: string } {
   const systemPrompt = [
     'You are a JSON structure repair assistant.',
@@ -99,6 +100,11 @@ export function buildStructureRepairPrompt(
     '- Fix type mismatches (e.g. string "3" → number 3 for numeric fields).',
     '- Remove unexpected fields only if they block validation.',
     '- Return ONLY the fixed JSON, nothing else. No explanation, no markdown fences.',
+    ...(schemaHint ? [
+      '',
+      'Target schema (the fixed JSON MUST match this structure):',
+      schemaHint,
+    ] : []),
   ].join('\n');
 
   // Truncate malformed JSON to avoid blowing up the repair call context
