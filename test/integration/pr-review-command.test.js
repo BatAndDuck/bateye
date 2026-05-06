@@ -524,6 +524,17 @@ test('pr-review command diagnostic mode announces and writes the diagnostics dir
   assert.match(result.stdout, /Diagnostics enabled\. Writing PR review traces to/);
 });
 
+test('pr-review command still parses when --diagnostic appears before the subcommand without a dir', () => {
+  const result = spawnSync('node', ['dist/index.js', '--diagnostic', 'pr-review', '--help'], {
+    cwd: process.cwd(),
+    encoding: 'utf-8',
+  });
+
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /Usage: bateye pr-review/);
+  assert.match(result.stdout, /--base <ref>/);
+});
+
 test('pr-review command uses exactly the reviewers the orchestrator selected, no more', () => {
   const repoPath = fs.mkdtempSync(path.join(os.tmpdir(), 'bateye-pr-review-broad-coverage-'));
   initGitRepo(repoPath);

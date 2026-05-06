@@ -9,7 +9,21 @@ void main().catch(err => {
 async function main(): Promise<void> {
   const { createCLI } = await import('./cli/index');
   const program = createCLI();
-  program.parse(process.argv);
+  program.parse(normalizeCliArgs(process.argv));
+}
+
+function normalizeCliArgs(argv: string[]): string[] {
+  const commands = new Set(['init', 'doctor', 'models', 'config', 'conf', 'reviewers', 'audit', 'pr-review']);
+  const normalized = [...argv];
+
+  for (let i = 2; i < normalized.length - 1; i++) {
+    if (normalized[i] === '--diagnostic' && commands.has(normalized[i + 1])) {
+      normalized.splice(i + 1, 0, '.bateye/out/diagnostics');
+      i++;
+    }
+  }
+
+  return normalized;
 }
 
 function installProcessWarningFilter(): void {
