@@ -1,6 +1,6 @@
 {
   "name": "bateye",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "AI code review CLI for pull requests and repository audits with your choice of LLM",
   "license": "AGPL-3.0",
   "repository": {
@@ -68,7 +68,7 @@
     "@ai-sdk/xai": "^3.0.82",
     "ai": "^6.0.143",
     "chalk": "^4.1.2",
-    "codebite": "^0.5.0",
+    "codebite": "file:../codebite",
     "commander": "^12.1.0",
     "execa": "^5.1.1",
     "glob": "^10.4.5",

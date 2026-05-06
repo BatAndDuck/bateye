@@ -1497,6 +1497,28 @@ function renderCodebiteDiagnosticTrace(
   return lines.join('\n');
 }
 
+function inferRepairSchemaHint(validationErrors: string): string | undefined {
+  if (validationErrors.includes('Expected object, received array')) {
+    return (
+      'The fixed JSON MUST be an object, not an array. '
+      + 'If the input is an array of findings, wrap it as: '
+      + '{"score": 80, "summary": "Analysis complete.", "findings": <the array>}'
+    );
+  }
+  if (
+    /\b(score|summary|findings)\b/.test(validationErrors)
+    && validationErrors.includes('Required')
+  ) {
+    return (
+      'The fixed JSON must be an object with exactly these top-level keys: '
+      + '"score" (number 0-100), "summary" (string), "findings" (array). '
+      + 'Use the finding data already present in the input to populate "findings". '
+      + 'Set "score" to 80 and "summary" to a one-line description if they are missing.'
+    );
+  }
+  return undefined;
+}
+
 async function parseAndRepairCodebiteOutput<T>(
   rawText: string,
   options: AgenticRepositoryReviewOptions,
@@ -1513,7 +1535,20 @@ async function parseAndRepairCodebiteOutput<T>(
     `[codebite]${labelTag} Structured output invalid, attempting repair: ${formatZodErrors(parsed.error)}`,
   );
 
-  const repair = buildStructureRepairPrompt(extractedJson, formatZodErrors(parsed.error));
+  const zodErrors = formatZodErrors(parsed.error);
+  let schemaHint: string | undefined;
+  try {
+    const jsonSchema = zodToJsonSchemaUntyped(schema, 'output');
+    schemaHint = JSON.stringify(jsonSchema, null, 2);
+  } catch {
+    schemaHint = inferRepairSchemaHint(zodErrors);
+  }
+
+  const repair = buildStructureRepairPrompt(
+    extractedJson,
+    zodErrors,
+    schemaHint,
+  );
   const prepared = prepareModel(options);
   const providerOptions = buildProviderOptions(prepared.transport, options.reasoningEffort);
   const generateTextUntyped = generateText as unknown as (
