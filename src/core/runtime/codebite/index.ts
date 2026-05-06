@@ -429,7 +429,7 @@ export function assertCodebiteAgenticSupport(
   }
 
   const baseURL = options.apiBaseUrl?.trim() || undefined;
-  if ((provider === 'azure' || provider === 'litellm') && !baseURL) {
+  if (provider === 'azure' && !baseURL) {
     throw new Error(
       `Agentic review with transport "${provider}" requires apiBaseUrl. `
       + 'Set it in .bateye/config.json or via `bateye config set apiBaseUrl <url>`.'

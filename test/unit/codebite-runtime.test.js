@@ -92,6 +92,45 @@ test('assertCodebiteAgenticSupport requires apiBaseUrl for azure and preserves i
   );
 });
 
+test('assertCodebiteAgenticSupport supports litellm with the default proxy URL', () => {
+  const { assertCodebiteAgenticSupport } = require('../../dist/core/runtime/codebite/index');
+
+  assert.deepEqual(
+    assertCodebiteAgenticSupport({
+      model: 'litellm/ollama/llama3',
+      transport: 'auto',
+      apiBaseUrl: undefined,
+    }),
+    {
+      provider: 'litellm',
+      model: 'ollama/llama3',
+      apiKey: '',
+      maxSteps: 30,
+      deepMode: false,
+      disableSubagents: false,
+      tools: {},
+    },
+  );
+
+  assert.deepEqual(
+    assertCodebiteAgenticSupport({
+      model: 'litellm/openai/gpt-4o',
+      transport: 'auto',
+      apiBaseUrl: 'https://litellm.example.com',
+    }),
+    {
+      provider: 'litellm',
+      model: 'openai/gpt-4o',
+      apiKey: '',
+      baseURL: 'https://litellm.example.com',
+      maxSteps: 30,
+      deepMode: false,
+      disableSubagents: false,
+      tools: {},
+    },
+  );
+});
+
 test('buildCodebiteWorkerScript imports Codebite from absolute file URLs', () => {
   const { buildCodebiteWorkerScript } = require('../../dist/core/runtime/codebite/index');
   const packageJsonPath = path.join('C:', 'repo', 'node_modules', 'codebite', 'package.json');
@@ -103,6 +142,8 @@ test('buildCodebiteWorkerScript imports Codebite from absolute file URLs', () =>
   assert.match(script, /import \{ createOpenAI \} from "file:\/\/\//);
   assert.match(script, /import \{ createAmazonBedrock \} from "file:\/\/\//);
   assert.match(script, /import \{ Agent \} from "file:\/\/\//);
+  assert.match(script, /case 'litellm':/);
+  assert.match(script, /baseURL: config\.baseURL \|\| 'http:\/\/localhost:4000'/);
   assert.match(script, /headersTimeout: gatewayRequestTimeoutMs/);
   assert.match(script, /function resolveModel\(config\)/);
   assert.match(script, /payload\.diagnosticsPath/);

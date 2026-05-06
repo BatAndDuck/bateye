@@ -82,6 +82,7 @@ bateye conf --model google/gemini-2.5-pro --apikey <key>
 bateye conf --model mistral/mistral-large-latest --apikey <key>
 bateye conf --model groq/llama-3.3-70b-versatile --apikey <key>
 bateye conf --model deepseek/deepseek-chat --apikey <key>
+bateye conf --model litellm/ollama/llama3 --apikey none
 ```
 
 Provider setup details live here: [Providers](./docs/providers.md)

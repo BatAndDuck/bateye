@@ -94,7 +94,7 @@ If you want BatEye to read credentials from a gitignored file instead of environ
 | `model` | string | `vercel/openai/gpt-5.4-nano` | Primary model in `provider/model-id` format |
 | `apiKey` | string | - | Plaintext LLM API key override. Recommended only in `.bateye/config.local.json` |
 | `transport` | string | `"auto"` | Transport override. `"auto"` uses the provider prefix from `model`. In practice, leave this as `"auto"` unless you are routing a supported model through `vercel` |
-| `apiBaseUrl` | string | - | Provider-specific base URL override for supported AI SDK providers. Required for transports such as `azure` and `litellm` |
+| `apiBaseUrl` | string | - | Provider-specific base URL override for supported AI SDK providers. Required for `azure`; optional for `litellm`, which defaults to `http://localhost:4000` |
 | `githubToken` | string | - | Plaintext GitHub token override for `pr-review --github`. Recommended only in `.bateye/config.local.json` |
 | `reasoningEffort` | string | - | Reasoning/thinking effort for models that support it. Common values: `minimal`, `low`, `medium`, `high`, `xhigh`. See [Reasoning effort](#reasoning-effort) |
 | `exclude` | string[] | - | Additional paths to exclude from analysis |
@@ -124,7 +124,7 @@ mistral/mistral-large-latest    → calls Mistral API
 vercel/openai/gpt-5.4-nano      → calls Vercel AI Gateway (three-part format)
 groq/llama-3.3-70b-versatile    → calls Groq via the Vercel AI SDK
 azure/my-deployment             → calls Azure OpenAI using your deployment name
-litellm/ollama/llama3           → calls LiteLLM via your configured base URL
+litellm/ollama/llama3           → calls LiteLLM via the default or configured base URL
 ```
 
 ### Custom API endpoint (`apiBaseUrl`)
